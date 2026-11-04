@@ -11,7 +11,8 @@
 
 #define CAL_FILE      "speaker_calibration.cfg"
 #define CAL_RATE      48000
-#define CAL_DELAY_MAX ((int)(CAL_RATE * EVO_SPEAKER_CAL_MAX_DELAY_MS / 1000.0f) + 1)
+/* An integer constant expression (a float one made s_line a GNU VLA extension). */
+#define CAL_DELAY_MAX (CAL_RATE * (int)EVO_SPEAKER_CAL_MAX_DELAY_MS / 1000 + 1)
 
 /* UI-thread side: the published profile and its generation. */
 static evo_speaker_cal_t s_published;

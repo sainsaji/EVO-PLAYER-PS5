@@ -9,6 +9,8 @@
  */
 #include "evo_ntfs.h"
 #include "evo_subtitle.h"
+#include "evo_langpref.h"
+#include <ctype.h>
 
 #include <ctype.h>
 #include <stdio.h>
@@ -66,7 +68,11 @@ double prospero_subtitle_time_scale = 1.0;
 
 /* PROSPERO_EMBEDDED_SUBTITLE_MODULE_START */
 
-#define PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES 256
+/* Cues are decoded when the demuxer reads them, which on a network stream is
+ * the whole read-ahead (up to five minutes) before they are shown. 1024 holds
+ * about forty minutes of dialogue, and the heaviest fansub typesetting comfortably
+ * spans the buffer. */
+#define PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES 1024
 #define PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE 768
 
 typedef struct {
@@ -104,7 +110,6 @@ prospero_embedded_subtitle_stream_index = -1;
 /* PROSPERO_DIRECT_SUBRIP_END */
 
 
-
 /* PROSPERO_SUBTITLE_SELECTION_STATE_START */
 
 /*
@@ -123,8 +128,6 @@ int prospero_subtitle_use_external = 0;
 /* PROSPERO_SUBTITLE_SELECTION_STATE_END */
 
 
-
-
 /*
  * #110 - dual subtitles.
  *
@@ -141,9 +144,22 @@ int prospero_subtitle_use_external = 0;
  *                under a decode in flight.
  *   ring_mutex   the cue ring. The render thread only ever takes this one.
  */
-/* A picture cue (Blu-ray PGS): every rect of one display set composed into one
- * RGBA image (0xAABBGGRR words) over the bounding box, on the track's canvas. */
-#define PROSPERO_BITMAP_CUES 4
+/*
+ * A picture cue (Blu-ray PGS): every rect of one display set composed into one
+ * palette-indexed image over the bounding box, on the track's canvas, and
+ * turned into RGBA (0xAABBGGRR words) only when it is drawn.
+ *
+ * Like text, a picture is decoded when the demuxer reads it - on a network
+ * stream, the read-ahead before it is due. This ring used to hold four, so
+ * from a USB stick (a read-ahead of a few packets) PGS showed, and from a
+ * debrid or media-server stream (thirty seconds to five minutes ahead) every
+ * picture had been pushed out by four later ones before its time came: the
+ * picker said PGS, and nothing was ever drawn. It now holds what the
+ * read-ahead can carry, at one byte a pixel, within a byte budget; when it is
+ * full, pictures already shown go first.
+ */
+#define PROSPERO_BITMAP_CUES 192
+#define PROSPERO_BITMAP_BUDGET_BYTES ((size_t)96 * 1024 * 1024)
 
 typedef struct {
     double    start_seconds;
@@ -151,7 +167,8 @@ typedef struct {
     int       x, y, w, h;
     int       canvas_w, canvas_h;
     uint32_t  serial;
-    uint32_t *pixels;
+    uint8_t  *index;               /* w*h palette indices; NULL = empty slot */
+    uint32_t  palette[256];        /* already 0xAABBGGRR */
 } ProsperoBitmapCue;
 
 typedef struct {
@@ -163,6 +180,8 @@ typedef struct {
     ProsperoBitmapCue bitmaps[PROSPERO_BITMAP_CUES];
     int              bitmap_count;
     uint32_t         bitmap_serial;
+    size_t           bitmap_bytes;     /* index data held */
+    double           bitmap_shown_at;  /* last position the renderer asked for */
     ProsperoEmbeddedSubtitleCue cues[
         PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES
     ];
@@ -226,11 +245,13 @@ static void prospero_sub_slot_bitmaps_clear(
     ProsperoSubSlot *slot
 ) {
     for (int i = 0; i < PROSPERO_BITMAP_CUES; i++) {
-        free(slot->bitmaps[i].pixels);
-        slot->bitmaps[i].pixels = NULL;
+        free(slot->bitmaps[i].index);
+        slot->bitmaps[i].index = NULL;
     }
 
     slot->bitmap_count = 0;
+    slot->bitmap_bytes = 0;
+    slot->bitmap_shown_at = 0.0;
 }
 
 
@@ -358,7 +379,90 @@ int prospero_subtitle_declared_cues(
 }
 
 
+/*
+ * What a subtitle track is worth before its codec is considered: its language
+ * against SUBTITLE LANGUAGE (evo_langpref), and what kind of track it is.
+ *
+ * A forced track carries only the signs and foreign-language lines. It is the
+ * right pick when the audio is already in the language you read - and the
+ * wrong one otherwise: it used to get a bonus here, so an "English (Forced)"
+ * flagged default beat the full English track and the screen stayed empty for
+ * most of the film while the toast said "English".
+ */
+static int prospero_subtitle_audio_in(const char *a3)
+{
+    if (!a3 || !a3[0] || !play_fmt || audio_stream_index < 0 ||
+        audio_stream_index >= (int)play_fmt->nb_streams)
+        return 0;
+    AVStream *a = play_fmt->streams[audio_stream_index];
+    if (!a)
+        return 0;
+    AVDictionaryEntry *l = av_dict_get(a->metadata, "language", NULL, 0);
+    return l && l->value && evo_lang_is(l->value, a3);
+}
 
+static int prospero_subtitle_title_has(AVStream *stream, const char *word)
+{
+    AVDictionaryEntry *t = av_dict_get(stream->metadata, "title", NULL, 0);
+    if (!t || !t->value || !word || !word[0])
+        return 0;
+    /* case-insensitive substring, ASCII (strcasestr is not imported) */
+    const size_t wn = strlen(word);
+    for (const char *p = t->value; *p; ++p) {
+        size_t k = 0;
+        while (k < wn && p[k] &&
+               tolower((unsigned char)p[k]) == tolower((unsigned char)word[k]))
+            ++k;
+        if (k == wn)
+            return 1;
+    }
+    return 0;
+}
+
+static int prospero_subtitle_meta_score(AVStream *stream)
+{
+    int score = 0;
+    AVDictionaryEntry *language =
+        av_dict_get(stream->metadata, "language", NULL, 0);
+    const int rank = evo_langpref_rank(language ? language->value : NULL, 's');
+    if (rank == 2)
+        score += 100;
+    else if (rank == 1)
+        score += 40;
+
+    if (stream->disposition & AV_DISPOSITION_DEFAULT)
+        score += 40;
+
+    if (stream->disposition & AV_DISPOSITION_FORCED ||
+        prospero_subtitle_title_has(stream, "forced")) {
+        const char *want = evo_langpref_subtitle()[0] ? evo_langpref_subtitle() : "eng";
+        if (prospero_subtitle_audio_in(want) && rank == 2)
+            score += 150;    /* audio already in your language: just the signs */
+        else
+            score -= 150;    /* never instead of the dialogue */
+    }
+
+    if (prospero_subtitle_title_has(stream, "commentary"))
+        score -= 200;
+    if (prospero_subtitle_title_has(stream, "sdh") ||
+        (stream->disposition & AV_DISPOSITION_HEARING_IMPAIRED))
+        score -= 5;          /* same dialogue plus [door creaks]: a tie-break */
+    return score;
+}
+
+int prospero_subtitle_stream_rank(AVStream *stream)
+{
+    if (!stream)
+        return 0;
+    AVDictionaryEntry *l = av_dict_get(stream->metadata, "language", NULL, 0);
+    return evo_langpref_rank(l ? l->value : NULL, 's');
+}
+
+int prospero_subtitle_stream_is_forced(AVStream *stream)
+{
+    return stream && ((stream->disposition & AV_DISPOSITION_FORCED) ||
+                      prospero_subtitle_title_has(stream, "forced"));
+}
 
 static int prospero_embedded_subtitle_score_stream(
     AVStream *stream
@@ -373,41 +477,7 @@ static int prospero_embedded_subtitle_score_stream(
         return -100000;
     }
 
-    int score = 10;
-
-    AVDictionaryEntry *language =
-        av_dict_get(
-            stream->metadata,
-            "language",
-            NULL,
-            0
-        );
-
-    if (language && language->value) {
-        if (
-            strcasecmp(
-                language->value,
-                "eng"
-            ) == 0 ||
-            strcasecmp(
-                language->value,
-                "en"
-            ) == 0 ||
-            strcasecmp(
-                language->value,
-                "english"
-            ) == 0
-        ) {
-            score += 100;
-        }
-    }
-
-    if (
-        stream->disposition &
-        AV_DISPOSITION_DEFAULT
-    ) {
-        score += 40;
-    }
+    int score = 10 + prospero_subtitle_meta_score(stream);
 
     /*
      * Cue count outranks every metadata signal, because it is the only one
@@ -429,13 +499,6 @@ static int prospero_embedded_subtitle_score_stream(
         } else if (cues > 0) {
             score += cues > 50 ? 20 : 5;
         }
-    }
-
-    if (
-        stream->disposition &
-        AV_DISPOSITION_FORCED
-    ) {
-        score += 25;
     }
 
     return score;
@@ -629,25 +692,7 @@ int prospero_embedded_subtitle_open(
             AV_CODEC_ID_HDMV_PGS_SUBTITLE
         ) {
             /* Picture tracks only win when there is no text track at all. */
-            int pgs_score = 0;
-            AVDictionaryEntry *pgs_lang =
-                av_dict_get(stream->metadata, "language", NULL, 0);
-
-            if (
-                pgs_lang && pgs_lang->value &&
-                (strcasecmp(pgs_lang->value, "eng") == 0 ||
-                 strcasecmp(pgs_lang->value, "en") == 0)
-            ) {
-                pgs_score += 100;
-            }
-
-            if (stream->disposition & AV_DISPOSITION_DEFAULT) {
-                pgs_score += 40;
-            }
-
-            if (stream->disposition & AV_DISPOSITION_FORCED) {
-                pgs_score -= 60;     /* signs only, not the dialogue */
-            }
+            int pgs_score = prospero_subtitle_meta_score(stream);
 
             if (!found_pgs || pgs_score > best_pgs_score) {
                 best_pgs_score = pgs_score;
@@ -704,6 +749,16 @@ int prospero_embedded_subtitle_open(
     }
 
     if (best_stream < 0 && found_pgs) {
+        best_stream = best_pgs;
+    } else if (
+        found_pgs && best_stream >= 0 &&
+        prospero_subtitle_requested_stream < 0 &&
+        prospero_subtitle_stream_rank(format->streams[best_pgs]) == 2 &&
+        !prospero_subtitle_stream_is_forced(format->streams[best_pgs]) &&
+        prospero_subtitle_stream_rank(format->streams[best_stream]) < 2
+    ) {
+        /* The text track won only on being text; the picture one is in the
+         * language you asked for and the text one is not. */
         best_stream = best_pgs;
     }
 
@@ -936,17 +991,14 @@ static void prospero_sub_slot_add_bitmap(
 
     if (rects == 0) {
         /* Clear: the newest picture stops being shown here. */
-        if (slot->bitmap_count > 0) {
-            ProsperoBitmapCue *last =
-                &slot->bitmaps[
-                    (slot->bitmap_serial + PROSPERO_BITMAP_CUES - 1) %
-                    PROSPERO_BITMAP_CUES
-                ];
-
-            if (last->pixels && last->end_seconds > start_seconds) {
-                last->end_seconds = start_seconds;
-            }
+        ProsperoBitmapCue *last = NULL;
+        for (int i = 0; i < PROSPERO_BITMAP_CUES; i++) {
+            ProsperoBitmapCue *c = &slot->bitmaps[i];
+            if (c->index && (!last || c->serial > last->serial))
+                last = c;
         }
+        if (last && last->end_seconds > start_seconds)
+            last->end_seconds = start_seconds;
 
         pthread_mutex_unlock(
             &slot->ring_mutex
@@ -957,10 +1009,11 @@ static void prospero_sub_slot_add_bitmap(
 
     const int w = max_x - min_x;
     const int h = max_y - min_y;
+    const size_t bytes = (size_t)w * (size_t)h;
 
     if (
         w <= 0 || h <= 0 ||
-        (size_t)w * (size_t)h > (size_t)4096 * 2160
+        bytes > (size_t)4096 * 2160
     ) {
         pthread_mutex_unlock(
             &slot->ring_mutex
@@ -969,19 +1022,60 @@ static void prospero_sub_slot_add_bitmap(
         return;
     }
 
-    uint32_t *pixels =
-        calloc(
-            (size_t)w * (size_t)h,
-            sizeof(uint32_t)
-        );
+    /*
+     * Room: first the pictures that are over (ended before the position the
+     * player last drew), then - only if the budget still says no - the oldest.
+     * Dropping the oldest is what the four-slot ring did all the time; here it
+     * only happens with minutes of pictures queued, and those are the ones
+     * furthest behind the screen anyway.
+     */
+    for (;;) {
+        int free_slot = -1, done = -1, oldest = -1;
+        for (int i = 0; i < PROSPERO_BITMAP_CUES; i++) {
+            ProsperoBitmapCue *c = &slot->bitmaps[i];
+            if (!c->index) {
+                if (free_slot < 0) free_slot = i;
+                continue;
+            }
+            if (c->end_seconds < slot->bitmap_shown_at - 1.0 &&
+                (done < 0 || c->serial < slot->bitmaps[done].serial))
+                done = i;
+            if (oldest < 0 || c->serial < slot->bitmaps[oldest].serial)
+                oldest = i;
+        }
+        const int over = slot->bitmap_bytes + bytes > PROSPERO_BITMAP_BUDGET_BYTES;
+        if (free_slot >= 0 && !over)
+            break;
+        const int victim = done >= 0 ? done : oldest;
+        if (victim < 0)
+            break;
+        ProsperoBitmapCue *v = &slot->bitmaps[victim];
+        slot->bitmap_bytes -= (size_t)v->w * (size_t)v->h;
+        free(v->index);
+        v->index = NULL;
+        slot->bitmap_count--;
+    }
 
-    if (!pixels) {
+    int at = -1;
+    for (int i = 0; i < PROSPERO_BITMAP_CUES && at < 0; i++)
+        if (!slot->bitmaps[i].index)
+            at = i;
+    uint8_t *index = at >= 0 ? (uint8_t *)calloc(bytes, 1) : NULL;
+
+    if (!index) {
         pthread_mutex_unlock(
             &slot->ring_mutex
         );
 
         return;
     }
+
+    ProsperoBitmapCue *cue = &slot->bitmaps[at];
+    /* Index 0 of the composed box is left transparent; each rect brings its own
+     * palette, so the cue keeps one merged palette: rect k's entries are
+     * re-numbered only when two rects disagree (rare - one PDS serves a set). */
+    memset(cue->palette, 0, sizeof cue->palette);
+    int palette_from = -1;
 
     for (unsigned int i = 0; i < subtitle->num_rects; i++) {
         const AVSubtitleRect *r = subtitle->rects[i];
@@ -996,45 +1090,33 @@ static void prospero_sub_slot_add_bitmap(
 
         const uint32_t *palette =
             (const uint32_t *)r->data[1];
+        const int colors = r->nb_colors > 0 && r->nb_colors <= 256 ? r->nb_colors : 256;
 
-        for (int row = 0; row < r->h; row++) {
-            const uint8_t *src =
-                r->data[0] + (size_t)row * (size_t)r->linesize[0];
-
-            uint32_t *dst =
-                pixels +
-                (size_t)(r->y - min_y + row) * (size_t)w +
-                (size_t)(r->x - min_x);
-
-            for (int col = 0; col < r->w; col++) {
-                /* The palette is 0xAARRGGBB; the frame wants R,G,B,A bytes. */
-                uint32_t c = palette[src[col]];
-
-                dst[col] =
+        if (palette_from < 0) {
+            /* The palette is 0xAARRGGBB; the frame wants R,G,B,A bytes. */
+            for (int k = 0; k < colors; k++) {
+                const uint32_t c = palette[k];
+                cue->palette[k] =
                     (c & 0xff000000u) |
                     ((c & 0x000000ffu) << 16) |
                     (c & 0x0000ff00u) |
                     ((c >> 16) & 0xffu);
             }
+            palette_from = (int)i;
+        }
+
+        for (int row = 0; row < r->h; row++) {
+            const uint8_t *src =
+                r->data[0] + (size_t)row * (size_t)r->linesize[0];
+
+            uint8_t *dst =
+                index +
+                (size_t)(r->y - min_y + row) * (size_t)w +
+                (size_t)(r->x - min_x);
+
+            memcpy(dst, src, (size_t)r->w);
         }
     }
-
-    if (slot->bitmap_count >= PROSPERO_BITMAP_CUES) {
-        /* Oldest goes; the ring is indexed by serial. */
-        ProsperoBitmapCue *old =
-            &slot->bitmaps[
-                slot->bitmap_serial % PROSPERO_BITMAP_CUES
-            ];
-
-        free(old->pixels);
-        old->pixels = NULL;
-        slot->bitmap_count--;
-    }
-
-    ProsperoBitmapCue *cue =
-        &slot->bitmaps[
-            slot->bitmap_serial % PROSPERO_BITMAP_CUES
-        ];
 
     cue->start_seconds = start_seconds;
     cue->end_seconds = end_seconds;
@@ -1044,9 +1126,10 @@ static void prospero_sub_slot_add_bitmap(
     cue->h = h;
     cue->canvas_w = canvas_w > 0 ? canvas_w : 1920;
     cue->canvas_h = canvas_h > 0 ? canvas_h : 1080;
-    cue->pixels = pixels;
+    cue->index = index;
     cue->serial = ++slot->bitmap_serial;
     slot->bitmap_count++;
+    slot->bitmap_bytes += bytes;
 
     pthread_mutex_unlock(
         &slot->ring_mutex
@@ -1433,12 +1516,13 @@ int prospero_embedded_subtitle_image_at(
     );
 
     const ProsperoBitmapCue *selected = NULL;
+    slot->bitmap_shown_at = position;
 
     for (int i = 0; i < PROSPERO_BITMAP_CUES; i++) {
         const ProsperoBitmapCue *cue = &slot->bitmaps[i];
 
         if (
-            cue->pixels &&
+            cue->index &&
             position >= cue->start_seconds &&
             position < cue->end_seconds &&
             (!selected || cue->serial > selected->serial)
@@ -1463,7 +1547,8 @@ int prospero_embedded_subtitle_image_at(
             }
 
             if (need <= view_cap && view) {
-                memcpy(view, selected->pixels, need * sizeof(uint32_t));
+                for (size_t k = 0; k < need; k++)
+                    view[k] = selected->palette[selected->index[k]];
                 view_serial = selected->serial;
                 view_info.pixels = view;
                 view_info.x = selected->x;
@@ -1508,12 +1593,17 @@ int prospero_subtitle_face = 2;  /* 1 SUB (SMALL), 2 MENU (MEDIUM/DEFAULT), 3 TI
 static char prospero_subtitle_path[512] = {0};
 
 
+/* What the external track is, for the picker ("Italiano · ONLINE"); "" = a
+ * plain sidecar SRT. */
+char prospero_subtitle_external_label[96] = {0};
+
 void prospero_subtitle_clear(void) {
     /* Media change or stop: an analysis of the old file must not land on the
      * new one, and its offset/ratio belong to the old SRT too. */
     evo_subsync_cancel();
     prospero_subtitle_count = 0;
     prospero_subtitle_path[0] = 0;
+    prospero_subtitle_external_label[0] = 0;
     prospero_subtitle_delay_ms = 0;
     prospero_subtitle_time_scale = 1.0;
     prospero_secondary_delay_ms = 0;
@@ -2166,6 +2256,11 @@ static int prospero_subtitle_load_file(
 }
 
 
+int prospero_subtitle_load_file_quiet(const char *path) {
+    return prospero_subtitle_load_file(path);
+}
+
+
 int prospero_subtitle_load_external(const char *path) {
     int count = prospero_subtitle_load_file(path);
 
@@ -2321,60 +2416,6 @@ void prospero_subtitle_toggle(void) {
     controls_last_used_ms = now_ms();
 }
 
-
-static int prospero_subtitle_collect_tracks(
-    int *tracks,
-    int capacity
-) {
-    if (
-        !tracks ||
-        capacity <= 0 ||
-        !play_fmt
-    ) {
-        return 0;
-    }
-
-    int count = 0;
-
-    /*
-     * -1 represents the matching external SRT.
-     */
-    if (
-        prospero_subtitle_count > 0 &&
-        count < capacity
-    ) {
-        tracks[count++] = -1;
-    }
-
-    for (
-        unsigned int index = 0;
-        index < play_fmt->nb_streams &&
-        count < capacity;
-        index++
-    ) {
-        AVStream *stream =
-            play_fmt->streams[index];
-
-        if (
-            !stream ||
-            !stream->codecpar ||
-            stream->codecpar->codec_type !=
-                AVMEDIA_TYPE_SUBTITLE
-        ) {
-            continue;
-        }
-
-        if (
-            prospero_embedded_subtitle_supported(
-                stream->codecpar->codec_id
-            )
-        ) {
-            tracks[count++] = (int)index;
-        }
-    }
-
-    return count;
-}
 
 
 static void prospero_subtitle_track_label(
@@ -2548,82 +2589,6 @@ void prospero_subtitle_apply_track(int track)
     controls_last_used_ms = now_ms();
 }
 
-
-static void prospero_subtitle_cycle_track(void) {
-    if (
-        screen != SCREEN_PLAYER ||
-        !play_fmt ||
-        !current_media_path[0]
-    ) {
-        return;
-    }
-
-    int tracks[64];
-
-    int track_count =
-        prospero_subtitle_collect_tracks(
-            tracks,
-            64
-        );
-
-    if (track_count <= 0) {
-        prospero_subtitle_enabled = 0;
-
-        toast(
-            "SUBTITLES",
-            "NO SUPPORTED TEXT TRACK"
-        );
-
-        return;
-    }
-
-    int current_track =
-        prospero_subtitle_use_external
-            ? -1
-            : prospero_embedded_subtitle_stream_index;
-
-    int current_slot = -1;
-
-    for (
-        int index = 0;
-        index < track_count;
-        index++
-    ) {
-        if (tracks[index] == current_track) {
-            current_slot = index;
-            break;
-        }
-    }
-
-    int next_slot =
-        current_slot < 0
-            ? 0
-            : (current_slot + 1) % track_count;
-
-    int next_track =
-        tracks[next_slot];
-
-    char label[128];
-
-    prospero_subtitle_track_label(
-        next_track,
-        label,
-        sizeof(label)
-    );
-
-    if (
-        track_count == 1 &&
-        current_slot == 0
-    ) {
-        prospero_subtitle_enabled = 1;
-        toast("SUBTITLES", label);
-        return;
-    }
-
-    prospero_subtitle_apply_track(
-        next_track
-    );
-}
 
 /* PROSPERO_SUBTITLE_CONTROLS_END */
 void prospero_subtitle_nudge_delay(int delta_ms)

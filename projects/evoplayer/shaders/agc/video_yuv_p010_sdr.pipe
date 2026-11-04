@@ -55,19 +55,19 @@ vec3 deep_black(vec3 c) {
     return mix(f, u, step(vec3(1.0), t));
 }
 
+vec3 yuv709(float y, float u, float v) {
+    float Yp = (y - 0.062561095) * 1.167808219;
+    float U = (u - 0.500488759) * 1.141741071;
+    float V = (v - 0.500488759) * 1.141741071;
+    return vec3(Yp + 1.574800 * V,
+                Yp + (-0.187324) * U + (-0.468124) * V,
+                Yp + 1.855600 * U);
+}
+
 void shade() {
     float y = texture(uY, vUV).r * 64.0615844;
     vec2 uv = texture(uUV, vUV).rg * 64.0615844;
-    float U = uv.x - 0.5;
-    float V = uv.y - 0.5;
-
-    float Y = (y - 0.0627451) * 1.1640625;
-    vec3 rgb = vec3(
-        Y + 1.79274107 * V,
-        Y - 0.21324861 * U - 0.53290933 * V,
-        Y + 2.11240179 * U
-    );
-    out_color = vec4(clamp(rgb, 0.0, 1.0), 1.0);
+    out_color = vec4(clamp(yuv709(y, uv.x, uv.y), 0.0, 1.0), 1.0);
 }
 
 void main() {

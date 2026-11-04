@@ -41,20 +41,6 @@ void hint_plate(DrawList &list, const ui::Fonts &fonts, const ui::Hint *hints, i
     list.rounded_rect({right - w + 16.0f, page::kHintsY - 18.0f, w, 36.0f}, 18, kBlack.with_alpha(0.6f));
 }
 
-std::vector<std::string> split_utf8(const std::string& str) {
-    std::vector<std::string> res;
-    size_t i = 0;
-    while (i < str.length()) {
-        unsigned char c = str[i];
-        size_t len = 1;
-        if ((c & 0xE0) == 0xC0) len = 2;
-        else if ((c & 0xF0) == 0xE0) len = 3;
-        else if ((c & 0xF8) == 0xF0) len = 4;
-        res.push_back(str.substr(i, len));
-        i += len;
-    }
-    return res;
-}
 } // namespace
 
 /* ----------------------------------------------------------- ReaderScreen */

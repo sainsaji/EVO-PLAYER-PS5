@@ -64,7 +64,15 @@ static inline void evo_bt_(const char *fmt, ...)
 
 #else /* !EVO_APP_MODULE */
 
-#define evo_bt(...) ((void)0)
+/* Off outside the app module, but the arguments are still type-checked
+ * against the format (a wrong %d/%s in a trace only shows on the console
+ * otherwise), and variables kept for a trace do not read as unused. The
+ * call is inline and empty, so nothing is evaluated beyond the arguments. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((format(printf, 1, 2)))
+#endif
+static inline void evo_bt_off_(const char *fmt, ...) { (void)fmt; }
+#define evo_bt(...) evo_bt_off_("EVO boot: " __VA_ARGS__)
 
 #endif
 

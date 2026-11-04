@@ -39,6 +39,16 @@ extern "C" {
 #define EVO_DOVI_PIECES   8
 #define EVO_DOVI_MMR_VEC4 48
 
+/*
+ * Fields the reshape maths leaves unused carry the HDR peak mapping:
+ *   lohi[0][3]  source peak in nits (the shot's L1 max), 0 = unknown
+ *   lohi[1][3]  target (panel) peak, filled by the runtime, 0 = no mapping
+ *   lohi[2][3]  kind: EVO_DOVI_KIND_RESHAPE (Profile 5) or _MAP_ONLY (a
+ *               profile 7/8 base layer, plain HDR10 - only the peak is used)
+ */
+#define EVO_DOVI_KIND_RESHAPE  0.0f
+#define EVO_DOVI_KIND_MAP_ONLY 1.0f
+
 typedef struct evo_dovi_params {
     float ycc[3][4];        /* YCC -> L'M'S' rows                     */
     float off[4];           /* signal offset subtracted before ycc     */
@@ -56,6 +66,16 @@ int evo_dovi_stream_profile(const void *codecpar);
 /* 1 when the stream needs evo_dovi to be shown with correct colour. */
 int evo_dovi_stream_needs_reshape(const void *codecpar);
 
+/* 1 when the stream carries a Dolby Vision RPU worth reading for its
+ * per-shot peak (profiles 5, 7 and 8). */
+int evo_dovi_stream_has_rpu(const void *codecpar);
+
+/* The shot's L1 max in nits from an AVDOVIMetadata *, 0 when absent. */
+float evo_dovi_l1_max_nits(const void *av_dovi_metadata);
+
+/* Fill *p for a profile 7/8 frame: no reshaping, only the peak. */
+void evo_dovi_params_map_only(evo_dovi_params *p, float src_peak_nits);
+
 /* Fill *p for a frame whose RPU has not been seen: no reshaping, the
  * reference Profile 5 matrices. */
 void evo_dovi_params_default(evo_dovi_params *p);
@@ -70,6 +90,8 @@ typedef struct evo_dovi_parser evo_dovi_parser;
 evo_dovi_parser *evo_dovi_parser_open(const void *codecpar);
 void             evo_dovi_parser_close(evo_dovi_parser *p);
 void             evo_dovi_parser_flush(evo_dovi_parser *p);
+/* A profile 7/8 stream: parse only for the per-shot peak (map-only params). */
+void             evo_dovi_parser_set_map_only(evo_dovi_parser *p, int map_only);
 
 /*
  * Find the RPU NAL in one Annex-B HEVC access unit and parse it into *out.

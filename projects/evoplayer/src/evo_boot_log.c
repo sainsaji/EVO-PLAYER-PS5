@@ -19,7 +19,29 @@
  * Masks the value of known secret query parameters, and the two path segments
  * after /live/, /movie/, /series/ and /timeshift/. Works in place on `msg`.
  * Applied to every line evo_boot_log() writes, so no caller can leak one.
+ *
+ * Stremio addons carry the debrid key in the path, not the query: Torrentio
+ * "/providers=...|torbox=KEY/manifest.json", and AIOStreams, Comet or
+ * MediaFusion one long encoded (often encrypted) configuration segment. In a
+ * web link, the value after a debrid service's name is masked up to the next
+ * '|', '/', '&' or space, and so is any path segment of 48 characters or more
+ * with no '.' in it - a token or config blob, never a file name.
  */
+static int bc_name_is_debrid(const char *name, size_t n)
+{
+    static const char *const keys[] = {
+        "realdebrid", "torbox", "alldebrid", "premiumize", "debridlink",
+        "offcloud", "putio", "easydebrid", "stremthru", "debridkey", "debridapikey", NULL };
+    for (int i = 0; keys[i]; ++i)
+        if (strlen(keys[i]) == n && strncasecmp(name, keys[i], n) == 0)
+            return 1;
+    return 0;
+}
+
+static int bc_is_word(char c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+}
 static int bc_param_is_secret(const char *name, size_t n)
 {
     static const char *const keys[] = {
@@ -76,6 +98,38 @@ void evo_log_redact(char *msg, size_t cap)
             }
         }
         if (hit) continue;
+        if (is_url && (p == msg || !bc_is_word(p[-1])) && bc_is_word(*p)) {
+            /* torbox=KEY in a path or a '|'-separated config */
+            const char *eq = p;
+            while (bc_is_word(*eq)) eq++;
+            if (*eq == '=' && bc_name_is_debrid(p, (size_t)(eq - p))) {
+                size_t len = (size_t)(eq - p) + 1;
+                if (o + len + 3 >= sizeof out) break;
+                memcpy(out + o, p, len);
+                o += len;
+                memcpy(out + o, "***", 3);
+                o += 3;
+                p = eq + 1;
+                while (*p && *p != '|' && *p != '/' && *p != '&' && *p != ' ' && *p != '%') p++;
+                continue;
+            }
+        }
+        if (is_url && *p == '/') {
+            /* a long opaque path segment: an encoded addon config or a token */
+            const char *e = p + 1;
+            int dot = 0;
+            while (*e && *e != '/' && *e != ' ' && *e != '?' && *e != '&' && *e != '"') {
+                if (*e == '.') dot = 1;
+                e++;
+            }
+            if (!dot && e - (p + 1) >= 48) {
+                if (o + 5 >= sizeof out) break;
+                memcpy(out + o, "/***", 4);
+                o += 4;
+                p = e;
+                continue;
+            }
+        }
         out[o++] = *p++;
     }
     out[o] = 0;

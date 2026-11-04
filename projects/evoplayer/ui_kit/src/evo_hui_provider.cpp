@@ -36,8 +36,6 @@ const Color kAmber = Color::rgb(0xffb020);
 constexpr int kCols = 8;                  /* a folder level: the shelf card, wrapped into 8 columns */
 constexpr float kGridX = NavRail::kWidth + 64.0f;
 constexpr float kGridTop = 214.0f;
-constexpr float kCardW = 232.0f;
-constexpr float kGap = 24.0f;
 constexpr Rect kDetail{1288.0f, 214.0f, 536.0f, 700.0f};
 
 /* Shelves: rows of posters. */
@@ -102,7 +100,6 @@ Rect contain_rect(int w, int h, const Rect &box)
     return {box.x + (box.w - ww) * 0.5f, box.y, ww, box.h};
 }
 
-const char *kind_word(int variant) { return variant == EVO_HUI_PROVIDER_XTREAM ? "CATEGORY" : "GROUP"; }
 
 struct SetupCard
 {
@@ -893,11 +890,10 @@ void ProviderGridScreen::draw_shelves(DrawList &list, const Context &ctx) const
             continue;
         }
 
-        /* the shelf's title and how many it holds */
+        /* the shelf's title (0.14: no item count beside it - the row shows it) */
         const bool focused_shelf = s.abs_index == shelf_focus_abs_;
-        const float tw = ui::text(list, fonts.display, fonts.display.font->fit(s.title, 30, 900.0f), kGridX, y + 26, 30,
-                                  focused_shelf ? kWhite : kWhite.with_alpha(0.78f));
-        ui::text(list, fonts.regular, std::to_string(s.total), kGridX + tw + 14, y + 26, 18, pal.text_faint);
+        ui::text(list, fonts.display, fonts.display.font->fit(s.title, 30, 900.0f), kGridX, y + 26, 30,
+                 focused_shelf ? kWhite : kWhite.with_alpha(0.78f));
 
         const float sx = (s.abs_index >= 0 && s.abs_index < 32) ? scroll_x_[s.abs_index] : 0.0f;
         for (std::size_t i = 0; i < s.cards.size(); ++i)

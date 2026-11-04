@@ -235,35 +235,6 @@ static void map_set(const char *key, const char *url, const char *st_new);
 static void epg_cache_paths(const char *url, char *body, size_t bsz, char *meta, size_t msz);
 
 /*
- * Names we accept for a playlist dropped on the USB stick, in priority order.
- *
- * The stick is how this audience already moves files around - they are copying
- * media onto it anyway - so a playlist file is the one configuration route
- * that needs no UI, no keyboard and no server. It loses to an explicit
- * playlist= in the conf, so a configured URL is never overridden by a stale
- * file someone forgot about.
- */
-static const char *const kUsbPlaylistNames[] = {
-    "/mnt/usb0/iptv.m3u",
-    "/mnt/usb0/iptv.m3u8",
-    "/mnt/usb0/playlist.m3u",
-    "/mnt/usb0/playlist.m3u8",
-    "/mnt/usb0/channels.m3u",
-    "/mnt/usb0/channels.m3u8",
-    NULL
-};
-
-/* First readable candidate, or NULL. */
-static const char *find_usb_playlist(void)
-{
-    for (int i = 0; kUsbPlaylistNames[i]; ++i) {
-        FILE *f = fopen(kUsbPlaylistNames[i], "rb");
-        if (f) { fclose(f); return kUsbPlaylistNames[i]; }
-    }
-    return NULL;
-}
-
-/*
  * Read a local playlist and parse it. No network, so this is synchronous and
  * the catalog is ready on return - which is why iptv_list_catalog can emit the
  * first page in the same call rather than waiting for a callback.
@@ -956,6 +927,10 @@ static int64_t xmltv_time(const char *s)
 static int tag_attr(const char *el, const char *el_end, const char *attr,
                     char *out, size_t out_sz)
 {
+    /* Always a string on return: callers test out[0] even when the attribute
+     * is missing, and their buffers are not initialised. */
+    if (!out || out_sz == 0) return -1;
+    out[0] = '\0';
     size_t al = strlen(attr);
     for (const char *p = el; p + al < el_end; ++p) {
         if (strncmp(p, attr, al) != 0) continue;
@@ -2193,10 +2168,6 @@ static int iptv_resolve(const char *item_id, evo_provider_resolve_cb cb, void *u
     return 0;
 }
 
-static const char *iptv_ui_bundle_url(void)
-{
-    return G.bundle_url[0] ? G.bundle_url : NULL;
-}
 
 /* ------------------------------------------------------------------------- */
 /* CAP_CONFIG - the typed playlist URL                                       */

@@ -58,7 +58,13 @@ enum {
      * by ui_kit/src/hui_agc_batch.cpp. */
     EVO_AGC_PIPE_UI_SDF = 78,
     EVO_AGC_PIPE_UI_SDF_PQ = 79,      /* the same on a HDR10 scanout */
-    EVO_AGC_PIPE_COUNT = 80,
+    /* 8-bit SDR above SD height is BT.709, not BT.601 (the NV12 / planar twins). */
+    EVO_AGC_PIPE_VIDEO_NV12_709 = 80,
+    EVO_AGC_PIPE_VIDEO_PLANAR_709 = 81,
+    /* HDR10 / Dolby Vision base layer on a HDR10 scanout, fitted to the panel
+     * peak (evo_agc_runtime_set_hdr_peak). Reads a DoviParams-shaped buffer. */
+    EVO_AGC_PIPE_VIDEO_HDR_PQ_DYN = 82,
+    EVO_AGC_PIPE_COUNT = 83,
 
     EVO_AGC_UP_S_CONVS = 4,
     EVO_AGC_UP_M_CONVS = 7,
@@ -373,6 +379,21 @@ const char *evo_agc_motion_smoothing_label(void);
 int         evo_agc_motion_smoothing_take_downgrade(void);
 int         evo_agc_motion_smoothing_is_active(void);
 void        evo_agc_motion_smoothing_reset(void);
+
+/*
+ * HDR peak mapping. `nits` is the panel's peak (0 = off: the TV tone-maps, as
+ * before). With it set, an HDR10 picture on a HDR10 scanout is fitted to that
+ * peak with a BT.2390 roll-off: per shot from a Dolby Vision RPU's L1 metadata,
+ * otherwise from the stream's static peak (evo_agc_runtime_set_hdr_static_peak).
+ */
+void evo_agc_runtime_set_hdr_peak(int nits);
+int  evo_agc_runtime_get_hdr_peak(void);
+/* The open stream's static peak in nits (HDR10 MaxCLL, else mastering max
+ * luminance), 0 when unknown. Set at open, cleared with 0 at close. */
+void evo_agc_runtime_set_hdr_static_peak(int nits);
+/* What the last HDR frame was fitted with, for the playback panel:
+ * 0 off/passthrough, 1 static peak, 2 Dolby Vision per-shot. */
+int  evo_agc_runtime_hdr_map_mode(void);
 
 /* Draw the video quad. Returns 0 when the quad was emitted (and the current
  * backbuffer stamped with pts_us), -1 when the frame was rejected.

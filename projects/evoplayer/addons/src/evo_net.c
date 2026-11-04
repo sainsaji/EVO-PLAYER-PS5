@@ -153,17 +153,33 @@ int evo_net_discover_poll(char *addr, size_t cap)
     return rc;
 }
 #ifndef NO_OPENSSL
+#include <openssl/pem.h>
+#include <openssl/x509_vfy.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #endif
 
+/* A Stremio account brings a dozen addons, and opening a title asks every one
+ * of them for streams and subtitles at once, beside the shelves' catalogs and
+ * their posters: 32 filled up and the requests past it failed at once, which
+ * read as "this addon gives nothing". */
 #ifndef EVO_NET_MAX_QUEUE
-#define EVO_NET_MAX_QUEUE    32
+#define EVO_NET_MAX_QUEUE    128
 #endif
 
 #ifndef EVO_NET_TIMEOUT_SEC
 #define EVO_NET_TIMEOUT_SEC  6
 #endif
+
+/* A stream lookup on an aggregator (AIOStreams asks every scraper it has, with
+ * its own timeout of ten seconds or more) or a debrid cache check can be quiet
+ * far longer than 6 s before its first byte. Those requests get this. */
+#ifndef EVO_NET_SLOW_TIMEOUT_SEC
+#define EVO_NET_SLOW_TIMEOUT_SEC 25
+#endif
+
+/* The read timeout of the request this worker thread is running. */
+static _Thread_local int t_timeout_sec = EVO_NET_TIMEOUT_SEC;
 
 #define EVO_NET_BUFFER_SIZE  8192
 
@@ -349,7 +365,7 @@ static int connect_bounded(const struct addrinfo *rp, int timeout_ms, int *timed
     }
 
     struct timeval tv;
-    tv.tv_sec = EVO_NET_TIMEOUT_SEC;
+    tv.tv_sec = t_timeout_sec > 0 ? t_timeout_sec : EVO_NET_TIMEOUT_SEC;
     tv.tv_usec = 0;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
@@ -399,6 +415,7 @@ typedef struct evo_net_req {
     void       *user_data;
     int         via_avio;       /* run on FFmpeg's HTTP client (evo_http_avio.c) */
     int         is_image;       /* a picture: runs on the image workers, never ahead of a page */
+    int         timeout_sec;    /* read timeout; 0 = EVO_NET_TIMEOUT_SEC */
 
     /* Result */
     int         completed;
@@ -411,7 +428,7 @@ typedef struct evo_net_req {
 
 /* Page requests run several at once: a provider home asks for each shelf, and
  * one slow answer no longer holds up the rest. */
-#define EVO_NET_PAGE_WORKERS  4
+#define EVO_NET_PAGE_WORKERS  8
 #define EVO_NET_IMAGE_WORKERS 4
 static pthread_t       g_page_threads[EVO_NET_PAGE_WORKERS];
 static int             g_page_threads_up = 0;
@@ -431,6 +448,88 @@ static int             g_completed_count = 0;
 static SSL_CTX        *g_ssl_ctx = NULL;
 static pthread_mutex_t g_ssl_init_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+/*
+ * Certificate verification.
+ *
+ * Until 0.14 every HTTPS request accepted any certificate, so anyone on the
+ * path (a hostile Wi-Fi, a poisoned DNS answer) could read what EVO sends:
+ * the Stremio authKey, and the debrid keys that addon URLs carry. Requests to
+ * public hosts are now verified against the Mozilla root set shipped in the
+ * app (assets/certs/cacert.pem), hostname included.
+ *
+ * Two deliberate exceptions:
+ *  - the validity dates are not checked: a jailbroken console that never
+ *    syncs its clock would otherwise fail every handshake. Chain and name are
+ *    what stop an impostor; an expired-but-genuine certificate is not one.
+ *  - a host on the home network (a private or loopback IPv4 literal, a name
+ *    without a dot, *.local / *.lan / *.home.arpa) is not verified: a NAS or
+ *    media server there commonly has a self-signed certificate.
+ * If the bundle cannot be read at all, EVO logs it and connects as before
+ * rather than failing every request - g_tls_verify stays 0.
+ */
+#ifndef EVO_NET_CA_BUNDLE
+#define EVO_NET_CA_BUNDLE "/app0/assets/certs/cacert.pem"
+#endif
+#ifndef EVO_NET_CA_MAX_BYTES
+#define EVO_NET_CA_MAX_BYTES ((size_t)1 << 20)
+#endif
+static int g_tls_verify = 0;     /* 1 once the roots are loaded */
+static int g_tls_roots = 0;
+
+/* Roots from the bundle into the context's store, read with the app's own
+ * stdio (not OpenSSL's file loader). Returns how many were added. */
+static int tls_load_roots(SSL_CTX *ctx, const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    size_t cap = (size_t)256 << 10, n = 0;
+    char *buf = (char *)malloc(cap);
+    while (buf) {
+        n += fread(buf + n, 1, cap - n, f);
+        if (n < cap) break;
+        if (cap >= EVO_NET_CA_MAX_BYTES) { free(buf); buf = NULL; break; }
+        char *g = (char *)realloc(buf, cap * 2);
+        if (!g) { free(buf); buf = NULL; break; }
+        buf = g;
+        cap *= 2;
+    }
+    fclose(f);
+    if (!buf) return 0;
+    int added = 0;
+    BIO *bio = BIO_new_mem_buf(buf, (int)n);
+    X509_STORE *store = SSL_CTX_get_cert_store(ctx);
+    for (X509 *x; bio && store && (x = PEM_read_bio_X509(bio, NULL, NULL, NULL)) != NULL;) {
+        if (X509_STORE_add_cert(store, x) == 1) added++;
+        X509_free(x);
+    }
+    ERR_clear_error();           /* the read loop ends on a "no start line" */
+    if (bio) BIO_free(bio);
+    free(buf);
+    return added;
+}
+
+/* A host on the home network: its certificate is not checked (see above). */
+static int tls_host_is_local(const char *host)
+{
+    if (!host || !host[0]) return 1;
+    unsigned a, b, c, d;
+    char tail;
+    if (sscanf(host, "%u.%u.%u.%u%c", &a, &b, &c, &d, &tail) == 4 && a < 256 && b < 256) {
+        return a == 10 || a == 127 || (a == 192 && b == 168) ||
+               (a == 172 && b >= 16 && b <= 31) || (a == 169 && b == 254) ||
+               (a == 100 && b >= 64 && b <= 127);      /* CGNAT / Tailscale */
+    }
+    if (strchr(host, ':')) return 0;                    /* IPv6 literal: verify */
+    if (!strchr(host, '.')) return 1;                   /* "nas", "localhost" */
+    const size_t n = strlen(host);
+    static const char *const suffix[] = { ".local", ".lan", ".home.arpa", ".internal", NULL };
+    for (int i = 0; suffix[i]; ++i) {
+        const size_t k = strlen(suffix[i]);
+        if (n > k && !strcasecmp(host + n - k, suffix[i])) return 1;
+    }
+    return 0;
+}
+
 static SSL_CTX *evo_net_get_ssl_ctx(void)
 {
     pthread_mutex_lock(&g_ssl_init_mutex);
@@ -442,6 +541,14 @@ static SSL_CTX *evo_net_get_ssl_ctx(void)
         g_ssl_ctx = SSL_CTX_new(method);
         if (g_ssl_ctx) {
             SSL_CTX_set_mode(g_ssl_ctx, SSL_MODE_AUTO_RETRY);
+            SSL_CTX_set_min_proto_version(g_ssl_ctx, TLS1_2_VERSION);
+            g_tls_roots = tls_load_roots(g_ssl_ctx, EVO_NET_CA_BUNDLE);
+            g_tls_verify = g_tls_roots > 0;
+            X509_VERIFY_PARAM_set_flags(SSL_CTX_get0_param(g_ssl_ctx), X509_V_FLAG_NO_CHECK_TIME);
+            if (g_tls_verify)
+                PROV_LOG("net: TLS verification on (%d root certificates)", g_tls_roots);
+            else
+                PROV_LOG("net: %s not readable - TLS certificates NOT verified", EVO_NET_CA_BUNDLE);
         }
     }
     pthread_mutex_unlock(&g_ssl_init_mutex);
@@ -900,12 +1007,24 @@ static int execute_http(const char *method,
                 return EVO_NET_ERR_SSL_NEW;
             }
             SSL_set_tlsext_host_name(ssl, host);
+            const int verify = g_tls_verify && !tls_host_is_local(host);
+            if (verify) {
+                SSL_set_verify(ssl, SSL_VERIFY_PEER, NULL);
+                SSL_set1_host(ssl, host);
+            }
             tls_session_resume(ssl, host, port);
             SSL_set_fd(ssl, sock);
             const int sc = SSL_connect(ssl);
             if (sc <= 0) {
-                PROV_WARN("net: TLS handshake with %s:%d failed (SSL error %d)",
-                          host, port, SSL_get_error(ssl, sc));
+                const long vr = verify ? SSL_get_verify_result(ssl) : X509_V_OK;
+                if (vr != X509_V_OK) {
+                    PROV_WARN("net: certificate of %s refused: %s", host, X509_verify_cert_error_string(vr));
+                    evo_error_set("%s: the server's certificate is not valid (%s)", host,
+                                  X509_verify_cert_error_string(vr));
+                } else {
+                    PROV_WARN("net: TLS handshake with %s:%d failed (SSL error %d)",
+                              host, port, SSL_get_error(ssl, sc));
+                }
                 SSL_free(ssl);
                 close(sock);
                 return EVO_NET_ERR_SSL_CONN;
@@ -1463,6 +1582,7 @@ static void *evo_net_worker(void *arg)
             struct timespec t0, t1;
             clock_gettime(CLOCK_MONOTONIC, &t0);
             /* Execute HTTP */
+            t_timeout_sec = req->timeout_sec > 0 ? req->timeout_sec : EVO_NET_TIMEOUT_SEC;
             int res = (req->via_avio && evo_avio_execute)
                 ? evo_avio_execute(req->method, req->url, req->post_data,
                                    (const char **)req->headers, req->header_count,
@@ -1581,7 +1701,8 @@ static int request_async(const char *method,
                          evo_net_cb callback,
                          void *user_data,
                          int via_avio,
-                         int is_image)
+                         int is_image,
+                         int timeout_sec)
 {
     if (!method || !url || strlen(url) >= EVO_NET_MAX_URL || strlen(method) >= 16) {
         return EVO_NET_ASYNC_ERR_ARG;
@@ -1608,6 +1729,7 @@ static int request_async(const char *method,
     req->user_data = user_data;
     req->via_avio  = via_avio;
     req->is_image  = is_image ? 1 : 0;
+    req->timeout_sec = timeout_sec;
 
     if (header_count > 0 && headers) {
         req->headers = (char **)calloc((size_t)header_count, sizeof(char *));
@@ -1645,21 +1767,29 @@ int evo_net_request_async(const char *method, const char *url, const char *post_
                           const char **headers, int header_count,
                           evo_net_cb callback, void *user_data)
 {
-    return request_async(method, url, post_data, headers, header_count, callback, user_data, 0, 0);
+    return request_async(method, url, post_data, headers, header_count, callback, user_data, 0, 0, 0);
+}
+
+int evo_net_request_async_slow(const char *method, const char *url, const char *post_data,
+                               const char **headers, int header_count,
+                               evo_net_cb callback, void *user_data)
+{
+    return request_async(method, url, post_data, headers, header_count, callback, user_data, 0, 0,
+                         EVO_NET_SLOW_TIMEOUT_SEC);
 }
 
 int evo_net_request_async_avio(const char *method, const char *url, const char *post_data,
                                const char **headers, int header_count,
                                evo_net_cb callback, void *user_data)
 {
-    return request_async(method, url, post_data, headers, header_count, callback, user_data, 1, 0);
+    return request_async(method, url, post_data, headers, header_count, callback, user_data, 1, 0, 0);
 }
 
 int evo_net_request_async_image(const char *method, const char *url, const char *post_data,
                                 const char **headers, int header_count,
                                 evo_net_cb callback, void *user_data)
 {
-    return request_async(method, url, post_data, headers, header_count, callback, user_data, 0, 1);
+    return request_async(method, url, post_data, headers, header_count, callback, user_data, 0, 1, 0);
 }
 
 /* ---- Why a request failed, in words (the callback only gets success/status) ---- */

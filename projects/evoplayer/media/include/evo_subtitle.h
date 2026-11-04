@@ -54,6 +54,9 @@ extern double prospero_subtitle_time_scale;      /* external SRT only, #102 */
 /* Manual nudge and auto-sync share one range (#102). */
 #define PROSPERO_SUBTITLE_MAX_DELAY_MS 60000
 extern int prospero_subtitle_requested_stream;   /* -2 auto, -1 SRT, >=0 emb */
+extern char prospero_subtitle_external_label[96]; /* "" = sidecar SRT */
+/* Load an SRT as the external track without the "Loaded N cues" toast. */
+int prospero_subtitle_load_file_quiet(const char *path);
 extern int prospero_subtitle_use_external;
 extern int prospero_embedded_subtitle_stream_index;
 extern int prospero_embedded_subtitle_count;
@@ -119,6 +122,10 @@ typedef struct {
 
 int  prospero_embedded_subtitle_image_at(double position, ProsperoSubtitleImage *out);
 int  prospero_subtitle_declared_cues(AVStream *stream);
+/* 1 for a forced (signs only) track: the disposition flag or "forced" in its title. */
+int  prospero_subtitle_stream_is_forced(AVStream *stream);
+/* evo_langpref_rank() of the track's language: 2 preferred, 1 English fallback, 0 other. */
+int  prospero_subtitle_stream_rank(AVStream *stream);
 
 /* ---- render helpers for prospero_subtitle_draw() (which lives in main.c) ---- */
 const ProsperoSubtitleCue *prospero_subtitle_active_cue(double position);

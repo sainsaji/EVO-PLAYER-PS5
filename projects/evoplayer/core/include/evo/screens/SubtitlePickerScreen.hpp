@@ -21,7 +21,8 @@ public:
 
 private:
     struct SubtitleTrackEntry {
-        int trackId = -2; // -2 = Off, -1 = External SRT, -3 = AUTO-SYNC, >= 0 = Stream index
+        int trackId = -2; // -2 = Off, -1 = External SRT, -3 = AUTO-SYNC, >= 0 = Stream index,
+                          // <= kOnlineBase = an online subtitle not loaded yet
         std::string label;
         std::string detail;
         bool isSecondary = false; // #110: this track is the second line of dialogue
@@ -32,6 +33,9 @@ private:
     static constexpr int kVisibleRows = 6;
     static constexpr int kAutoSyncTrack = -3;
     static constexpr int kLoadFileTrack = -4;   /* opens SubtitleFileScreen */
+    /* Online subtitle i (not loaded yet) is trackId kOnlineBase - i. */
+    static constexpr int kOnlineBase = -100;
+    static constexpr int kMaxOnlineRows = 24;
 
     void refreshTracks();
     void navigate(int delta);

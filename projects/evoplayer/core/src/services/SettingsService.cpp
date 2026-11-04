@@ -8,6 +8,7 @@
 #include "evo_rmlui_bridge.h"
 #include "evo_subtitle.h"
 #include "evo_vdec.h"
+#include "evo_langpref.h"
 
 #include <cerrno>
 #include <cstdio>
@@ -80,6 +81,42 @@ const char* SettingsService::getHdrOutputModeName(HdrOutputMode mode) const {
         case HdrOutputMode::Auto:
         default:                  return "AUTO (MATCH CONTENT)";
     }
+}
+
+const char* SettingsService::getHdrPeakName(HdrPeak peak) const {
+    switch (peak) {
+        case HdrPeak::Nits800:  return "800 NITS";
+        case HdrPeak::Nits1000: return "1000 NITS";
+        case HdrPeak::Nits1500: return "1500 NITS";
+        case HdrPeak::Nits2000: return "2000 NITS";
+        case HdrPeak::Nits3000: return "3000 NITS";
+        case HdrPeak::Off:
+        default:                return "OFF (TV DECIDES)";
+    }
+}
+
+const char* SettingsService::getPreferredLanguageName(PreferredLanguage lang) const {
+    switch (lang) {
+        case PreferredLanguage::Italian:    return "ITALIANO";
+        case PreferredLanguage::English:    return "ENGLISH";
+        case PreferredLanguage::Spanish:    return "ESPAÑOL";
+        case PreferredLanguage::French:     return "FRANÇAIS";
+        case PreferredLanguage::German:     return "DEUTSCH";
+        case PreferredLanguage::Portuguese: return "PORTUGUÊS";
+        case PreferredLanguage::Japanese:   return "JAPANESE";
+        case PreferredLanguage::Auto:
+        default:                            return "AUTO";
+    }
+}
+
+void SettingsService::setAudioLanguage(PreferredLanguage lang) {
+    m_audioLanguage = lang;
+    evo_langpref_set_audio(getPreferredLanguageCode(lang));
+}
+
+void SettingsService::setSubtitleLanguage(PreferredLanguage lang) {
+    m_subtitleLanguage = lang;
+    evo_langpref_set_subtitle(getPreferredLanguageCode(lang));
 }
 
 const char* SettingsService::getAudioOutputChannelsName(AudioOutputChannels channels) const {
@@ -191,7 +228,7 @@ bool SettingsService::saveSettings() {
     }
 
     std::fprintf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
         0, // legacy dummy profile
         m_resumePlaybackEnabled ? 1 : 0,
         static_cast<int>(m_defaultViewMode),
@@ -221,7 +258,11 @@ bool SettingsService::saveSettings() {
         static_cast<int>(m_networkBuffer),   // line 27 (#199 network buffer)
         m_audioDelayMs,                      // line 28 (#170 audio delay ms)
         evo_log_server_saved_port(),         // line 29 (#227 phone & log port)
-        kSettingsSchema                      // line 30 (#233: experimental defaults applied)
+        kSettingsSchema,                     // line 30 (#233: experimental defaults applied)
+        static_cast<int>(m_hdrPeak),         // line 31 (HDR peak mapping)
+        static_cast<int>(m_audioLanguage),   // line 32 (preferred audio language)
+        static_cast<int>(m_subtitleLanguage), // line 33 (preferred subtitle language)
+        m_addonAutoPick ? 1 : 0              // line 34 (addons: play the best stream at once)
     );
 
     if (std::fclose(file) != 0)
@@ -267,9 +308,13 @@ bool SettingsService::loadSettings() {
     int rawAudioDelay = 0;
     int rawLogPort = EVO_LOG_SERVER_PORT;
     int rawSchema = 0;
+    int rawHdrPeak = 0;
+    int rawAudioLanguage = 0;
+    int rawSubtitleLanguage = 0;
+    int rawAddonAutoPick = 1;
 
     int readCount = std::fscanf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
         &rawProfile,
         &rawResume,
         &rawViewMode,
@@ -299,7 +344,11 @@ bool SettingsService::loadSettings() {
         &rawNetworkBuffer,
         &rawAudioDelay,
         &rawLogPort,
-        &rawSchema
+        &rawSchema,
+        &rawHdrPeak,
+        &rawAudioLanguage,
+        &rawSubtitleLanguage,
+        &rawAddonAutoPick
     );
 
     std::fclose(file);
@@ -383,7 +432,17 @@ bool SettingsService::loadSettings() {
     }
     /* An older file has no port line: the default stands, and the server may bind it. */
     evo_log_server_set_port(readCount >= 29 ? rawLogPort : evo_log_server_saved_port());   /* ignores out-of-range */
-    EVO_LOGI("settings", "loaded %d of 30 fields from %s", readCount, filePath);
+    EVO_LOGI("settings", "loaded %d of 34 fields from %s", readCount, filePath);
+    if (readCount >= 31 && rawHdrPeak >= 0 && rawHdrPeak <= 5) {
+        m_hdrPeak = static_cast<HdrPeak>(rawHdrPeak);
+    }
+    if (readCount >= 32 && rawAudioLanguage >= 0 && rawAudioLanguage < kPreferredLanguageCount) {
+        setAudioLanguage(static_cast<PreferredLanguage>(rawAudioLanguage));
+    }
+    if (readCount >= 33 && rawSubtitleLanguage >= 0 && rawSubtitleLanguage < kPreferredLanguageCount) {
+        setSubtitleLanguage(static_cast<PreferredLanguage>(rawSubtitleLanguage));
+    }
+    if (readCount >= 34) m_addonAutoPick = (rawAddonAutoPick != 0);
 
     /* #233: Deep Blacks, Motion Smoothing and Match Video Rate moved to
      * Experimental, where everything starts off. A file from before that

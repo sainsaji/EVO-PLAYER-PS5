@@ -75,7 +75,7 @@ const char *evo_language_native_name(const char *code)
         return NULL;
     char low[8];
     size_t n = 0;
-    for (; code[n] && n < sizeof low - 1; ++n)
+    for (; n < sizeof low - 1 && code[n]; ++n)
         low[n] = (char)tolower((unsigned char)code[n]);
     low[n] = 0;
     if (code[n] != 0 && code[n] != '-' && code[n] != '_')

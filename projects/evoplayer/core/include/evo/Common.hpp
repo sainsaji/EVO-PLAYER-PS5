@@ -139,6 +139,58 @@ enum class AudioOutputChannels : int {
     Stereo = 1
 };
 
+// HDR peak mapping: the panel's peak brightness. Off leaves tone mapping to
+// the TV (HDR10 passthrough, as before); a value fits each Dolby Vision shot
+// (from its L1 metadata) or an HDR10 film (from MaxCLL) to that peak.
+enum class HdrPeak : int {
+    Off = 0,
+    Nits800 = 1,
+    Nits1000 = 2,
+    Nits1500 = 3,
+    Nits2000 = 4,
+    Nits3000 = 5
+};
+
+inline int getHdrPeakNits(HdrPeak peak) {
+    switch (peak) {
+        case HdrPeak::Nits800:  return 800;
+        case HdrPeak::Nits1000: return 1000;
+        case HdrPeak::Nits1500: return 1500;
+        case HdrPeak::Nits2000: return 2000;
+        case HdrPeak::Nits3000: return 3000;
+        case HdrPeak::Off:
+        default:                return 0;
+    }
+}
+
+// Preferred audio / subtitle language. Auto keeps the old choice (first
+// decodable audio track, English subtitles).
+enum class PreferredLanguage : int {
+    Auto = 0,
+    Italian = 1,
+    English = 2,
+    Spanish = 3,
+    French = 4,
+    German = 5,
+    Portuguese = 6,
+    Japanese = 7
+};
+constexpr int kPreferredLanguageCount = 8;
+
+inline const char* getPreferredLanguageCode(PreferredLanguage lang) {
+    switch (lang) {
+        case PreferredLanguage::Italian:    return "ita";
+        case PreferredLanguage::English:    return "eng";
+        case PreferredLanguage::Spanish:    return "spa";
+        case PreferredLanguage::French:     return "fra";
+        case PreferredLanguage::German:     return "deu";
+        case PreferredLanguage::Portuguese: return "por";
+        case PreferredLanguage::Japanese:   return "jpn";
+        case PreferredLanguage::Auto:
+        default:                            return "";
+    }
+}
+
 // Audio volume boost (#166): Off, +50%, +100%, +200%, +300%.
 // Multiplies decoded PCM before sceAudioOutOutput with clean int16 clipping.
 enum class VolumeBoost : int {

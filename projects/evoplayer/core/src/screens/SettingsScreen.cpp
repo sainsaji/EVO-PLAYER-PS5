@@ -46,16 +46,19 @@ enum class SettingKey : int {
     AiNetwork,
     RefreshRate,
     HdrOutput,
+    HdrPeak,
     /* AUDIO */
     VolumeBoost,
     AudioDelay,
     NetworkBuffer,
     OutputChannels,
     AudioPassthrough,
+    AudioLanguage,
     SurroundTest,
     NavigationSounds,
     /* SUBTITLES */
     AutoSubtitles,
+    SubtitleLanguage,
     SubtitleFont,
     SecondaryPosition,
     SecondaryColour,
@@ -66,6 +69,7 @@ enum class SettingKey : int {
     KeyboardInput,
     PhonePort,
     AskStream,
+    AddonAutoPick,
     /* SYSTEM & DIAGNOSTICS */
     ReportProblem,
     ReportLastRun,
@@ -125,6 +129,12 @@ const PreviewSpec kPreviews[] = {
      "Outputs the video's own rate (24p or 50 Hz) so motion has no judder."},
     {SettingKey::HdrOutput, EVO_RMLUI_PREVIEW_HDR,
      "Highlights like the sun and lamps get brighter without clipping. Needs an HDR10 TV."},
+    {SettingKey::HdrPeak, EVO_RMLUI_PREVIEW_INFO,
+     "Fits bright HDR films to your TV's real peak, shot by shot for Dolby Vision, instead of leaving it to the TV. Set your TV's peak (about 1500 nits for an LG G5) and turn its dynamic tone mapping off."},
+    {SettingKey::AudioLanguage, EVO_RMLUI_PREVIEW_INFO,
+     "The audio track a film starts with when it has several languages. Auto takes the first one."},
+    {SettingKey::SubtitleLanguage, EVO_RMLUI_PREVIEW_INFO,
+     "The subtitles chosen when a film opens: embedded tracks first, then online subtitles from your Stremio addons. Forced (signs only) tracks are only picked when the audio is already in your language."},
     {SettingKey::VolumeBoost, EVO_RMLUI_PREVIEW_INFO,
      "Makes quiet files louder. Very loud passages are cut off cleanly instead of wrapping into noise. Has no effect on Dolby/DTS passthrough."},
     {SettingKey::AudioDelay, EVO_RMLUI_PREVIEW_INFO,
@@ -156,6 +166,8 @@ const PreviewSpec kPreviews[] = {
      "The report has EVO's log, version and settings. Passwords and tokens are taken out."},
     {SettingKey::ReportLastRun, EVO_RMLUI_PREVIEW_REPORT,
      "The log of the run before this one. Use it when EVO crashed or froze and you reopened it."},
+    {SettingKey::AddonAutoPick, EVO_RMLUI_PREVIEW_ASK_STREAM,
+     "Plays the best source at once: Remux and high bitrate, Dolby Vision or HDR, already cached on your debrid service. The full list is in OPTIONS on the title."},
     {SettingKey::DebugOverlay, EVO_RMLUI_PREVIEW_DEBUG_OVERLAY, "Shows live performance numbers on screen."},
     {SettingKey::DeveloperTools, EVO_RMLUI_PREVIEW_INFO, "System diagnostics and performance stats."},
     {SettingKey::ConsoleModel, EVO_RMLUI_PREVIEW_INFO,
@@ -170,19 +182,20 @@ const PreviewSpec kPreviews[] = {
 const SettingKey kVideoKeys[] = {
     SettingKey::DefaultAspect, SettingKey::ResumePlayback, SettingKey::VideoDecoder,
     SettingKey::Upscaling, SettingKey::AiNetwork, SettingKey::RefreshRate,
-    SettingKey::HdrOutput, SettingKey::NetworkBuffer,
+    SettingKey::HdrOutput, SettingKey::HdrPeak, SettingKey::NetworkBuffer,
 };
 const SettingKey kAudioKeys[] = {
     SettingKey::VolumeBoost, SettingKey::AudioDelay,
-    SettingKey::OutputChannels, SettingKey::AudioPassthrough, SettingKey::SurroundTest, SettingKey::NavigationSounds,
+    SettingKey::OutputChannels, SettingKey::AudioPassthrough, SettingKey::AudioLanguage,
+    SettingKey::SurroundTest, SettingKey::NavigationSounds,
 };
 const SettingKey kSubtitleKeys[] = {
-    SettingKey::AutoSubtitles, SettingKey::SubtitleFont,
+    SettingKey::AutoSubtitles, SettingKey::SubtitleLanguage, SettingKey::SubtitleFont,
     SettingKey::SecondaryPosition, SettingKey::SecondaryColour,
 };
 const SettingKey kInterfaceKeys[] = {
     SettingKey::Theme, SettingKey::Lightbar, SettingKey::FoldersFirst,
-    SettingKey::KeyboardInput, SettingKey::PhonePort, SettingKey::AskStream,
+    SettingKey::KeyboardInput, SettingKey::PhonePort, SettingKey::AskStream, SettingKey::AddonAutoPick,
 };
 const SettingKey kSystemKeys[] = {
     SettingKey::ReportProblem, SettingKey::ReportLastRun, SettingKey::DebugOverlay, SettingKey::DeveloperTools,
@@ -355,6 +368,13 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
             d.opt_label[i] = settings->getHdrOutputModeName(static_cast<HdrOutputMode>(i));
         break;
 
+    case SettingKey::HdrPeak:
+        d = valueDef(key, "HDR PEAK", "FIT HDR & DOLBY VISION TO YOUR TV'S PEAK - OFF LEAVES IT TO THE TV",
+                     "../icons/icon_sun.png", 6, static_cast<int>(settings->getHdrPeak()));
+        for (int i = 0; i < 6; ++i)
+            d.opt_label[i] = settings->getHdrPeakName(static_cast<HdrPeak>(i));
+        break;
+
     /* #199: sized when a network file opens, so it applies from the next file. */
     case SettingKey::NetworkBuffer:
         d = valueDef(key, "NETWORK BUFFER", "HOW FAR AHEAD STREAMS LOAD. HIGH BITRATE FILES GET LESS",
@@ -398,6 +418,22 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
                      static_cast<int>(settings->getAudioOutputChannels()));
         for (int i = 0; i < 2; ++i)
             d.opt_label[i] = settings->getAudioOutputChannelsName(static_cast<AudioOutputChannels>(i));
+        break;
+
+    case SettingKey::AudioLanguage:
+        d = valueDef(key, "AUDIO LANGUAGE", "THE TRACK A FILM STARTS WITH",
+                     "../icons/icon_volume.png", kPreferredLanguageCount,
+                     static_cast<int>(settings->getAudioLanguage()));
+        for (int i = 0; i < kPreferredLanguageCount; ++i)
+            d.opt_label[i] = settings->getPreferredLanguageName(static_cast<PreferredLanguage>(i));
+        break;
+
+    case SettingKey::SubtitleLanguage:
+        d = valueDef(key, "SUBTITLE LANGUAGE", "EMBEDDED FIRST, THEN ONLINE FROM YOUR ADDONS",
+                     "../icons/icon_subtitles.png", kPreferredLanguageCount,
+                     static_cast<int>(settings->getSubtitleLanguage()));
+        for (int i = 0; i < kPreferredLanguageCount; ++i)
+            d.opt_label[i] = settings->getPreferredLanguageName(static_cast<PreferredLanguage>(i));
         break;
 
     case SettingKey::AudioPassthrough:
@@ -498,6 +534,11 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
     case SettingKey::AskStream:
         d = toggleDef(key, "ASK WHICH LIVE STREAM", "PICK THE FORMAT AND QUALITY WHEN YOU OPEN A CHANNEL",
                       "../icons/icon_tv.png", settings->isAskStreamEnabled());
+        break;
+
+    case SettingKey::AddonAutoPick:
+        d = toggleDef(key, "PLAY BEST ADDON STREAM", "REMUX, DOLBY VISION / HDR, CACHED FIRST - LIST IN OPTIONS",
+                      "../icons/icon_tv.png", settings->isAddonAutoPickEnabled());
         break;
 
     case SettingKey::ReportProblem:
@@ -760,6 +801,7 @@ void toggleSetting(SettingKey key) {
     case SettingKey::AudioPassthrough: st->setAudioPassthroughEnabled(!st->isAudioPassthroughEnabled()); break;
     case SettingKey::MatchVideoRate:   st->setMatchVideoRateEnabled(!st->isMatchVideoRateEnabled()); break;
     case SettingKey::AskStream:        st->setAskStreamEnabled(!st->isAskStreamEnabled()); break;
+    case SettingKey::AddonAutoPick:    st->setAddonAutoPickEnabled(!st->isAddonAutoPickEnabled()); break;
     case SettingKey::AutoSubtitles:    st->setAutoSubtitlesEnabled(!st->isAutoSubtitlesEnabled()); break;
     case SettingKey::NavigationSounds: st->setSoundFeedbackEnabled(!st->isSoundFeedbackEnabled()); break;
     case SettingKey::Lightbar:         st->setLightbarFeedbackEnabled(!st->isLightbarFeedbackEnabled()); break;
@@ -785,6 +827,9 @@ void applyOption(SettingKey key, int opt) {
     case SettingKey::DeepBlacks:     st->setDeepBlacks(static_cast<DeepBlacks>(opt)); break;
     case SettingKey::MotionSmoothing: st->setMotionSmoothing(static_cast<MotionSmoothing>(opt)); break;
     case SettingKey::HdrOutput:      st->setHdrOutputMode(static_cast<HdrOutputMode>(opt)); break;
+    case SettingKey::HdrPeak:        st->setHdrPeak(static_cast<HdrPeak>(opt)); break;
+    case SettingKey::AudioLanguage:  st->setAudioLanguage(static_cast<PreferredLanguage>(opt)); break;
+    case SettingKey::SubtitleLanguage: st->setSubtitleLanguage(static_cast<PreferredLanguage>(opt)); break;
     case SettingKey::NetworkBuffer:  st->setNetworkBuffer(static_cast<NetworkBuffer>(opt)); break;
     case SettingKey::VolumeBoost:    st->setVolumeBoost(static_cast<VolumeBoost>(opt)); break;
     case SettingKey::AudioDelay:     st->setAudioDelayMs((opt - 10) * 50); break;

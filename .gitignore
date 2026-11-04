@@ -22,6 +22,8 @@ proprietary/
 *.bin.enc
 *.key
 *.pem
+# Public Mozilla root certificates for TLS verification (docs/proprietary.md), not a key.
+!projects/evoplayer/assets/certs/cacert.pem
 *.p12
 id_rsa*
 *_dump/

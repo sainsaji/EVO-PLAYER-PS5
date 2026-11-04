@@ -37,9 +37,9 @@ Everything that carries the version string, as changed by the v0.12.5 commit
    `version` comment in `ui_rml/include/evo_rmlui_bridge.h`. The updater compares
    against this define, so a missed one makes EVO offer its own version as an
    update.
-4. `projects/evoplayer/evo_changelog.h` and its twin
-   `projects/evoplayer/include/evo_changelog.h` (the in-app Changelog screen; keep
-   the two identical and write the strings in capitals like the others), plus the
+4. `projects/evoplayer/include/evo_changelog.h` (the in-app Changelog screen;
+   write the strings in capitals like the others - the old twin at
+   `projects/evoplayer/evo_changelog.h` was never included and is gone), plus the
    fixture version in `tools/hui_preview/hui_preview.cpp`.
 5. `CHANGELOG.md`: a `## 0.12.6` heading. The workflow lifts exactly that section
    into the GitHub release notes, so the heading must match the version.

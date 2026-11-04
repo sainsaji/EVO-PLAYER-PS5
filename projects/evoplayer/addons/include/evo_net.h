@@ -160,6 +160,12 @@ int  evo_net_request_async(const char *method,
  * its own workers, so it never delays a page request, and a page request never
  * waits behind it.
  */
+/* The same, with a long read timeout (EVO_NET_SLOW_TIMEOUT_SEC): for requests
+ * whose server thinks before it answers - an addon's stream lookup. */
+int  evo_net_request_async_slow(const char *method, const char *url,
+                                const char *post_data, const char **headers,
+                                int header_count, evo_net_cb callback, void *user_data);
+
 int  evo_net_request_async_image(const char *method,
                                  const char *url,
                                  const char *post_data,

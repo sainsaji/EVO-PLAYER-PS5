@@ -1323,6 +1323,11 @@ int evo_agc_runtime_init(int width, int height, int hdr)
         /* Dolby Vision P5; without them a P5 stream plays purple/green */
         {EVO_AGC_PIPE_VIDEO_DOVI,    &video_yuv_p010_dovi_metadata,        "video_yuv_p010_dovi"},
         {EVO_AGC_PIPE_VIDEO_DOVI_PQ, &video_yuv_p010_dovi_pq_out_metadata, "video_yuv_p010_dovi_pq_out"},
+        /* BT.709 SDR for HD and UHD; missing ones keep the BT.601 pipes */
+        {EVO_AGC_PIPE_VIDEO_NV12_709,   &video_yuv_nv12_709_metadata,   "video_yuv_nv12_709"},
+        {EVO_AGC_PIPE_VIDEO_PLANAR_709, &video_yuv_planar_709_metadata, "video_yuv_planar_709"},
+        /* HDR peak mapping; missing keeps the plain PQ passthrough */
+        {EVO_AGC_PIPE_VIDEO_HDR_PQ_DYN, &video_yuv_p010_pq_dyn_metadata, "video_yuv_p010_pq_dyn"},
         /* #103 upscaler. Each is optional: a missing one makes the upscaler
          * fall back a mode (AI -> Sharp -> Off), never fail the runtime. */
         {EVO_AGC_PIPE_UP_EASU,      &upscale_easu_metadata,       "upscale_easu"},
@@ -4327,6 +4332,32 @@ static void agc_video_scale(int disp_w, int disp_h, int view_mode, float *sx, fl
     }
 }
 
+/* ---- HDR peak mapping ------------------------------------------------- */
+static int g_hdr_peak_nits = 0;        /* the panel peak, 0 = off */
+static int g_hdr_static_peak_nits = 0; /* the open stream's MaxCLL / mastering peak */
+static int g_hdr_map_mode = 0;         /* last frame: 0 passthrough, 1 static, 2 DV */
+static evo_dovi_params g_hdr_static_params;
+static evo_dovi_params g_dovi_scratch;
+
+void evo_agc_runtime_set_hdr_peak(int nits)
+{
+    if (nits < 0) nits = 0;
+    if (nits > 10000) nits = 10000;
+    if (nits != g_hdr_peak_nits)
+        evo_boot_log("agc hdr: peak mapping %s (%d nits)", nits ? "on" : "off", nits);
+    g_hdr_peak_nits = nits;
+}
+
+int evo_agc_runtime_get_hdr_peak(void) { return g_hdr_peak_nits; }
+
+void evo_agc_runtime_set_hdr_static_peak(int nits)
+{
+    if (nits < 0 || nits > 10000) nits = 0;
+    g_hdr_static_peak_nits = nits;
+}
+
+int evo_agc_runtime_hdr_map_mode(void) { return g_hdr_map_mode; }
+
 int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
                       const uint8_t *uv, int uv_pitch,
                       const uint8_t *u,  int u_pitch,
@@ -4352,14 +4383,60 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
     const int hdr_src = (color_trc == 16 || color_trc == 18);
     g_agc_dev.last_video_trc = hdr_src ? color_trc : 1;
 
-    /* Dolby Vision P5 rides the 10-bit two-plane layout (P010, or planar
-     * interleaved to RG16) with its RPU constants after the textures. */
-    if (dovi && (!ten_bit || !g_agc_dev.pipelines[EVO_AGC_PIPE_VIDEO_DOVI].valid))
+    /*
+     * Dolby Vision rides the 10-bit two-plane layout (P010, or planar
+     * interleaved to RG16) with its RPU constants after the textures. Two
+     * kinds arrive here: a Profile 5 picture that must be reshaped, and a
+     * profile 7/8 base layer (plain HDR10) whose RPU only lends its per-shot
+     * L1 peak to the HDR peak mapping.
+     */
+    int peak_map = 0;            /* bind the PQ_DYN pipeline with `dovi` */
+    g_hdr_map_mode = 0;
+    if (dovi && ten_bit) {
+        const evo_dovi_params *dp = (const evo_dovi_params *)dovi;
+        const int map_only = dp->lohi[2][3] == EVO_DOVI_KIND_MAP_ONLY;
+        const int can_map = g_hdr_peak_nits > 0 && g_agc_dev.is_hdr &&
+                            g_agc_dev.current_layer_target == NULL;
+        g_dovi_scratch = *dp;
+        g_dovi_scratch.lohi[1][3] = can_map ? (float)g_hdr_peak_nits : 0.0f;
+        if (can_map && !(g_dovi_scratch.lohi[0][3] > 0.0f) && g_hdr_static_peak_nits > 0)
+            g_dovi_scratch.lohi[0][3] = (float)g_hdr_static_peak_nits;
+        if (map_only) {
+            if (can_map && g_dovi_scratch.lohi[0][3] > (float)g_hdr_peak_nits &&
+                g_agc_dev.pipelines[EVO_AGC_PIPE_VIDEO_HDR_PQ_DYN].valid) {
+                peak_map = 1;
+                g_hdr_map_mode = 2;
+                dovi = &g_dovi_scratch;
+            } else {
+                dovi = NULL;     /* plain HDR10 path below */
+            }
+        } else {
+            if (can_map && g_dovi_scratch.lohi[0][3] > (float)g_hdr_peak_nits)
+                g_hdr_map_mode = 2;
+            dovi = &g_dovi_scratch;
+        }
+    }
+    if (!peak_map && !dovi && ten_bit && color_trc == 16 && g_hdr_peak_nits > 0 &&
+        g_agc_dev.is_hdr && g_agc_dev.current_layer_target == NULL &&
+        g_hdr_static_peak_nits > g_hdr_peak_nits &&
+        g_agc_dev.pipelines[EVO_AGC_PIPE_VIDEO_HDR_PQ_DYN].valid) {
+        /* HDR10 with a known static peak above the panel's */
+        memset(&g_hdr_static_params, 0, sizeof g_hdr_static_params);
+        g_hdr_static_params.lohi[0][3] = (float)g_hdr_static_peak_nits;
+        g_hdr_static_params.lohi[1][3] = (float)g_hdr_peak_nits;
+        g_hdr_static_params.lohi[2][3] = EVO_DOVI_KIND_MAP_ONLY;
+        dovi = &g_hdr_static_params;
+        peak_map = 1;
+        g_hdr_map_mode = 1;
+    }
+    if (dovi && !peak_map && (!ten_bit || !g_agc_dev.pipelines[EVO_AGC_PIPE_VIDEO_DOVI].valid))
         dovi = NULL;
 
     /* 1. Select Pipeline */
     int pipe_id;
-    if (dovi) {
+    if (peak_map) {
+        pipe_id = EVO_AGC_PIPE_VIDEO_HDR_PQ_DYN;
+    } else if (dovi) {
         pipe_id = EVO_AGC_PIPE_VIDEO_DOVI;
     } else if (ten_bit) {
         if (color_trc == 16)
@@ -4373,7 +4450,15 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
                                                    : EVO_AGC_PIPE_NV12_HDR].valid) {
         pipe_id = (color_trc == 18) ? EVO_AGC_PIPE_NV12_HLG : EVO_AGC_PIPE_NV12_HDR;
     } else {
-        pipe_id = planar ? EVO_AGC_PIPE_VIDEO_PLANAR : EVO_AGC_PIPE_VIDEO_NV12;
+        /* 8-bit SDR: BT.709 above SD height (720p, 1080p and 4K are BT.709;
+         * an untagged HD stream is read that way by every player), else 601. */
+        const int src_h = (disp_h > 0 && disp_h <= coded_h) ? disp_h : coded_h;
+        const int hd = src_h > 576;
+        const int p709 = planar ? EVO_AGC_PIPE_VIDEO_PLANAR_709 : EVO_AGC_PIPE_VIDEO_NV12_709;
+        if (hd && g_agc_dev.pipelines[p709].valid)
+            pipe_id = p709;
+        else
+            pipe_id = planar ? EVO_AGC_PIPE_VIDEO_PLANAR : EVO_AGC_PIPE_VIDEO_NV12;
     }
     evo_agc_runtime_bind_pipeline(pipe_id);
     evo_agc_runtime_set_blend(EVO_AGC_BLEND_NONE);

@@ -65,6 +65,9 @@ extern "C" void evo_log_alloc_state(const char *when)
 
 #include "evo_adec.h"
 #include "evo_subtitle.h"
+#include "evo_langpref.h"
+#include "evo_online_subs.h"
+#include "evo_agc_runtime.h"
 #include "evo_stream_io.h"
 #include "pp_stage_breadcrumb.h"
 /* #90: the provider seam. Needed for report_progress from saveResumePosition
@@ -83,6 +86,7 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/mathematics.h>
+#include <libavutil/mastering_display_metadata.h>
 #include <libswscale/swscale.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -125,6 +129,90 @@ extern long long video_queue_byte_cap;
 extern long long audio_queue_byte_cap;
 
 namespace evo {
+
+/*
+ * Online subtitles (Stremio addons, evo_online_subs): the file has no track in
+ * SUBTITLE LANGUAGE, the addons offered one, so it is fetched now - on the
+ * playback worker, like a media server's sidecar - and loaded as the external
+ * track. An embedded track in the preferred language always wins; English
+ * online subtitles only stand in when the file has no usable track at all.
+ *
+ * The loaded file is kept for the title, so an audio switch (which reopens the
+ * file and clears the external track) brings the same subtitles back.
+ */
+void PlaybackController::applyOnlineSubtitles()
+{
+    if (!m_source.isProvider() || m_source.item_id.empty() || !m_source.subtitleUrl.empty())
+        return;
+    if (!play_fmt || isLiveSource())
+        return;
+    char key[512];
+    evo_osubs_key(key, sizeof key);
+    if (m_source.item_id != key)
+        return;
+
+    /* The same title again (audio switch, reopen): restore what was loaded. */
+    {
+        char keptPath[512], keptLabel[96];
+        if (evo_osubs_active() >= 0 &&
+            evo_osubs_remembered(keptPath, sizeof keptPath, keptLabel, sizeof keptLabel)) {
+            if (prospero_subtitle_load_file_quiet(keptPath) > 0)
+                std::snprintf(prospero_subtitle_external_label, sizeof prospero_subtitle_external_label,
+                              "%s", keptLabel);
+            return;
+        }
+    }
+    if (prospero_subtitle_count > 0)
+        return;                       /* a sidecar is already loaded */
+    if (!prospero_subtitle_enabled)
+        return;                       /* AUTO SUBTITLES is off: the picker still lists them */
+
+    int embRank = -1;                 /* -1: no embedded track chosen */
+    const int ei = prospero_embedded_subtitle_stream_index;
+    if (ei >= 0 && ei < static_cast<int>(play_fmt->nb_streams)) {
+        AVStream* st = play_fmt->streams[ei];
+        embRank = prospero_subtitle_stream_is_forced(st) ? 0 : prospero_subtitle_stream_rank(st);
+    }
+    if (embRank >= 2)
+        return;                       /* the file already has your language */
+
+    /* The requests went out with the stream list; give them a moment. */
+    const int n = evo_osubs_wait(key, 4000);
+    int rank = 0;
+    const int best = evo_osubs_best(embRank < 0, &rank);
+    evo_bt("PlaybackController: online subtitles: %d offered, best=%d rank=%d (embedded rank %d)",
+           n, best, rank, embRank);
+    if (best < 0 || rank <= embRank)
+        return;
+
+    const char* path = evo_osubs_fetch_sync(best);
+    if (!path) {
+        evo_bt("PlaybackController: online subtitle download failed");
+        return;
+    }
+    const std::string saved = path;
+    if (prospero_subtitle_load_file_quiet(saved.c_str()) <= 0)
+        return;
+
+    char lang[64];
+    evo_osubs_label(best, lang, sizeof lang);
+    evo_osub_t meta;
+    std::string label = lang;
+    if (evo_osubs_get(best, &meta)) {
+        label += " - ";
+        label += meta.source;
+    }
+    std::snprintf(prospero_subtitle_external_label, sizeof prospero_subtitle_external_label,
+                  "%s", label.c_str());
+    prospero_subtitle_use_external = 1;
+    prospero_subtitle_enabled = 1;
+    evo_osubs_set_active(best);
+    evo_osubs_remember(saved.c_str(), label.c_str());
+    char msg[128];
+    std::snprintf(msg, sizeof msg, "%s (ONLINE)", lang);
+    toast("SUBTITLES", msg);
+}
+
 
 /*
  * Ceiling on avformat_find_stream_info(). It has to clear the slowest probe we
@@ -1007,6 +1095,42 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     }
 
     /*
+     * AUDIO LANGUAGE: among the decodable tracks, the one in the preferred
+     * language wins over stream order (Italian releases often carry the
+     * original first). Within that language the default-flagged track wins,
+     * and a commentary track never does. Auto keeps the first decodable one.
+     * A program-grouped source (HLS) keeps its own pairing above.
+     */
+    if (chosen_program < 0 && evo_langpref_audio()[0]) {
+        int best = -1, bestScore = 0;
+        for (unsigned int i = 0; i < play_fmt->nb_streams; ++i) {
+            AVStream* st = play_fmt->streams[i];
+            if (!st || !st->codecpar || st->codecpar->codec_type != AVMEDIA_TYPE_AUDIO)
+                continue;
+            if (!avcodec_find_decoder(st->codecpar->codec_id))
+                continue;
+            const AVDictionaryEntry* lang = av_dict_get(st->metadata, "language", nullptr, 0);
+            if (evo_langpref_rank(lang ? lang->value : nullptr, 'a') != 2)
+                continue;
+            const AVDictionaryEntry* title = av_dict_get(st->metadata, "title", nullptr, 0);
+            int score = 10;
+            if (st->disposition & AV_DISPOSITION_DEFAULT) score += 5;
+            if ((st->disposition & AV_DISPOSITION_COMMENT) ||
+                (title && title->value && (std::strstr(title->value, "omment") || std::strstr(title->value, "OMMENT"))))
+                score -= 9;
+            if (score > bestScore) {
+                bestScore = score;
+                best = static_cast<int>(i);
+            }
+        }
+        if (best >= 0 && best != audio_stream_index) {
+            evo_bt("PlaybackController: audio language %s -> stream %d (was %d)",
+                   evo_langpref_audio(), best, audio_stream_index);
+            audio_stream_index = best;
+        }
+    }
+
+    /*
      * Nothing decodable: fall back to the first audio stream anyway, so the
      * file still opens and the track picker can show what is in it. Better a
      * silent file the user can inspect than a refusal with no explanation.
@@ -1385,6 +1509,37 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                              0, 0);
     }
 
+    /*
+     * HDR peak mapping needs the film's own peak when there is no Dolby Vision
+     * RPU: MaxCLL from the content light level, else the mastering display's
+     * max luminance; the smaller when both are there (a MaxCLL above the
+     * mastering peak is an encoder default, not a measurement).
+     */
+    {
+        int peak = 0;
+        if (video_stream_index >= 0 && play_fmt && video_stream_index < static_cast<int>(play_fmt->nb_streams)) {
+            const AVCodecParameters* vp = play_fmt->streams[video_stream_index]->codecpar;
+            int cll = 0, mdm = 0;
+            if (const AVPacketSideData* sd = av_packet_side_data_get(vp->coded_side_data, vp->nb_coded_side_data,
+                                                                     AV_PKT_DATA_CONTENT_LIGHT_LEVEL)) {
+                if (sd->size >= sizeof(AVContentLightMetadata))
+                    cll = static_cast<int>(reinterpret_cast<const AVContentLightMetadata*>(sd->data)->MaxCLL);
+            }
+            if (const AVPacketSideData* sd = av_packet_side_data_get(vp->coded_side_data, vp->nb_coded_side_data,
+                                                                     AV_PKT_DATA_MASTERING_DISPLAY_METADATA)) {
+                const auto* m = reinterpret_cast<const AVMasteringDisplayMetadata*>(sd->data);
+                if (sd->size >= sizeof(AVMasteringDisplayMetadata) && m->has_luminance && m->max_luminance.den)
+                    mdm = static_cast<int>(av_q2d(m->max_luminance) + 0.5);
+            }
+            if (cll < 100 || cll > 10000) cll = 0;
+            if (mdm < 100 || mdm > 10000) mdm = 0;
+            peak = (cll && mdm) ? std::min(cll, mdm) : (cll ? cll : mdm);
+            if (peak)
+                evo_bt("PlaybackController: HDR static peak %d nits (MaxCLL %d, mastering %d)", peak, cll, mdm);
+        }
+        evo_agc_runtime_set_hdr_static_peak(peak);
+    }
+
     // Subtitle setup
     prospero_subtitle_clear();
     prospero_subtitle_load_for_media(filePath.c_str());
@@ -1417,8 +1572,19 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
         }
         std::free(body);
     }
+    /*
+     * AUTO SUBTITLES: a new file starts with subtitles on or off as the
+     * setting says (it was stored and never read, so whatever the last file
+     * left behind carried over). Reopens of the same file - audio switch,
+     * track change - restore their own state after this returns.
+     */
+    {
+        const ISettingsService* st = Application::getInstance().getSettingsService();
+        prospero_subtitle_enabled = (!st || st->isAutoSubtitlesEnabled()) ? 1 : 0;
+    }
     prospero_embedded_subtitle_open(play_fmt);
     prospero_secondary_subtitle_open(play_fmt);   // #110: only if one was chosen for this file
+    applyOnlineSubtitles();
 
     /*
      * Apply the resume position. This has to be a real seek on play_fmt before

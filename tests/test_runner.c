@@ -32,6 +32,10 @@
 #include "evo_data_path.h"
 #include "pp_playback.h"
 #include "evo_audio_gain.h"
+#include "evo_langpref.h"
+#include "evo_stremio_account.h"
+#include "provider_stremio.h"
+#include "evo_online_subs.h"
 
 /* Test runner assertion tracking */
 int g_tests_run = 0;
@@ -1268,6 +1272,164 @@ static void test_audio_volume_boost(void)
     TEST_PASS();
 }
 
+
+/* ==========================================================================
+ * Preferred language: tag normalisation and track ranking
+ * ========================================================================== */
+static void test_language_preference(void)
+{
+    TEST_START("Language preference: normalise + rank");
+    char c[4];
+    TEST_ASSERT(evo_lang_normalize("it", c) && !strcmp(c, "ita"), "it -> ita");
+    TEST_ASSERT(evo_lang_normalize("ITA", c) && !strcmp(c, "ita"), "ITA -> ita");
+    TEST_ASSERT(evo_lang_normalize("Italian", c) && !strcmp(c, "ita"), "Italian -> ita");
+    TEST_ASSERT(evo_lang_normalize("italiano", c) && !strcmp(c, "ita"), "italiano -> ita");
+    TEST_ASSERT(evo_lang_normalize("it-IT", c) && !strcmp(c, "ita"), "it-IT -> ita");
+    TEST_ASSERT(evo_lang_normalize("fre", c) && !strcmp(c, "fra"), "fre -> fra");
+    TEST_ASSERT(evo_lang_normalize("pob", c) && !strcmp(c, "por"), "pob -> por");
+    TEST_ASSERT(evo_lang_normalize("pt-BR", c) && !strcmp(c, "por"), "pt-BR -> por");
+    TEST_ASSERT(evo_lang_normalize("English", c) && !strcmp(c, "eng"), "English -> eng");
+    TEST_ASSERT(!evo_lang_normalize("und", c) && c[0] == 0, "und is no language");
+    TEST_ASSERT(!evo_lang_normalize(NULL, c), "NULL is no language");
+
+    /* Auto: subtitles prefer English, audio has no preference */
+    evo_langpref_set_subtitle("");
+    evo_langpref_set_audio("");
+    TEST_ASSERT(evo_langpref_rank("eng", 's') == 2, "auto subs: eng preferred");
+    TEST_ASSERT(evo_langpref_rank("ita", 's') == 0, "auto subs: ita not");
+    TEST_ASSERT(evo_langpref_rank("eng", 'a') == 0, "auto audio: no preference");
+
+    /* Italian preferred, English the fallback */
+    evo_langpref_set_subtitle("ita");
+    evo_langpref_set_audio("Italiano");
+    TEST_ASSERT(!strcmp(evo_langpref_subtitle(), "ita"), "stored as 639-2/T");
+    TEST_ASSERT(!strcmp(evo_langpref_audio(), "ita"), "audio stored normalised");
+    TEST_ASSERT(evo_langpref_rank("it", 's') == 2, "it preferred");
+    TEST_ASSERT(evo_langpref_rank("en", 's') == 1, "en fallback");
+    TEST_ASSERT(evo_langpref_rank("jpn", 's') == 0, "jpn other");
+    TEST_ASSERT(evo_langpref_rank("ita", 'a') == 2, "audio ita preferred");
+    evo_langpref_set_subtitle("");
+    evo_langpref_set_audio("");
+    TEST_PASS();
+}
+
+/* ==========================================================================
+ * Online subtitles registry (Stremio addons)
+ * ========================================================================== */
+static void test_online_subtitles_registry(void)
+{
+    TEST_START("Online subtitles: registry, keying, best pick");
+    evo_osubs_begin("e:0:series:tt0903747:1:2");
+    evo_osubs_add("e:0:series:tt0903747:1:2", "https://subs.example/1.srt", "eng", "OpenSubtitles");
+    evo_osubs_add("e:0:series:tt0903747:1:2", "https://subs.example/2.srt", "ita", "OpenSubtitles");
+    evo_osubs_add("e:0:series:tt0903747:1:2", "https://subs.example/2.srt", "ita", "dup");      /* dropped */
+    evo_osubs_add("e:0:series:tt0903747:1:2", "magnet:?xt=urn", "ita", "bad scheme");            /* dropped */
+    evo_osubs_add("another-title", "https://subs.example/3.srt", "ita", "stale");                 /* wrong key */
+    TEST_ASSERT(evo_osubs_count() == 2, "two distinct http(s) entries for this title");
+
+    int rank = 0;
+    evo_langpref_set_subtitle("ita");
+    TEST_ASSERT(evo_osubs_best(0, &rank) == 1 && rank == 2, "Italian picked when preferred");
+    evo_langpref_set_subtitle("spa");
+    TEST_ASSERT(evo_osubs_best(0, &rank) == -1, "no Spanish, no fallback allowed");
+    TEST_ASSERT(evo_osubs_best(1, &rank) == 0 && rank == 1, "English as the fallback");
+    evo_langpref_set_subtitle("");
+
+    evo_osubs_pending("e:0:series:tt0903747:1:2", +1);
+    evo_osubs_pending("e:0:series:tt0903747:1:2", -1);
+    TEST_ASSERT(evo_osubs_wait("e:0:series:tt0903747:1:2", 10) == 2, "wait returns at once when idle");
+
+    char key[128];
+    evo_osubs_key(key, sizeof key);
+    TEST_ASSERT(!strcmp(key, "e:0:series:tt0903747:1:2"), "key kept");
+    evo_osubs_begin("m:0:movie:tt0111161");
+    TEST_ASSERT(evo_osubs_count() == 0 && evo_osubs_active() == -1, "a new title starts empty");
+    TEST_PASS();
+}
+
+static void test_stremio_account_helpers(void)
+{
+    TEST_START("Stremio account: ISO dates, library ids, Continue Watching rule");
+    char iso[32];
+    evo_sa_iso8601(0, iso);
+    TEST_ASSERT(!strcmp(iso, "1970-01-01T00:00:00.000Z"), "epoch");
+    evo_sa_iso8601(951782400, iso);              /* leap day 2000 */
+    TEST_ASSERT(!strcmp(iso, "2000-02-29T00:00:00.000Z"), "leap day 2000");
+    evo_sa_iso8601(1793739845, iso);
+    TEST_ASSERT(!strcmp(iso, "2026-11-03T21:04:05.000Z"), "2026-11-03 21:04:05");
+
+    char id[64];
+    evo_sa_lib_id_of("tt0903747:1:2", id, sizeof id);
+    TEST_ASSERT(!strcmp(id, "tt0903747"), "imdb episode -> show");
+    evo_sa_lib_id_of("tt0111161", id, sizeof id);
+    TEST_ASSERT(!strcmp(id, "tt0111161"), "imdb film unchanged");
+    evo_sa_lib_id_of("kitsu:7:3", id, sizeof id);
+    TEST_ASSERT(!strcmp(id, "kitsu:7"), "kitsu keeps its prefix");
+
+    cJSON *it = cJSON_Parse("{\"type\":\"series\",\"removed\":false,\"temp\":false,\"state\":{\"timeOffset\":1200}}");
+    TEST_ASSERT(evo_sa_in_continue_watching(it), "offset > 0 -> CW");
+    cJSON_Delete(it);
+    it = cJSON_Parse("{\"type\":\"movie\",\"removed\":true,\"temp\":false,\"state\":{\"timeOffset\":1200}}");
+    TEST_ASSERT(!evo_sa_in_continue_watching(it), "removed, not temp -> not CW");
+    cJSON_Delete(it);
+    it = cJSON_Parse("{\"type\":\"movie\",\"removed\":true,\"temp\":true,\"state\":{\"timeOffset\":5}}");
+    TEST_ASSERT(evo_sa_in_continue_watching(it), "removed but temp -> CW");
+    cJSON_Delete(it);
+    it = cJSON_Parse("{\"type\":\"other\",\"state\":{\"timeOffset\":5}}");
+    TEST_ASSERT(!evo_sa_in_continue_watching(it), "type other never CW");
+    cJSON_Delete(it);
+
+    evo_sa_init();
+    TEST_ASSERT(!evo_sa_signed_in(), "no account file -> signed out");
+    TEST_PASS();
+}
+
+static void test_stremio_stream_ranking(void)
+{
+    TEST_START("Stremio addons: stream ranking (cached, remux, DV/HDR, size)");
+    evo_stream_choice_t a, b, c, d, e;
+    const int remux = evo_stremio_rank_json(
+        "{\"name\":\"[TB+] Torrentio\\n4k DV | HDR\",\"title\":\"Movie.2023.2160p.UHD.BluRay.REMUX.DV.HDR.HEVC.TrueHD.Atmos\\n\\xF0\\x9F\\x92\\xBE 58.3 GB\",\"url\":\"https://x/1\"}", &a);
+    const int web = evo_stremio_rank_json(
+        "{\"name\":\"[TB+] Torrentio\\n4k HDR\",\"title\":\"Movie.2023.2160p.WEB-DL.HDR10.HEVC\\n\\xF0\\x9F\\x92\\xBE 14.1 GB\",\"url\":\"https://x/2\"}", &b);
+    const int uncached = evo_stremio_rank_json(
+        "{\"name\":\"[TB download] Torrentio\\n4k DV\",\"title\":\"Movie.2023.2160p.BluRay.REMUX.DV.HDR\\n80 GB\",\"url\":\"https://x/3\"}", &c);
+    const int hd = evo_stremio_rank_json(
+        "{\"name\":\"AIOStreams \\xE2\\x9A\\xA1\",\"description\":\"1080p BluRay x264 12 GB\",\"url\":\"https://x/4\"}", &d);
+    const int cam = evo_stremio_rank_json(
+        "{\"name\":\"[TB+] Torrentio\\n1080p\",\"title\":\"Movie.2023.HDCAM.x264 1.4 GB\",\"url\":\"https://x/5\"}", &e);
+    TEST_ASSERT(remux > web, "cached 4K remux DV above cached 4K web HDR");
+    TEST_ASSERT(web > hd, "cached 4K HDR above cached 1080p");
+    TEST_ASSERT(hd > uncached, "anything cached above an uncached remux");
+    TEST_ASSERT(cam < uncached, "a cam rip last");
+    TEST_ASSERT(!strcmp(a.video_range, "Dolby Vision") && a.height == 2160, "remux: DV, 2160p");
+    TEST_ASSERT(a.size_bytes > (int64_t)58 * 1024 * 1024 * 1024, "remux size read");
+    TEST_ASSERT(!strcmp(b.video_range, "HDR10") && !strcmp(b.video_codec, "hevc"), "web: HDR10 HEVC");
+    TEST_ASSERT(d.height == 1080 && !strcmp(d.video_codec, "h264"), "1080p x264");
+
+    /* sainsaji's review of #235: an SDR "HDRip" is not HDR, and a ".ts" file
+     * extension is not the telesync tag. */
+    evo_stream_choice_t f, g, h;
+    const int hdrip = evo_stremio_rank_json(
+        "{\"name\":\"[TB+] Torrentio\\n720p\",\"title\":\"Movie.720p.HDRip.x264\",\"url\":\"https://x/6\"}", &f);
+    const int bluray = evo_stremio_rank_json(
+        "{\"name\":\"[TB+] Torrentio\\n1080p\",\"title\":\"Movie.1080p.BluRay.x264\",\"url\":\"https://x/7\"}", &g);
+    TEST_ASSERT(f.video_range[0] == 0, "HDRip gets no HDR pill");
+    TEST_ASSERT(bluray > hdrip, "1080p BluRay above a 720p HDRip");
+    const int tsfile = evo_stremio_rank_json(
+        "{\"name\":\"[TB+] Torrentio\\n1080p\",\"title\":\"BluRay x265 DTS\",\"url\":\"https://x/8\","
+        "\"behaviorHints\":{\"filename\":\"Movie.1080p.BluRay.x265.DTS.ts\"}}", &h);
+    TEST_ASSERT(tsfile > uncached, "an MPEG-TS file is not a telesync");
+    evo_stream_choice_t i;
+    const int telesync = evo_stremio_rank_json(
+        "{\"name\":\"[TB+] Torrentio\\n1080p\",\"title\":\"Movie.2023.TS.XviD\",\"url\":\"https://x/9\"}", &i);
+    TEST_ASSERT(telesync < uncached, "a real TS tag still goes last");
+    evo_stream_choice_t j;
+    evo_stremio_rank_json("{\"name\":\"x\",\"title\":\"Movie.2160p.WEB-DL.HDR10.HEVC\",\"url\":\"https://x/10\"}", &j);
+    TEST_ASSERT(!strcmp(j.video_range, "HDR10"), "HDR10 still detected");
+    TEST_PASS();
+}
+
 /* Settings service save/load and backward compatibility host tests */
 extern void test_settings_save_load_roundtrip(void);
 extern void test_settings_legacy_compat(void);
@@ -1321,6 +1483,10 @@ int main(void)
     test_smb_url_parsing();
     test_smb_recent_and_favorites();
     test_smb_attach_credentials();
+    test_language_preference();
+    test_online_subtitles_registry();
+    test_stremio_account_helpers();
+    test_stremio_stream_ranking();
 
     printf("\n----------------------------------------------------------------------\n");
     printf("  Results: %d/%d passed (%d failed)\n",

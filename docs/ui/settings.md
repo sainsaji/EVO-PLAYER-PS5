@@ -20,14 +20,17 @@ its real effect (#158). A row can be disabled by another setting, and then says 
 | | AI network | Auto, Standard, Large, Maximum (Pro). Only used when Upscaling is AI |
 | | 120 Hz output | Off, Always, Playback only. Disabled when the display or HDMI sink lacks 120 Hz. The TV goes black briefly at each switch |
 | | HDR output | Auto (HDR10 for HDR video), Off (tone-map to SDR) |
+| | HDR peak | Off (the TV tone-maps), 800, 1000, 1500, 2000, 3000 nits. On a HDR10 output, fits Dolby Vision shot by shot from its L1 metadata and HDR10 from MaxCLL to that peak ([../hardware/video-decode.md](../hardware/video-decode.md#hdr-peak-mapping)) |
 | | Network buffer | 30 s, 1 min, 2 min, 5 min. Sized when a network file opens, so it applies from the next file; high-bitrate files get less than you pick |
 | **Audio** | Volume boost | Off, +50, +100, +200, +300 % ([../hardware/audio.md](../hardware/audio.md)) |
 | | Audio delay | 0, in 50 ms steps from -500 to +500 ms |
 | | Output channels | Auto, Stereo (downmix 5.1/7.1) |
 | | Audio passthrough | off, on (Dolby and DTS bitstream to a receiver) |
+| | Audio language | Auto, Italiano, English, Español, Français, Deutsch, Português, Japanese: the track a file opens with (Auto: the first decodable one) |
 | | Surround sound test | action: opens Surround Studio ([surround-studio.md](surround-studio.md)) |
 | | Navigation sounds | on, off |
-| **Subtitles** | Auto subtitles | on, off |
+| **Subtitles** | Auto subtitles | on, off (read when a file opens) |
+| | Subtitle language | Auto (English), Italiano, English, Español, Français, Deutsch, Português, Japanese: the embedded track chosen, then online subtitles from Stremio addons ([../providers/media-servers.md](../providers/media-servers.md#online-subtitles)) |
 | | Default font style | Standard, Rounded, Bold, Condensed |
 | | Secondary subtitle position | Stacked above, Top of screen |
 | | Secondary subtitle colour | Yellow, Cyan, White |
@@ -69,6 +72,11 @@ and read with a single `fscanf`:
  6 folders first            13 keyboard marker (2)     20 ask stream           27 network buffer
  7 theme (by name)          14 upscaling               21 output channels      28 audio delay (ms)
                                                                                29 phone & log port
+                                                                               30 settings schema
+                                                                               31 HDR peak
+                                                                               32 audio language
+                                                                               33 subtitle language
+                                                                               34 play best addon stream
 ```
 
 A line is applied only if the file has that many (`readCount >= N`), so an older file

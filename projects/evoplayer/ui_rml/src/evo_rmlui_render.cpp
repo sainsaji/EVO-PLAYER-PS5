@@ -1139,7 +1139,6 @@ static bool try_draw_fast_quad(uint32_t* fb, int screen_w, int screen_h,
             }
             return true;
         }
-        uint32_t col = ((uint32_t)a << 24) | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r;
         for (int y = ry0; y < ry1; y++) {
             uint32_t* row = &fb[y * screen_w];
             for (int x = rx0; x < rx1; x++) {

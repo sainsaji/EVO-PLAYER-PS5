@@ -12,6 +12,7 @@
 #include <libavcodec/version.h>
 #include <libavutil/dovi_meta.h>
 #include <libavutil/mem.h>
+#include <math.h>
 
 /*
  * FFmpeg's RPU parser is internal (libavcodec/dovi_rpu.h), and the source
@@ -55,6 +56,7 @@ struct evo_dovi_parser {
     DOVIContext ctx;
     uint8_t    *nal;        /* the RPU with emulation prevention removed */
     size_t      nal_cap;
+    int         map_only;   /* profile 7/8: only the L1 peak is read */
 };
 
 static const AVDOVIDecoderConfigurationRecord *conf_record(const void *codecpar)
@@ -82,6 +84,59 @@ int evo_dovi_stream_needs_reshape(const void *codecpar)
     /* Profile 5 is the one without a displayable base layer
      * (bl_signal_compatibility_id 0). 8.x has HDR10/SDR/HLG underneath. */
     return c && c->dv_profile == 5 && c->rpu_present_flag && c->bl_present_flag;
+}
+
+int evo_dovi_stream_has_rpu(const void *codecpar)
+{
+    const AVDOVIDecoderConfigurationRecord *c = conf_record(codecpar);
+    if (!c || !c->rpu_present_flag)
+        return 0;
+    return c->dv_profile == 5 || c->dv_profile == 7 || c->dv_profile == 8;
+}
+
+/* --- per-shot peak (L1) --------------------------------------------------- */
+
+/* 12-bit PQ code value -> nits (SMPTE ST 2084). */
+static float pq12_to_nits(unsigned code)
+{
+    if (code > 4095)
+        code = 4095;
+    const float N = (float)code / 4095.0f;
+    const float m1 = 0.1593017578125f, m2 = 78.84375f;
+    const float c1 = 0.8359375f, c2 = 18.8515625f, c3 = 18.6875f;
+    /* powf: the same libm entry evo_agc_runtime.c already imports */
+    const float Np = powf(N, 1.0f / m2);
+    float num = Np - c1;
+    if (num < 0.0f)
+        num = 0.0f;
+    const float den = c2 - c3 * Np;
+    if (den <= 0.0f)
+        return 10000.0f;
+    return 10000.0f * powf(num / den, 1.0f / m1);
+}
+
+float evo_dovi_l1_max_nits(const void *av_dovi_metadata)
+{
+    const AVDOVIMetadata *md = (const AVDOVIMetadata *)av_dovi_metadata;
+    if (!md)
+        return 0.0f;
+    const AVDOVIDmData *l1 = av_dovi_find_level(md, 1);
+    if (!l1 || l1->l1.max_pq == 0)
+        return 0.0f;
+    float nits = pq12_to_nits(l1->l1.max_pq);
+    /* A shot never needs fitting below SDR reference white; a broken L1 of
+     * a few nits would otherwise crush the whole picture. */
+    if (nits < 100.0f)
+        nits = 100.0f;
+    return nits;
+}
+
+void evo_dovi_params_map_only(evo_dovi_params *p, float src_peak_nits)
+{
+    memset(p, 0, sizeof *p);
+    p->lohi[0][3] = src_peak_nits > 0.0f ? src_peak_nits : 0.0f;
+    p->lohi[1][3] = 0.0f;
+    p->lohi[2][3] = EVO_DOVI_KIND_MAP_ONLY;
 }
 
 /* --- metadata -> shader constants ---------------------------------------- */
@@ -212,6 +267,9 @@ int evo_dovi_params_from_av(const void *av_dovi_metadata, evo_dovi_params *p)
             }
         }
     }
+    p->lohi[0][3] = evo_dovi_l1_max_nits(md);
+    p->lohi[1][3] = 0.0f;
+    p->lohi[2][3] = EVO_DOVI_KIND_RESHAPE;
     return 0;
 }
 
@@ -236,6 +294,12 @@ void evo_dovi_parser_close(evo_dovi_parser *p)
     ff_dovi_ctx_unref(&p->ctx);
     free(p->nal);
     free(p);
+}
+
+void evo_dovi_parser_set_map_only(evo_dovi_parser *p, int map_only)
+{
+    if (p)
+        p->map_only = map_only ? 1 : 0;
 }
 
 void evo_dovi_parser_flush(evo_dovi_parser *p)
@@ -294,7 +358,13 @@ int evo_dovi_parse_annexb(evo_dovi_parser *p, const uint8_t *au, int size,
             AVDOVIMetadata *md = NULL;
             if (ff_dovi_get_metadata(&p->ctx, &md) < 0 || !md)
                 return -1;
-            int rc = evo_dovi_params_from_av(md, out);
+            int rc;
+            if (p->map_only) {
+                evo_dovi_params_map_only(out, evo_dovi_l1_max_nits(md));
+                rc = 0;
+            } else {
+                rc = evo_dovi_params_from_av(md, out);
+            }
             av_free(md);
             return rc == 0 ? 1 : -1;
         }

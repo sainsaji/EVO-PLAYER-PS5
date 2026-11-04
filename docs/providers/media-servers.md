@@ -96,6 +96,54 @@ over the addons saved in a Nuvio web app.
   so every added addon vanished at the next start (fixed 2026-10-21, with a round-trip
   test).
 
+### Stremio account (0.14)
+
+`addons/src/evo_stremio_account.c` speaks the Stremio API (`api.strem.io`, the protocol of
+stremio-core): sign-in by a link code (`link.stremio.com/api/v2/create`, then `read` every
+3 s until it hands back the `authKey`; the code is renewed after 4.5 min), the addon
+collection (`addonCollectionGet`, manifests included), the library (`datastoreGet` on
+`libraryItem`) and progress (`datastorePut` of the changed item, keeping every field it does
+not know). Saved as `stremio_account.json`, `stremio_addons.json`, `stremio_library.json`.
+
+In `provider_stremio.c` the account's addons lead `g_addons` (`from_account`), the ones added
+here follow, Cinemeta last. `account_apply()` rebuilds the list only when the account's URLs
+changed, and only from `list_root`, so addon indices in on-screen ids stay valid. The first
+Home of a session waits for a fresh pull; later ones refresh in the background every 5 min.
+Root shelves `l:cw` (Continue Watching: stremio-core's rule, newest first, episodes resume
+at `timeOffset`) and `l:lib` come first. `report_progress` maps `m:`/`e:` ids to the library
+id (`tt123:1:2` → `tt123`) and adds unseen titles as `temp` items, as Stremio does.
+
+**Stream ranking** (`rank_stream`): debrid cached ±, resolution, Remux/BluRay/WEB-DL, DV with
+an HDR10 base > HDR10+ > HDR10 > DV-only (profile 5), size as the bitrate proxy; cam, 3D and
+uncached last. Up to 48 sources are kept (the worst is replaced when full) and sorted. With
+PLAY BEST ADDON STREAM on, choice 0 plays and the next ones are the automatic fallback;
+the detail page's CHOOSE STREAM (`sel.force_pick`) opens the ranked list.
+
+**Disk cache**: `<data>/addon_cache/<fnv1a64>.json` with an `EVOCACHE <unix>` first line, for
+manifests (24 h), catalog page 0 (6 h) and meta (24 h); a failed request falls back to any
+saved copy. Nuvio's set (`avio`) is not cached.
+
+### Online subtitles
+
+Stremio shows subtitles that are not in the video file: addons with a
+`subtitles` resource answer `<base>/subtitles/<type>/<id>.json`
+(`{subtitles: [{url, lang}]}`), and a stream may carry its own `subtitles` array.
+EVO asks for them while it resolves a title (`resolve_subtitles` in
+`provider_stremio.c`), beside the stream requests and never holding them up:
+every added addon that declares the resource, or, when none does, OpenSubtitles
+v3 (`https://opensubtitles-v3.strem.io`, IMDb ids), the addon the Stremio app
+ships with. The list lives in `addons/src/evo_online_subs.c`, keyed by the item
+id so a late answer for another title is dropped.
+
+When the file opens, an embedded track in SUBTITLE LANGUAGE wins. Otherwise the
+playback worker waits up to 4 s for the requests, fetches the best online one
+(the preferred language; English only when the file has no usable track at all)
+and loads it as the external track. The subtitle picker lists the rest as
+`ONLINE` rows, downloaded off the UI thread when picked and loaded by the player
+(`pumpOnlineSubtitles`). An audio switch reopens the file and clears the
+external track, so the active one is copied aside (`online_sub_active.srt`) and
+reloaded.
+
 ## IPTV and Xtream
 
 - **IPTV.** `#EXTINF` carries `tvg-id`, `tvg-logo` and `group-title` as unordered quoted
