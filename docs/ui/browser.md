@@ -196,8 +196,9 @@ the kit's `rail_items`; keep the two in step.
   history. Opening the section starts the engine in the background, and the
   subtitle says when it is starting or why it cannot.
 - **Page view** (`ScreenId::WebPage`, kit screen `evo_hui_render_webpage`):
-  the address bar on top (96 px), the page under it at 1:1 (the engine is
-  resized to 1920x984), EVO's pointer over it. No rail.
+  EVO's rail stays on the left (128 px, the Web entry lit); right of it the
+  address bar on top (96 px) and the page under it at 1:1 (the engine is
+  resized to 1792x984), EVO's pointer over it. D-pad Left opens the rail.
 - **Bookmarks and history:** `web_bookmarks.txt` and `web_history.txt` in
   EVO's data folder, one `url<TAB>title` per line, history capped at 50. A
   fresh install gets three default bookmarks.
@@ -212,7 +213,9 @@ the kit's `rail_items`; keep the two in step.
 | Page view | does |
 |---|---|
 | Left stick | moves the pointer (squared response, 1500 px/s at full tilt) |
-| Right stick, D-pad | scrolls (D-pad: 160 px a press) |
+| Right stick | scrolls, both ways |
+| D-pad Up / Down / Right | scrolls 160 px a press |
+| D-pad Left | opens EVO's rail |
 | Cross | clicks (press and release are sent apart, so drags work) |
 | Square | edits the address |
 | L1 / R1 | back / forward |

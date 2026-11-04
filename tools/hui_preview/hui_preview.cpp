@@ -389,12 +389,14 @@ int main(int argc, char **argv)
     std::vector<uint32_t> image_px;
     /* #237: the Web page view, with a made-up page standing in for the engine's frame */
     evo_hui_webpage_params_t webp{};
-    std::vector<uint32_t> web_px(static_cast<std::size_t>(1920) * 984, 0xFFFFFFFFu);
+    constexpr int kWebW = EVO_HUI_WEBPAGE_W;
+    constexpr int kWebH = EVO_HUI_WEBPAGE_H;
+    std::vector<uint32_t> web_px(static_cast<std::size_t>(kWebW) * kWebH, 0xFFFFFFFFu);
     {
         auto bar = [&](int x, int y, int w, int h, uint32_t c) {
-            for (int yy = y; yy < y + h && yy < 984; ++yy)
-                for (int xx = x; xx < x + w && xx < 1920; ++xx)
-                    web_px[static_cast<std::size_t>(yy) * 1920 + xx] = c;
+            for (int yy = y; yy < y + h && yy < kWebH; ++yy)
+                for (int xx = x; xx < x + w && xx < kWebW; ++xx)
+                    web_px[static_cast<std::size_t>(yy) * kWebW + xx] = c;
         };
         bar(0, 0, 1920, 110, 0xFFF4F1EEu);            /* site header */
         bar(160, 36, 420, 40, 0xFF555555u);
@@ -1044,7 +1046,7 @@ int main(int argc, char **argv)
             provider.draw(list, ctx);
         else if (f.kind == 18)
         {
-            webpage.set_page(webp.state == 2 ? textures.pixels(web_px.data(), 1920, 984) : 0u, 1.0f, 1.0f);
+            webpage.set_page(webp.state == 2 ? textures.pixels(web_px.data(), kWebW, kWebH) : 0u, 1.0f, 1.0f);
             webpage.draw(list, ctx);
         }
         const bool over_video = (f.kind >= 4 && f.kind <= 6) || f.kind == 11 || f.kind == 12 || f.kind == 15;
@@ -1066,7 +1068,7 @@ int main(int argc, char **argv)
             else
                 keyboard.draw(list, ctx);
         }
-        else if (f.kind != 10 && f.kind != 14 && f.kind != 18)
+        else if (f.kind != 10 && f.kind != 14)
         {
             rail.draw(list, ctx);
         }

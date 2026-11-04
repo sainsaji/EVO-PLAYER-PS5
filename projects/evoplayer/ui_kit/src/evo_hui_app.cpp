@@ -151,11 +151,16 @@ struct WebFrame
             return;
         const long long t0 = mono_us();
         long long bytes = 0;
-        if (f.stride != f.width * 4)
+        /* The textures are as wide as the buffer's rows (stride / 4), not the
+         * page: create_texture wants tight rows, and after a RESIZE to a
+         * narrower page the rows keep the buffer's full width. The page is
+         * the top-left page_w x page_h of them (the drawer's UV). */
+        const int row_w = f.stride / 4;
+        if (f.stride % 4 != 0 || row_w < f.width)
         {
-            /* create_texture wants tight rows; the hosts send exactly that */
+            /* not a layout we can sample */
         }
-        else if (!tex[0] || f.width > tex_w || f.height > tex_h)
+        else if (!tex[0] || row_w != tex_w || f.height > tex_h)
         {
             /* First frame, or a page grown past the textures (a RESIZE):
              * make both again from this whole frame. */
@@ -165,9 +170,9 @@ struct WebFrame
                     batch.release_texture(t);
                 t = 0;
             }
-            tex[0] = batch.create_texture(f.width, f.height, f.pixels);
-            tex[1] = batch.create_texture(f.width, f.height, f.pixels);
-            tex_w = f.width;
+            tex[0] = batch.create_texture(row_w, f.height, f.pixels);
+            tex[1] = batch.create_texture(row_w, f.height, f.pixels);
+            tex_w = row_w;
             tex_h = f.height;
             cur = 0;
             bytes = 2LL * f.stride * f.height;
@@ -936,8 +941,7 @@ int evo_hui_render_webpage(int width, int height)
             k.webpage.set_page(t, u1, v1);
             k.webpage.update(dt);
             k.webpage.draw(list, ctx);
-        },
-        false);
+        }); /* with EVO's rail: the page sits right of it */
 }
 
 int evo_hui_render_webframe(int width, int height)

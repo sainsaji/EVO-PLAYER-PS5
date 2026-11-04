@@ -373,6 +373,13 @@ void WebHomeScreen::render(uint32_t* framebuffer, int width, int height)
 
 namespace {
 constexpr float kBarH = static_cast<float>(EVO_HUI_WEBPAGE_BAR_H);
+constexpr float kPageX = static_cast<float>(EVO_HUI_WEBPAGE_X);   /* right of EVO's rail */
+
+bool rail_focused()
+{
+    auto sm = Application::getInstance().getScreenManager();
+    return sm && sm->isRailFocused();
+}
 constexpr float kPointerSpeed = 1500.0f;   /* px/s at full tilt */
 constexpr float kScrollSpeed = 2200.0f;    /* px/s at full tilt */
 constexpr int kDpadStep = 160;             /* px per D-pad press */
@@ -381,7 +388,7 @@ constexpr long long kFieldClickMs = 1500;  /* a focus this soon after a click op
 
 WebPageScreen::WebPageScreen() : StatefulScreen("WebPageScreen") {}
 
-int WebPageScreen::pageX() const { return static_cast<int>(m_px); }
+int WebPageScreen::pageX() const { return static_cast<int>(m_px - kPageX); }
 int WebPageScreen::pageY() const { return static_cast<int>(m_py - kBarH); }
 
 void WebPageScreen::openUrl(const std::string& url)
@@ -475,7 +482,7 @@ void WebPageScreen::movePointer(double dtMs)
     const float dt = static_cast<float>(dtMs) / 1000.0f;
     /* squared response: fine control near the centre, speed at full tilt */
     auto curve = [](float v) { return v * std::fabs(v); };
-    m_px = std::clamp(m_px + curve(sx) * kPointerSpeed * dt, 0.0f, 1919.0f);
+    m_px = std::clamp(m_px + curve(sx) * kPointerSpeed * dt, kPageX, 1919.0f);
     m_py = std::clamp(m_py + curve(sy) * kPointerSpeed * dt, kBarH, 1079.0f);
     if (pageX() != m_sentX || pageY() != m_sentY) {
         m_sentX = pageX();
@@ -512,7 +519,7 @@ void WebPageScreen::update(double deltaMs)
         evo_browser_set_visible(1);
     }
     pollEvents();
-    if (evo_keyboard_is_open()) return;   /* the keyboard owns the pad */
+    if (evo_keyboard_is_open() || rail_focused()) return;   /* they own the pad */
     movePointer(deltaMs);
     scrollWithStick(deltaMs);
 }
@@ -555,6 +562,12 @@ bool WebPageScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
         evo_browser_pointer(pageX(), pageY(), EVOB_PTR_UP, 1);
         return true;
     }
+    /* D-pad Left opens EVO's rail, as on every other screen (the right
+     * stick still scrolls sideways). */
+    if (pressed & raw & PadButtons::Left) {
+        if (auto sm = Application::getInstance().getScreenManager()) sm->setRailFocused(true);
+        return true;
+    }
     const uint32_t dirs = PadButtons::Up | PadButtons::Down | PadButtons::Left | PadButtons::Right;
     if (pressed & dirs) {
         /* The left stick also arrives as D-pad presses; on the page it only
@@ -562,7 +575,6 @@ bool WebPageScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
         int dx = 0, dy = 0;
         if (pressed & raw & PadButtons::Up) dy = -kDpadStep;
         if (pressed & raw & PadButtons::Down) dy = kDpadStep;
-        if (pressed & raw & PadButtons::Left) dx = -kDpadStep;
         if (pressed & raw & PadButtons::Right) dx = kDpadStep;
         if (ready && (dx || dy)) evo_browser_scroll(pageX(), pageY(), dx, dy);
         return true;
@@ -615,7 +627,9 @@ void WebPageScreen::render(uint32_t* framebuffer, int width, int height)
     p.can_back = m_canBack ? 1 : 0;
     p.can_forward = m_canForward ? 1 : 0;
     p.state = static_cast<int>(st);
-    p.message = st == EVO_BROWSER_FAILED ? why : "Starting the browser...";
+    p.message = st == EVO_BROWSER_FAILED ? why
+              : st == EVO_BROWSER_READY  ? "Loading the page..."
+                                         : "Starting the browser...";
     p.pointer_visible = st == EVO_BROWSER_READY ? 1 : 0;
     p.pointer_x = static_cast<int>(m_px);
     p.pointer_y = static_cast<int>(m_py);

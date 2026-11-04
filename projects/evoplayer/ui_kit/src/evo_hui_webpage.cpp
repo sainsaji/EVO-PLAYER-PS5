@@ -140,7 +140,7 @@ bool WebPage::focus(FocusInfo *out) const
         return false;
     out->id = "webpage";
     out->text = url_;
-    out->rect = {120.0f, 18.0f, 1680.0f, 60.0f};
+    out->rect = {EVO_HUI_WEBPAGE_X + 120.0f, 18.0f, 1920.0f - 64.0f - (EVO_HUI_WEBPAGE_X + 120.0f), 60.0f};
     out->index = 1;
     out->total = 1;
     out->focusable.clear();
@@ -156,26 +156,27 @@ void WebPage::draw(DrawList &list, const Context &ctx) const
     // 1. Background: the theme background, like the other pages.
     draw_backdrop(list, ctx);
 
-    // 2. Address bar: y 0..96
-    // Back and forward arrow glyphs left of the field (x: 0..120, cy: 48)
+    // 2. Address bar: y 0..96, right of EVO's rail (x from kX)
+    constexpr float kX = static_cast<float>(EVO_HUI_WEBPAGE_X);
+    // Back and forward arrow glyphs left of the field (cy: 48)
     const float arrow_cy = 48.0f;
     const Color back_c = can_back_ ? p.text : p.text.with_alpha(0.25f);
     const Color fwd_c = can_forward_ ? p.text : p.text.with_alpha(0.25f);
 
-    // Back arrow (pointing left) at cx = 48
-    const float back_cx = 48.0f;
+    // Back arrow (pointing left)
+    const float back_cx = kX + 48.0f;
     list.line(back_cx + 7.0f, arrow_cy, back_cx - 7.0f, arrow_cy, 2.5f, back_c);
     list.line(back_cx - 7.0f, arrow_cy, back_cx - 1.0f, arrow_cy - 6.0f, 2.5f, back_c);
     list.line(back_cx - 7.0f, arrow_cy, back_cx - 1.0f, arrow_cy + 6.0f, 2.5f, back_c);
 
-    // Forward arrow (pointing right) at cx = 88
-    const float fwd_cx = 88.0f;
+    // Forward arrow (pointing right)
+    const float fwd_cx = kX + 88.0f;
     list.line(fwd_cx - 7.0f, arrow_cy, fwd_cx + 7.0f, arrow_cy, 2.5f, fwd_c);
     list.line(fwd_cx + 7.0f, arrow_cy, fwd_cx + 1.0f, arrow_cy - 6.0f, 2.5f, fwd_c);
     list.line(fwd_cx + 7.0f, arrow_cy, fwd_cx + 1.0f, arrow_cy + 6.0f, 2.5f, fwd_c);
 
-    // Rounded field (kRadiusTile) from x 120 to x 1800, y 18..78
-    const Rect field{120.0f, 18.0f, 1680.0f, 60.0f};
+    // Rounded field (kRadiusTile) after the arrows, to 64 px from the right edge, y 18..78
+    const Rect field{kX + 120.0f, 18.0f, 1920.0f - 64.0f - (kX + 120.0f), 60.0f};
     list.rounded_rect(field, page::kRadiusTile, p.surface);
     list.bordered_rect(field, page::kRadiusTile, Color::rgb(0, 0), 1.0f, p.border);
 
@@ -217,8 +218,9 @@ void WebPage::draw(DrawList &list, const Context &ctx) const
         list.pop_clip();
     }
 
-    // 3. Page area: x 0, y 96, w 1920, h 984
-    const Rect page_rect{0.0f, 96.0f, 1920.0f, 984.0f};
+    // 3. Page area: right of the rail, under the bar, 1:1 with the engine's page
+    const Rect page_rect{kX, static_cast<float>(EVO_HUI_WEBPAGE_BAR_H),
+                         static_cast<float>(EVO_HUI_WEBPAGE_W), static_cast<float>(EVO_HUI_WEBPAGE_H)};
     if (tex_ != 0 && state_ == 2)
     {
         list.image(tex_, page_rect, Rect{0.0f, 0.0f, u1_, v1_}, kWhite);
@@ -257,7 +259,7 @@ void WebPage::draw(DrawList &list, const Context &ctx) const
     // 5. Hints (only if hints_visible)
     if (hints_visible_)
     {
-        list.rounded_rect({0.0f, 1012.0f, 1920.0f, 68.0f}, 0.0f, Color::rgb(0x000000, 0.65f));
+        list.rounded_rect({kX, 1012.0f, 1920.0f - kX, 68.0f}, 0.0f, Color::rgb(0x000000, 0.65f));
 
         std::vector<ui::Hint> hints;
         hints.push_back({ui::Button::cross, "Click"});

@@ -85,12 +85,14 @@ int  evo_hui_render_keyboard(int width, int height);
  * no engine host is sending frames. */
 int  evo_hui_render_webframe(int width, int height);
 
-/* #237 Phase 2: the Browser section's page view. An address bar across the
- * top (EVO_HUI_WEBPAGE_BAR_H tall), the page under it at 1:1 pixels, EVO's
- * own pointer over the page, and the button hints over the page's foot.
+/* #237 Phase 2: the Browser section's page view. EVO's rail stays on the
+ * left (EVO_HUI_WEBPAGE_X wide); right of it an address bar across the top
+ * (EVO_HUI_WEBPAGE_BAR_H tall), the page under it at 1:1 pixels, EVO's own
+ * pointer over the page, and the button hints over the page's foot.
  * The page is the browser engine's newest frame (evo_browser_frame_*). */
+#define EVO_HUI_WEBPAGE_X     128   /* NavRail::kWidth */
 #define EVO_HUI_WEBPAGE_BAR_H 96
-#define EVO_HUI_WEBPAGE_W     1920
+#define EVO_HUI_WEBPAGE_W     (1920 - EVO_HUI_WEBPAGE_X)
 #define EVO_HUI_WEBPAGE_H     (1080 - EVO_HUI_WEBPAGE_BAR_H)
 
 typedef struct evo_hui_webpage_params_s {

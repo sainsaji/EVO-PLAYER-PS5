@@ -85,7 +85,8 @@ int ScreenManager::getSectionForScreen(ScreenId screenId) const {
         case ScreenId::EmbySetup:
         case ScreenId::EmbyBrowse:      return 2; // Emby
 #endif
-        case ScreenId::WebHome:         return kSecWeb; // the page view itself has no rail
+        case ScreenId::WebHome:
+        case ScreenId::WebPage:         return kSecWeb; // the page sits right of the rail
         case ScreenId::Settings:
         case ScreenId::SettingsPlayback:
         case ScreenId::SettingsAudio:
