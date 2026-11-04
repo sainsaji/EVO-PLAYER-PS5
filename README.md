@@ -2,13 +2,26 @@
 
 **A native media player for jailbroken PlayStation 5.**
 
-Plays video from USB drives, internal storage, network shares (SMB and FTP), Live TV (IPTV / M3U), and media servers (Emby, Jellyfin, Stremio). Video decodes on the console's own hardware decoder at up to 4K with 10-bit HDR and Dolby Vision, the interface renders directly on the GPU via bare-metal `sceAgc`, and everything is built from the ground up for the DualSense controller and the big screen.
+Plays video from USB drives (exFAT, FAT32 and read-only NTFS), internal storage, network shares (SMB and FTP), Live TV (IPTV / M3U / Xtream), and media servers (Emby, Jellyfin, Plex, Stremio, Nuvio). Video decodes on the console's own hardware decoder at up to 4K with 10-bit HDR and Dolby Vision, the interface renders directly on the GPU via bare-metal `sceAgc`, and everything is built from the ground up for the DualSense controller and the big screen.
 
-![EVO Player launch screen](docs/images/launch.png)
+![Playback on EVO Player: 4K HDR10 over hardware decode, chapter marks, captions and the Skip intro button](docs/images/player.png)
+
+*A real capture from the console: 4K HDR10 HEVC on the hardware decoder, chapter ticks on the seek bar, and the new **Skip intro** button.*
 
 **[Download the latest release](https://github.com/sainsaji/EVO-PLAYER-PS5/releases/latest)** · **[Install from ProsperoStore](https://github.com/blackbearreloaded/ProsperoStore)** · **[Join the Discord](https://discord.gg/MyNnCWNU5)**
 
 ---
+
+## Coming in the next release (already on `main`)
+
+- **Skip intros & credits:** a **Skip intro** / **Skip credits** / **Next episode** button appears while the playhead is inside one, and **TRIANGLE** presses it. **Settings → Video & Display → Skip intros & credits** is Off, Ask (default) or Auto. It works for every file whose chapters are named Intro, Opening, OP, Recap, Credits, Ending, ED or Outro, and uses the media server's own marks on Jellyfin and Emby.
+- **NTFS USB drives:** open read-only. Browse, play, view pictures and load subtitles from them.
+- **Load subtitles from file:** the subtitle picker browses the video's folder, any USB or NTFS drive, or internal storage.
+- **Add Server flow for SMB and FTP:** address, Guest or Account, a login test with a plain error, a share picker, and Online / Offline status on every server card.
+- **Movie and show detail page:** Overview, Cast and Details tabs, a stream picker, and a resume prompt (Continue / Restart / Cancel).
+- **Stremio account:** native sign-in, a ranked automatic stream pick, and PGS picture subtitles on streams.
+- **Safer network use:** TLS certificate verification, a dead server fails in 3 seconds instead of 75, and no passwords or keys in logs.
+- **Diagnostics:** a phone and PC log viewer with live playback health, a kept log of the last run, and **Report a problem**, which opens a GitHub issue already filled in.
 
 ## What's New in v0.13.0
 
@@ -59,10 +72,10 @@ EVO Player is a **game-category app module** (`PPSA99039`). It installs as a sin
 
 ### Prerequisites
 
-- A jailbroken PS5 on any firmware **below 13.60**. Developed and tested on 12.70.
+- A jailbroken PS5 on firmware **13.60 or below**. Developed and tested on a PS5 Pro on 13.60 (earlier releases were measured on 12.70).
 - **ShadowMountPlus** on the console to mount and manage the app image.
 - An FTP server on the console (the usual jailbreak payloads provide one on port `2121`).
-- *(For USB playback)* a USB drive formatted **exFAT** or **FAT32**, plugged into `/mnt/usb0`.
+- *(For USB playback)* a USB drive formatted **exFAT** or **FAT32**, or **NTFS** (read-only).
 
 ### Easiest: install from ProsperoStore
 
@@ -89,7 +102,7 @@ Video decodes on the console's own `sceVideodec2` hardware decoder — **H.264, 
 - **Dolby Vision Profile 5:** Correct IPT color tonemapping reshaped on the GPU from the RPU data, eliminating magenta/green discoloration.
 - **AV1 Support:** Decodes AV1 up to 4K 10-bit via optimized libdav1d.
 
-![Playback OSD over 4K hardware-decoded video](docs/images/player.png)
+![Media Info for a 4K HDR10 HEVC clip: hardware decoder, BT.2020 / ST 2084, 60 fps](docs/images/mediainfo.png)
 
 #### Video Codecs
 
@@ -143,21 +156,29 @@ Full-featured IPTV playback built right into EVO's native screens:
 - **Xtream Codes API:** Native account support for Live Streams, VOD, and Series categories.
 - **Live Stream Switcher:** Press **R2** during playback to swap video streams, quality renditions, or audio tracks on the fly.
 
-![Live TV channel guide and EPG](docs/images/iptv.png)
-
 ---
 
-### Media Servers: Emby, Jellyfin & Stremio
+### Media Servers: Emby, Jellyfin, Plex, Stremio & Nuvio
 
 Connect your media servers directly to EVO without leaving the native interface:
 
-- **Native Libraries:** Poster grids, Continue Watching, TV series, seasons, and episode tracking. Watched status and playback positions sync back to the server.
-- **Jellyfin Quick Connect:** Sign in instantly using a 6-digit code without typing passwords on a controller.
-- **LAN Discovery:** Automatically finds Emby and Jellyfin servers on your local network.
+- **Native Libraries:** One shelf layout for every provider: Continue Watching, Next Up, posters, a details block with description, rating and cast, TV series, seasons, and episode tracking. Watched status and playback positions sync back to the server.
+- **Jellyfin Quick Connect and Plex PIN link:** Sign in with a code instead of typing passwords on a controller.
+- **LAN Discovery:** Automatically finds Emby, Jellyfin and Plex servers on your local network.
 - **Multi-Version Selector:** If a movie or episode has multiple releases (e.g. 4K HDR Remux, 1080p SDR, Web-DL), EVO lets you choose which version to play.
-- **Embedded Web View:** Quick web access to Emby, Jellyfin, and Nuvio beside the navigation rail.
+- **Stremio and Nuvio:** addons and accounts in EVO's own screens, with a ranked pick that plays the best stream at once, or a picker if you turn that off.
+- **Skip intro and credits:** Jellyfin and Emby segment marks drive the Skip button, and "Next episode" starts the following episode.
 
-![Providers hub](docs/images/providers.png)
+---
+
+### Chapters, Skip Intro & Credits
+
+![The chapter list on a clip with Intro, Fractal Dive and Credits chapters](docs/images/chapters.png)
+
+- **Chapter navigation:** **L1 / R1** jump between chapters, the seek bar shows a tick at each one, the OSD names the current chapter, and the **right stick** opens the chapter list.
+- **Skip button:** inside an intro or credits, a **Skip intro**, **Skip credits** or **Next episode** button shows for 8 seconds and **TRIANGLE** presses it, with the controls hidden or not.
+- **Three modes:** **Settings → Video & Display → Skip intros & credits** is **Off**, **Ask** (the default, the button) or **Auto** (skips once and says so; TRIANGLE goes back). Auto never skips a stretch you seeked or resumed into.
+- **Any source:** chapter titles with the whole word Intro, Opening, OP, Recap, Credits, Ending, ED or Outro count on every file, whether it plays from USB, NTFS, SMB, FTP, Plex or Stremio. Media server marks win when both exist.
 
 ---
 
@@ -190,8 +211,8 @@ Manage your storage directly on the PS5 with native file operations, integrated 
 - **Automatic PS5 Internal FTP Detection:** EVO Player automatically detects and connects to the console's resident jailbreak FTP payload on loopback (`127.0.0.1:2121`). Pre-configured as **PS5 Local FTP** in the browser sidebar, giving you immediate access to explore and manage the entire console filesystem (`/`) without typing IP addresses or credentials.
 - **High-Speed Loopback Delegation:** Large internal file transfers (>64 MB) automatically stream through the loopback FTP daemon to bypass per-process application write throttling, sustaining full drive speeds (~80+ MB/s).
 - **Remote FTP / NAS Mounting:** Add remote FTP servers from your home network in the sidebar to stream media directly or transfer files between your PC/NAS and console without leaving the sofa.
-
-![Browsing a folder](docs/images/browse.png)
+- **NTFS USB drives:** an NTFS drive is not mounted by the PS5, so EVO reads the raw disk itself, read-only: browse, play, view pictures and load subtitles from it ([docs/hardware/ntfs.md](docs/hardware/ntfs.md)).
+- **Cover art:** FTP and SMB folders show posters from `poster.jpg`, `folder.jpg` and `<name>.jpg` files beside the video.
 
 ---
 
@@ -200,7 +221,9 @@ Manage your storage directly on the PS5 with native file operations, integrated 
 - **Experimental Audio Auto-Sync:** Analyzes spoken audio in real time to calculate acoustic timing offsets and synchronize subtitle tracks automatically.
 - **Concurrent Dual Subtitles:** Display two subtitle languages simultaneously — primary at the bottom, secondary at the top of the screen.
 - **Live Touchpad Sync Nudge:** Swipe horizontally or click left/right on the DualSense trackpad (or press **L2**) during playback to nudge timing in ±50 ms increments without pausing.
-- **Broad Format Support:** Styled ASS / SSA with full styling and positioning, SRT, SubRip, and WebVTT.
+- **Broad Format Support:** Styled ASS / SSA with full styling and positioning, SRT, SubRip, WebVTT and PGS picture subtitles.
+- **Load from file:** the picker's **Load from file** row browses the video's folder, any USB or NTFS drive, or internal storage for an `.srt`. Online subtitles can be fetched too.
+- **Preferred languages:** **Settings → Audio** and **Subtitles** pick the audio and subtitle language to start on.
 
 ![Subtitle track picker with Auto-Sync](docs/images/picker.png)
 
@@ -218,9 +241,12 @@ Manage your storage directly on the PS5 with native file operations, integrated 
 The entire user interface is rendered on the GPU through bare-metal `sceAgc` at the panel's native resolution:
 - Locked 60 fps navigation with minimal frame times.
 - Renders only when state changes, maintaining near-zero idle GPU load.
-- Five built-in color themes (Midnight, Carbon, Ember, Aurora) plus custom USB themes (`/mnt/usb0/evo_themes`).
+- Built-in color themes (Midnight is the default) plus your own `.theme` files, under **Settings → Interface & Storage → Theme** ([docs/ui/theming.md](docs/ui/theming.md)).
+- A preview card beside every setting shows what it does before you change it.
 
-![Settings](docs/images/settings.png)
+![Settings: Video & Display, with the preview card for each row](docs/images/settings.png)
+
+![About: what EVO decodes, renders and targets](docs/images/about.png)
 
 ---
 
@@ -230,17 +256,17 @@ The entire user interface is rendered on the GPU through bare-metal `sceAgc` at 
 |---|---|---|---|
 | **CROSS ✕** | Select / Open | Play / Pause | Type character |
 | **CIRCLE ○** | Back | Stop playback (with prompt) | Cancel |
-| **TRIANGLE △** | Toggle favourite / Web view / Remove network server | Cycle Aspect Ratio (Fit / Fill / Stretch) | Space |
+| **TRIANGLE △** | Toggle favourite / Web view / Remove network server | **Skip intro / credits** while the button shows, otherwise cycle Aspect Ratio (Fit / Fill / Stretch) | Space |
 | **SQUARE □** | File details / Provider settings | Media Info (Codec, Resolution, Decoder) | Backspace |
 | **OPTIONS** | File operations (Copy, Move, Rename, Delete) / Server options (Edit, Remove) | Playback settings menu | Done |
 | **D-Pad / Left Stick** | Move focus, hold to scroll | Scrub seek bar (hold for high-speed) | Move between keys (up from the top row: the clear X) |
 | **LEFT** | Open navigation rail | — | — |
 | **UP** | Instant folder filter chips | Toggle OSD overlay | — |
 | **DOWN** | — | Open subtitle track picker | — |
-| **L1 / R1** | Page up / Page down | Chapter skip / ±60 s seek | Move the text cursor left / right |
+| **L1 / R1** | Page up / Page down | Previous / next chapter (±30 s without chapters) | Move the text cursor left / right |
 | **L2 / R2** | Jump alphabetically (A–Z) | **L2:** Subtitle sync ±50ms<br>**R2:** Live stream quality & audio picker | **L2:** Shift (press again: Caps Lock)<br>**R2:** Done |
 | **Trackpad Swipe** | — | Live subtitle sync offset nudge | — |
-| **L3 / R3** | Take screenshot to `/mnt/usb0` | Take screenshot | — |
+| **L3 / R3** | Take screenshot (to `/mnt/usb0`, or `/data/evoplayer` with no stick) | **L3:** screenshot<br>**R3:** chapter list (a file with chapters) | — |
 
 ---
 
@@ -311,7 +337,7 @@ To report a bug or send a pull request, read **[CONTRIBUTING.md](CONTRIBUTING.md
 
 ## Credits & License
 
-Forked from [ProsperoPlayer](https://github.com/KINGDKAK/ProsperoPlayer) by KINGDKAK and licensed under **GPL-3.0-or-later** (see [COPYRIGHT.md](COPYRIGHT.md)).
+EVO Player is licensed under **GPL-3.0-or-later** (see [COPYRIGHT.md](COPYRIGHT.md)). The initial idea came from [ProsperoPlayer](https://github.com/KINGDKAK/ProsperoPlayer) by KINGDKAK; thank you.
 
 If EVO helps your project, a credit mention would be great: a request, not a licence condition ([details](COPYRIGHT.md#credit-is-appreciated)).
 
