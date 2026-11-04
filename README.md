@@ -104,6 +104,10 @@ Video decodes on the console's own `sceVideodec2` hardware decoder — **H.264, 
 
 ![Media Info for a 4K HDR10 HEVC clip: hardware decoder, BT.2020 / ST 2084, 60 fps](docs/images/mediainfo.png)
 
+Press **OPTIONS** during playback for the diagnostics panel: codec, HDR, audio output, render and decode rate, dropped frames, queue depth, A/V clock delta and GPU / RAM / CPU graphs.
+
+![Playback diagnostics panel over 4K HDR10 video](docs/images/stats.png)
+
 #### Video Codecs
 
 | Codec | Decoder | Up to | Verified |
@@ -214,6 +218,8 @@ Manage your storage directly on the PS5 with native file operations, integrated 
 - **NTFS USB drives:** an NTFS drive is not mounted by the PS5, so EVO reads the raw disk itself, read-only: browse, play, view pictures and load subtitles from it ([docs/hardware/ntfs.md](docs/hardware/ntfs.md)).
 - **Cover art:** FTP and SMB folders show posters from `poster.jpg`, `folder.jpg` and `<name>.jpg` files beside the video.
 
+![Network Storage: Add Server, the console's own FTP (Online, 1 ms) and an SMB server that is Offline](docs/images/network.png)
+
 ---
 
 ### Subtitles & Audio Auto-Sync
@@ -241,12 +247,28 @@ Manage your storage directly on the PS5 with native file operations, integrated 
 The entire user interface is rendered on the GPU through bare-metal `sceAgc` at the panel's native resolution:
 - Locked 60 fps navigation with minimal frame times.
 - Renders only when state changes, maintaining near-zero idle GPU load.
-- Built-in color themes (Midnight is the default) plus your own `.theme` files, under **Settings → Interface & Storage → Theme** ([docs/ui/theming.md](docs/ui/theming.md)).
+- Four built-in color themes (Midnight is the default, then Carbon, Ember and Aurora) plus your own `.theme` files, under **Settings → Interface & Storage → Theme** ([docs/ui/theming.md](docs/ui/theming.md)).
 - A preview card beside every setting shows what it does before you change it.
 
 ![Settings: Video & Display, with the preview card for each row](docs/images/settings.png)
 
-![About: what EVO decodes, renders and targets](docs/images/about.png)
+<table>
+  <tr>
+    <td><img src="docs/images/settings_audio.png" alt="Settings: Audio, with volume boost, delay, channels and passthrough"></td>
+    <td><img src="docs/images/settings_subtitles.png" alt="Settings: Subtitles, with a live caption preview"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/settings_interface.png" alt="Settings: Interface and Storage, with the four built-in themes"></td>
+    <td><img src="docs/images/settings_experimental.png" alt="Settings: Experimental, with motion smoothing, match frame rate and deep blacks"></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td><img src="docs/images/about.png" alt="About: what EVO decodes, renders and targets"></td>
+    <td><img src="docs/images/changelog.png" alt="The in-app changelog, one release at a time"></td>
+  </tr>
+</table>
 
 ---
 
