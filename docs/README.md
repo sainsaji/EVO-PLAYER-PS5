@@ -65,6 +65,7 @@ ones expensive to relearn on real hardware) are in the root [CLAUDE.md](../CLAUD
 | [rmlui.md](ui/rmlui.md) | What RmlUi still does, where it lives, and the rules that cost hardware cycles |
 | [settings.md](ui/settings.md) | Every setting, the config file format, how to add a setting |
 | [theming.md](ui/theming.md) | Themes and the `.theme` format |
+| [browser.md](ui/browser.md) | The Browser section (#237): the out-of-process engine, its lifetime and the frame handoff |
 | [surround-studio.md](ui/surround-studio.md) | The room soundstage and DualSense-mic calibration |
 
 ## [providers/](providers/): media servers and Live TV

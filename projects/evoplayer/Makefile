@@ -137,6 +137,8 @@ MEDIA_SRCS := \
     src/evo_prev_run.c \
     src/evo_ntfs.c \
     src/generated/evo_ntfs_helper_elf.c \
+    src/evo_elfldr.c \
+    src/evo_browser_prosperoweb.c \
     src/evo_error.c \
     src/evo_log_server.c \
     src/evo_stats.c \

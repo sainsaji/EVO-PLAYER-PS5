@@ -50,6 +50,7 @@ extern "C" int perf_render_fps;
 #include "evo_boot_trace.h"
 #include "evo_crash_note.h"
 #include "evo_jailbreak.h"
+#include "evo_browser_engine.h"
 #include "evo_vdec.h"
 #include "evo_direct_mem.h"
 #include "evo_updater.h"
@@ -397,6 +398,8 @@ bool Application::initHardware() {
     }
     EnsureDataDirectories();
     evo_crash_note_init();
+    /* #237 spike S1: only with /mnt/usb0/evo_browser_spike; never blocks. */
+    evo_browser_engine_boot();
 
     sceUserServiceInitialize(nullptr);
     scePadInit();
@@ -1165,6 +1168,9 @@ int Application::run() {
                 if (m_soundEffectEngine)   m_soundEffectEngine->shutdown();
                 if (m_fileTransferService) m_fileTransferService->cancelTransfer();
                 pp_playback_shutdown(&g_pp_pb);
+                /* The browser engine's broker kills its children and exits
+                 * when EVO drops its connection; checked before parking. */
+                evo_browser_engine_stop();
                 if (evo_agc_runtime_is_120hz()) {
                     evo_agc_runtime_set_120hz(0);
                 }
@@ -1178,6 +1184,8 @@ int Application::run() {
                     m_screenManager->navigateTo(ScreenId::SafeToClose);
             }
             if (++m_softCloseFrames > 150) {     /* ~2.5 s of presented frames */
+                /* No engine process may outlive a park: `close` follows it. */
+                evo_browser_engine_wait_stopped(1500);
                 evo_agc_runtime_wait_idle(500);
                 m_softClosed = true;
                 evo_boot_log("soft close: parked - GPU idle, display latched, "

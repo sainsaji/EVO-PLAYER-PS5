@@ -90,6 +90,7 @@ SRCS=(
     "${EVO}/src/evo_prev_run.c"
     "${REPO_ROOT}/tests/test_ntfs.cpp"
     "${EVO}/src/evo_ntfs.c"
+    "${EVO}/src/evo_elfldr.c"
     "${CORE}/src/services/ReleaseName.cpp"
 )
 

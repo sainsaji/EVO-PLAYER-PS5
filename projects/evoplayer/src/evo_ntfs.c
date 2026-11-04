@@ -13,6 +13,7 @@
  */
 #include "evo_ntfs.h"
 #include "evo_boot_log.h"
+#include "evo_elfldr.h"
 #include "evo_readdir.h"
 
 #include <errno.h>
@@ -103,25 +104,11 @@ static int sock_all(int s, void *p, size_t n, int out)
     return 0;
 }
 
-/* A socket to a loopback port, with read/write timeouts (a stuck helper must
- * not freeze the browser). -1 when nothing listens. */
+/* A socket to a loopback port, with 10 s read/write timeouts (a stuck helper
+ * must not freeze the browser). -1 when nothing listens. */
 static int loopback_connect(int port)
 {
-    int s = socket(AF_INET, SOCK_STREAM, 0);
-    if (s < 0) return -1;
-    struct sockaddr_in a;
-    memset(&a, 0, sizeof a);
-    a.sin_family = AF_INET;
-    a.sin_port = htons((uint16_t)port);
-    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (connect(s, (struct sockaddr *)&a, sizeof a) != 0) {   /* connect-ok: loopback, answers at once */
-        close(s);
-        return -1;
-    }
-    struct timeval tv = {10, 0};
-    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
-    return s;
+    return evo_loopback_connect(port, 10000);
 }
 
 static int recv_line(int s, char *out, size_t cap)
@@ -1136,19 +1123,15 @@ static void log_dev_view(void)
 extern const unsigned char evo_ntfs_helper_elf[];
 extern const size_t evo_ntfs_helper_elf_len;
 
-#define ELF_LOADER_PORT 9021
-#define REMOTE_DISK     100
+#define ELF_LOADER_PORT EVO_ELFLDR_PORT
+#define REMOTE_DISK    100
 #define HELPER_TRIES    3          /* starts per change of the USB device set */
 
 static int g_remote_empty[MAX_DISKS];
 
 static int helper_start(void)
 {
-    int s = loopback_connect(ELF_LOADER_PORT);
-    if (s < 0) return -1;
-    const int rc = sock_all(s, (void *)evo_ntfs_helper_elf, evo_ntfs_helper_elf_len, 1);
-    close(s);
-    return rc;
+    return evo_elfldr_send(evo_ntfs_helper_elf, evo_ntfs_helper_elf_len, 10000);
 }
 
 static int helper_list(char *out, size_t cap)
