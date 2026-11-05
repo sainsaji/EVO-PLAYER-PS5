@@ -11,8 +11,8 @@ docker compose run --rm ps5-dev ./scripts/package-app.sh --ffpfsc --usb-remote
 # one step at a time; stop at the first anomaly; never auto-retry
 timeout 100 ./tools/evo-remote.sh quit      # soft close; waits for parked=1
 timeout 100 ./tools/evo-remote.sh close     # kills the (parked) app; waits for "released"
-docker compose run --rm ps5-dev ./scripts/deploy-app.sh --ffpfsc    # sha256-verified
-timeout 200 ./tools/evo-remote.sh launch    # waits for ShadowMount to go idle
+docker compose run --rm ps5-dev ./scripts/deploy-app.sh --ffpfsc    # sha256-verified, then restarts ShadowMount
+timeout 200 ./tools/evo-remote.sh launch    # waits for ShadowMount to go idle; once only
 ```
 
 The whole loop as one bounded, classified run: `evo-remote.sh cycle --secs 60`
@@ -49,6 +49,19 @@ unmounts it. Launch from the Games row or with `evo-remote.sh launch`. Launching
 right after a deploy, while ShadowMount is still scanning, gives "Can't start game
 or app"; `launch` waits for its log to be quiet for 15 s for that reason.
 
+**ShadowMount's launch hook serves one launch.** After a deploy, and after EVO
+has run and closed, the next launch answers `launchApp: LNC_ISOK::0x80940033` and
+ShadowMount logs no `[SHELLCORE]` line for EVO, though its scanner keeps logging
+(2026-11-05). A ShadowMount restart brings the hook back, so `evo-remote.sh launch`
+does one before every launch (after its slot checks), then waits for the log to go
+quiet. `deploy-app.sh --ffpfsc` also does one after the image check, so a launch
+from the TV works too. Both use `evo-remote.sh smrestart`: it re-sends ShadowMount+
+v1.7beta4 (`output/shadowmountplusb4.elf`, sha256-pinned: other ShadowMount builds
+are different versions, so copy the b4 ELF there once) to elfldr `:9021` and waits
+for `[SHELLCORE] hooks installed: ... launch=1`. It is refused while EVO runs or is
+resident. `launch --no-sm-restart` and `deploy-app.sh --no-sm-restart` skip it. A
+`0x80940033` after the restart means something else: read ShadowMount's log first.
+
 **The truth about lifecycle is ShadowMount's `/data/shadowmount/debug.log`**, not an
 exit code. `tools/evo_lifecycle.py` reads it (and EVO's heartbeat) over FTP:
 
@@ -56,6 +69,7 @@ exit code. `tools/evo_lifecycle.py` reads it (and EVO's heartbeat) over FTP:
 |---|---|
 | `NOTIFY: installed game` / `[LINK] mount.lnk created` | registered |
 | `[IMG][LVD] unmount complete: source=/data/homebrew/PPSA99039.ffpfsc` | an updated image was verified (v1.7) |
+| `[SHELLCORE] hooks installed: ... launch=1` | ShadowMount (re)started with its launch hook live |
 | `[GAME] started: PPSA99039` | launched |
 | `[LINK] runtime layers released: PPSA99039` | process gone, slot free |
 
@@ -72,10 +86,8 @@ foreground user; `close.c` kills the foreground app only if its title is
 bytes. The harmless `getAppStatus: LNC_ISOK::0x80940004` line is echoed
 SceLncUtil chatter, not a failure; the old `0x80940005` came from hbldr. The
 `launchApp: LNC_ISOK::0x...` line is the system's real answer, and a launch that
-never reaches `[GAME] started` quotes it in the error. `0x80940033` with no
-`[SHELLCORE]` line for EVO in ShadowMount's log means ShadowMount's launch hook
-is not live, even though its log still shows scans: run ShadowMount+ again from
-the payload list, then `launch` works (2026-11-04).
+never reaches `[GAME] started` quotes it in the error; for `0x80940033` (dead
+launch hook, [above](#why-the-order-matters)) it points at `smrestart`.
 
 A `timeout` or `curl` timeout (exit 124 / 28) on an `evo-remote.sh` call is a
 normal, successful outcome: the far end holds the socket open. Bound every

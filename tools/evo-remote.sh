@@ -11,11 +11,21 @@
 #   PS5_HOST=192.168.0.6 ./tools/evo-remote.sh <subcommand>
 #
 #   build [--breadcrumbs ...]               package --usb-remote + deploy .ffpfsc
-#   launch                                  launch PPSA99039 with no controller
+#   launch [--no-sm-restart]                restart ShadowMount (smrestart: its
+#                                           launch hook serves one launch), then
+#                                           launch PPSA99039 with no controller
 #                                           (title-aware controller -> elfldr
 #                                           :9021). Refused while ShadowMount
 #                                           shows it resident or the heartbeat
 #                                           is live - never stacks a launch
+#   smrestart                               re-send ShadowMount+ v1.7beta4
+#                                           (output/shadowmountplusb4.elf, sha-
+#                                           pinned) to elfldr and wait for its
+#                                           "hooks installed ... launch=1". A
+#                                           deploy kills the launch hook
+#                                           (0x80940033); deploy-app.sh --ffpfsc
+#                                           runs this itself. Refused while EVO
+#                                           is running or resident
 #   quit                                    soft close (= Settings -> QUIT EVO):
 #                                           stop media, drain the GPU, park.
 #                                           Waits for parked=1 in evo_status
@@ -257,6 +267,36 @@ send_controller() {   # send_controller launch|close
     echo "sent: ${mode} ${TITLE_ID} -> ${PS5_HOST}:${ELF_PORT}"
 }
 
+# ShadowMount+ restart. Every deploy (the image check that remounts the new
+# .ffpfsc) leaves ShadowMount's launch hook dead: launchApp then answers
+# 0x80940033 and no [SHELLCORE] line for the title appears, though its scanner
+# keeps logging. Re-sending ShadowMount to elfldr stops the old instance
+# ("[RESTART]") and installs the hooks again. deploy-app.sh --ffpfsc runs this
+# itself. Only v1.7beta4 - the build the console runs - is accepted: the other
+# ShadowMount ELFs are different versions.
+SM_ELF="${SHADOWMOUNT_ELF:-${OUTPUT_DIR}/shadowmountplusb4.elf}"
+SM_SHA="fc4e5f715e76660ce34bde2adb10eaf1d069cb2cdf06f7a380896dfb62bd0c4a"
+
+do_smrestart() {
+    local slot hb base rc=0
+    [[ -f "${SM_ELF}" ]] || die "no ${SM_ELF}.
+   Copy ShadowMount+ v1.7beta4 (shadowmountplusb4.elf) there, or set SHADOWMOUNT_ELF."
+    [[ "$(sha256sum "${SM_ELF}" | cut -d' ' -f1)" == "${SM_SHA}" ]] \
+        || die "${SM_ELF} is not ShadowMount+ v1.7beta4 (sha256 differs) - only b4 matches the console's."
+    hb="$(lc heartbeat)"
+    [[ "${hb}" == RUNNING ]] && die "EVO is running - quit + close it before restarting ShadowMount."
+    slot="$(lc slot)"
+    [[ "${slot}" == RESIDENT ]] && die "ShadowMount shows ${TITLE_ID} started and not released - close it first."
+    base="$(lc smlen)" || die "could not read ShadowMount's log"
+    # A resident payload never closes the socket: exit 124 (timeout) is normal.
+    timeout --signal=TERM 15s nc -q0 "${PS5_HOST}" "${ELF_PORT}" < "${SM_ELF}" > /dev/null 2>&1 || rc=$?
+    (( rc == 0 || rc == 124 )) || die "elfldr ${PS5_HOST}:${ELF_PORT} did not take ShadowMount (nc exit ${rc})"
+    echo "sent: ShadowMount+ v1.7beta4 -> ${PS5_HOST}:${ELF_PORT}"
+    [[ "$(lc wait-hooks "${base}" 45)" == HOOKED ]] \
+        || die "no '[SHELLCORE] hooks installed ... launch=1' within 45 s of the restart. STOP - check the console."
+    ok "ShadowMount restarted (launch hook installed)"
+}
+
 do_launch() {
     local slot hb base
     slot="$(lc slot)"; hb="$(lc heartbeat)"
@@ -286,6 +326,14 @@ do_launch() {
     # remount) raises "Can't start game or app" on the PS5. Wait it out.
     [[ "$(lc wait-quiet 15 120)" == QUIET ]] \
         || die "ShadowMount's log is still moving after 120 s - it is not idle. Not launching."
+    # ShadowMount's launch hook serves one launch: after a deploy, and after
+    # EVO has run and closed, the next launch gets 0x80940033 (2026-11-05). So
+    # every launch restarts it first, then waits out the startup scan.
+    if [[ "${1:-}" != --no-sm-restart ]]; then
+        ( do_smrestart ) || die "ShadowMount restart failed - not launching."
+        [[ "$(lc wait-quiet 15 120)" == QUIET ]] \
+            || die "ShadowMount's log is still moving 120 s after its restart. Not launching."
+    fi
     base="$(lc smlen)" || die "could not read ShadowMount's log"
     # Another ShadowMount game still running means the PS5 answers the launch
     # with a dialog no script can clear. Said up front, not after 30 s.
@@ -304,10 +352,14 @@ do_launch() {
     # (No launchApp line on a clean launch: grep finding nothing must not end the
     # script under set -e/pipefail.)
     code="$(printf '%s\n' "${sent}" | grep -oE 'launchApp: LNC_ISOK::0x[0-9a-fA-F]+' | tail -1 | sed 's/.*:://' || true)"
-    [[ "$(lc wait-started "${base}" 30)" == STARTED ]] \
-        || die "no '[GAME] started: ${TITLE_ID}' within 30 s - launch did not take${code:+ (launchApp returned ${code})}.
+    if [[ "$(lc wait-started "${base}" 30)" != STARTED ]]; then
+        [[ "${code,,}" == 0x80940033 ]] && die "launch did not take: launchApp returned ${code} - ShadowMount's launch hook is dead
+   even after the restart. Look at /data/shadowmount/debug.log before anything else.
+   Never retry automatically."
+        die "no '[GAME] started: ${TITLE_ID}' within 30 s - launch did not take${code:+ (launchApp returned ${code})}.
    Look at the TV: if \"Can't start game or app\" is showing, press X on the pad to clear it
    (nothing here can), or start EVO from the home screen. Never retry automatically."
+    fi
     ok "launched (ShadowMount: started)"
 }
 
@@ -543,7 +595,8 @@ build)
     echo ""
     echo "  >>> launch PPSA99039 from the Games row (ShadowMount+ remounted) <<<"
     ;;
-launch) do_launch ;;
+launch) do_launch "${1:-}" ;;
+smrestart) do_smrestart ;;
 quit)   do_quit ;;
 close)  do_close "${1:-}" ;;
 kill)   do_quit; do_close ;;

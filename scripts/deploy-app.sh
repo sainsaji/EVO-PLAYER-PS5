@@ -20,8 +20,13 @@
 # The --ffpfsc deploy also DELETEs /mnt/usb0/{evo.log, evo_status,
 # evo_report.txt}, so each launch starts with a fresh log.
 #
-# This does NOT launch anything - launch safety (never stack launches) is on
-# you and ShadowMountPlus. See docs/architecture/app-module.md.
+# After an --ffpfsc deploy it restarts ShadowMount+ (evo-remote.sh smrestart):
+# every deploy leaves ShadowMount's launch hook dead, so the next launch would
+# fail with 0x80940033. It waits for ShadowMount to check the new image and go
+# quiet first. --no-sm-restart skips it.
+#
+# This does NOT launch anything - launch with evo-remote.sh launch, once.
+# See docs/console/hardware-cycle.md.
 # =============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -29,13 +34,15 @@ ACTION="deploy"
 FFPFSC=0
 FORCE=0
 FRESH=0
+SM_RESTART=1
 while (( $# )); do
     case "$1" in
         --undeploy) ACTION="undeploy" ;;
         --ffpfsc)   FFPFSC=1 ;;
         --force)    FORCE=1 ;;
         --fresh)    FRESH=1 ;;
-        -h|--help)  sed -n '2,16p' "$0"; exit 0 ;;
+        --no-sm-restart) SM_RESTART=0 ;;
+        -h|--help)  sed -n '2,29p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
     shift
@@ -49,6 +56,7 @@ if ! in_container; then
     (( FFPFSC )) && FWD+=(--ffpfsc)
     (( FORCE )) && FWD+=(--force)
     (( FRESH )) && FWD+=(--fresh)
+    (( SM_RESTART )) || FWD+=(--no-sm-restart)
     reexec_in_container "deploy-app.sh" "${FWD[@]+"${FWD[@]}"}"
 fi
 
@@ -60,6 +68,9 @@ need_file "${PARAM}"
 TITLE_ID="$(python3 -c 'import json,sys,re
 t=json.load(open(sys.argv[1]))["titleId"]
 sys.exit("bad titleId") if not re.fullmatch(r"PPSA\d{5}",t) else print(t)' "${PARAM}")"
+
+lc() { PS5_HOST="${PS5_HOST}" FTP_PORT="${FTP_PORT}" TITLE_ID="${TITLE_ID}" \
+       python3 "${REPO_ROOT}/tools/evo_lifecycle.py" "$@"; }
 
 APPDIR="${OUTPUT_DIR}/app/${TITLE_ID}"
 FFPFSC_IMG="${OUTPUT_DIR}/app/${TITLE_ID}.ffpfsc"
@@ -237,6 +248,10 @@ if (( FFPFSC )) && [[ "${ACTION}" == "deploy" ]]; then
         python3 "${REPO_ROOT}/tools/wipe-evo.py" "${PS5_HOST}" --do ||
             die "wipe failed - nothing was deployed"
     fi
+    # ShadowMount's log length before the upload: the image check after it,
+    # and the restart that follows, are found from here.
+    SM_BASE=""
+    (( SM_RESTART )) && SM_BASE="$(lc smlen 2>/dev/null || true)"
     begin "deploy ${TITLE_ID}.ffpfsc -> ftp://${PS5_HOST}:${FTP_PORT}/data/homebrew/"
     python3 - "${PS5_HOST}" "${FTP_PORT}" "${TITLE_ID}" "${FFPFSC_IMG}" <<'PY'
 import hashlib, sys, time
@@ -320,7 +335,27 @@ PY
     # and re-upload that loose tree on every deploy; deleting
     # /data/evoplayer/app/assets/ on the console now has zero effect on the UI.
     ok "deploy complete"
-    echo "   Mount + launch from the Games row (ShadowMountPlus). Never stack launches."
+
+    # Every deploy leaves ShadowMount's launch hook dead (launch -> 0x80940033)
+    # until ShadowMount is restarted. Let it check the new image and go quiet
+    # first - restarting mid-scan is what "Can't start game or app" comes from.
+    if (( SM_RESTART )); then
+        begin "restart ShadowMount (a deploy leaves its launch hook dead)"
+        if [[ -z "${SM_BASE}" ]]; then
+            warn "could not read ShadowMount's log before the upload - not restarting it.
+   Run evo-remote.sh smrestart before the launch."
+        elif [[ "$(lc wait-registered "${SM_BASE}" 90)" != REGISTERED ]]; then
+            warn "ShadowMount did not check the new image within 90 s - not restarting it.
+   Look at /data/shadowmount/debug.log, then evo-remote.sh smrestart before the launch."
+        elif [[ "$(lc wait-quiet 15 120)" != QUIET ]]; then
+            warn "ShadowMount's log is still moving after 120 s - not restarting it mid-scan.
+   Run evo-remote.sh smrestart before the launch."
+        else
+            "${REPO_ROOT}/tools/evo-remote.sh" smrestart \
+                || die "ShadowMount restart failed - do not launch; check the console"
+        fi
+    fi
+    echo "   Next: evo-remote.sh launch (once). Never stack launches."
     exit 0
 fi
 

@@ -30,6 +30,7 @@ Subcommands (print one word / line, exit 0 unless the FTP read failed):
   wait-registered  BASE S  REGISTERED | TIMEOUT   (new install/mount.lnk after BASE)
   wait-started     BASE S  STARTED | TIMEOUT
   wait-released    BASE S  RELEASED | TIMEOUT
+  wait-hooks       BASE S  HOOKED | TIMEOUT   (ShadowMount restarted, launch=1)
   wait-parked      S       PARKED | TIMEOUT
   wait-quiet  Q MAX        QUIET | TIMEOUT   (debug.log grew by nothing for Q s)
   smslice BASE            the debug.log lines after BASE that mention the title
@@ -55,6 +56,9 @@ INSTALLED = f"NOTIFY: installed game {TID}"
 MOUNTED = f"[LINK] mount.lnk created: /user/app/{TID}/mount.lnk"
 MOUNT_READY = f"[SHELLCORE] launch mount ready: {TID}"
 IMAGE_CHECKED = f"unmount complete: source=/data/homebrew/{TID}.ffpfsc"
+# A (re)started ShadowMount with its launch hook live. A deploy leaves the hook
+# dead (launchApp then answers 0x80940033), and only a restart brings it back.
+HOOKED = re.compile(r"\[SHELLCORE\] hooks installed:.*\blaunch=1\b")
 
 # ShadowMount writes these once, as it comes up. Finding one means the log
 # still holds the whole of this boot, so "no [GAME] started since" is evidence
@@ -185,7 +189,8 @@ def wait_for(base, secs, needles, label):
     while True:
         try:
             delta = sm_delta(base)
-            if any(n in delta for n in needles):
+            if any((n.search(delta) if hasattr(n, "search") else n in delta)
+                   for n in needles):
                 return label
         except Exception:
             pass          # a missed poll is not a verdict; keep waiting
@@ -215,6 +220,8 @@ def main(argv):
             print(wait_for(int(argv[2]), int(argv[3]), (STARTED,), "STARTED"))
         elif cmd == "wait-released":
             print(wait_for(int(argv[2]), int(argv[3]), (RELEASED,), "RELEASED"))
+        elif cmd == "wait-hooks":
+            print(wait_for(int(argv[2]), int(argv[3]), (HOOKED,), "HOOKED"))
         elif cmd == "wait-parked":
             deadline = time.time() + int(argv[2])
             while True:
