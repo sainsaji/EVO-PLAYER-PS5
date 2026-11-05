@@ -102,6 +102,9 @@ public:
     virtual bool isPaused() const = 0;
     virtual bool isActive() const = 0;
     virtual bool isMusicMode() const = 0;
+    /* Audio-only file's embedded cover (0xAABBGGRR pixels), or nullptr. *gen
+     * changes whenever the picture does. */
+    virtual const uint32_t* musicCover(int* width, int* height, unsigned* gen) const = 0;
 
     virtual PlaybackState getPlaybackState() const = 0;
 

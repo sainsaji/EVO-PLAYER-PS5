@@ -109,6 +109,12 @@ private:
     bool m_browserPreviewFailed = false;
 };
 
+/* Decodes a JPEG/PNG held in memory (e.g. a FLAC or MP3 file's embedded cover)
+ * into EVO pixels (0xAABBGGRR words), box-scaled so the longer side is at most
+ * maxSide. False when the bytes are not a usable image. */
+bool decodeImageBytes(const uint8_t* bytes, int len, int maxSide,
+                      std::vector<uint32_t>& out, int& width, int& height);
+
 } // namespace evo
 
 #endif // EVO_COVER_ART_SERVICE_HPP

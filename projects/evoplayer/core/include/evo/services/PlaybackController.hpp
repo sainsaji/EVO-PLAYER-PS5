@@ -40,6 +40,12 @@ public:
     bool isPaused() const override;
     bool isActive() const override;
     bool isMusicMode() const override { return m_musicMode; }
+    const uint32_t* musicCover(int* width, int* height, unsigned* gen) const override {
+        if (width) *width = m_coverW;
+        if (height) *height = m_coverH;
+        if (gen) *gen = m_coverGen;
+        return m_coverPixels.empty() ? nullptr : m_coverPixels.data();
+    }
 
     double getPositionSeconds() const override;
     double getDurationSeconds() const override { return m_durationSeconds; }
@@ -100,6 +106,9 @@ private:
     double m_durationSeconds = 0.0;
     double m_resumeBaseOffset = 0.0;
     bool m_musicMode = false;
+    std::vector<uint32_t> m_coverPixels;   /* audio-only file's embedded cover */
+    int m_coverW = 0, m_coverH = 0;
+    unsigned m_coverGen = 0;
     ViewMode m_viewMode = ViewMode::Fit;
     std::string m_viewModeFor;   /* the source m_viewMode was last defaulted for */
 

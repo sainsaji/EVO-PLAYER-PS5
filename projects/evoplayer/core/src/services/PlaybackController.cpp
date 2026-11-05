@@ -1,6 +1,7 @@
 #include "evo/services/PlaybackController.hpp"
 #include "evo/interfaces/IMediaMetadataService.hpp"
 #include "evo/services/NetworkStorageService.hpp"
+#include "evo/services/CoverArtService.hpp"   /* decodeImageBytes: embedded cover */
 #include "evo/Application.hpp"
 
 #include "pp_playback.h"
@@ -715,6 +716,11 @@ void PlaybackController::stopPlayback() {
     resume_base_offset_seconds = 0.0;
     resume_base_anchor_pending = -1.0;
     m_musicMode = false;
+    if (!m_coverPixels.empty()) {
+        m_coverPixels.clear();
+        m_coverW = m_coverH = 0;
+        ++m_coverGen;
+    }
     m_currentFilePath.clear();
     m_source = PlaybackSource{};
     m_lastProgressReport = 0.0;
@@ -1209,6 +1215,25 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     }
 
     m_musicMode = (video_stream_index < 0 && audio_stream_index >= 0);
+
+    /* Audio-only: the file's embedded cover (FLAC picture, ID3 APIC) is shown
+     * on the NOW PLAYING card. The demuxer already read it at open. */
+    m_coverPixels.clear();
+    m_coverW = m_coverH = 0;
+    if (m_musicMode) {
+        for (unsigned int i = 0; i < play_fmt->nb_streams; ++i) {
+            const AVStream* st = play_fmt->streams[i];
+            if (!(st->disposition & AV_DISPOSITION_ATTACHED_PIC) || st->attached_pic.size <= 0)
+                continue;
+            if (decodeImageBytes(st->attached_pic.data, st->attached_pic.size, 512,
+                                 m_coverPixels, m_coverW, m_coverH)) {
+                EVO_LOGI("playback", "cover art: stream %u, %dx%d", i, m_coverW, m_coverH);
+                break;
+            }
+            EVO_LOGW("playback", "cover art: stream %u is not a JPEG/PNG", i);
+        }
+    }
+    ++m_coverGen;
 
     // Initialize Video Decoder if video present
     if (video_stream_index >= 0) {

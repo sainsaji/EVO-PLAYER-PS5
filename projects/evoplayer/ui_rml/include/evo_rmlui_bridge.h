@@ -95,6 +95,12 @@ typedef struct {
     /* #219: the skip button ("Skip intro" / "Skip credits" / "Next episode").
      * NULL/"" hides it. Drawn by the kit OSD even when the chrome is faded. */
     const char* skip_label;
+    /* Audio-only: the file's embedded cover, 0xAABBGGRR pixels (NULL = none).
+     * music_cover_gen changes whenever the picture does. */
+    const uint32_t* music_cover;
+    int music_cover_w;
+    int music_cover_h;
+    unsigned music_cover_gen;
 } evo_playback_osd_params_t;
 
 /*

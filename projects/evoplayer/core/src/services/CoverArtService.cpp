@@ -1418,6 +1418,48 @@ bool CoverArtService::loadNetArtInto(const NetArtRequest& req, uint32_t* out, in
     return true;
 }
 
+bool decodeImageBytes(const uint8_t* bytes, int len, int maxSide,
+                      std::vector<uint32_t>& out, int& width, int& height) {
+    out.clear();
+    width = height = 0;
+    if (!bytes || len <= 0 || maxSide < 1) return false;
+    int iw = 0, ih = 0, ich = 0;
+    unsigned char* data = stbi_load_from_memory(bytes, len, &iw, &ih, &ich, 4);
+    if (!data) return false;
+    if (iw < 1 || ih < 1 || iw > 8192 || ih > 8192) {
+        stbi_image_free(data);
+        return false;
+    }
+    int w = iw, h = ih;
+    if (w > maxSide || h > maxSide) {
+        if (w >= h) { h = std::max(1, static_cast<int>(static_cast<int64_t>(h) * maxSide / w)); w = maxSide; }
+        else        { w = std::max(1, static_cast<int>(static_cast<int64_t>(w) * maxSide / h)); h = maxSide; }
+    }
+    out.resize(static_cast<size_t>(w) * static_cast<size_t>(h));
+    for (int y = 0; y < h; ++y) {
+        int y0 = static_cast<int>(static_cast<int64_t>(y) * ih / h);
+        int y1 = static_cast<int>(static_cast<int64_t>(y + 1) * ih / h);
+        if (y1 <= y0) y1 = y0 + 1;
+        for (int x = 0; x < w; ++x) {
+            int x0 = static_cast<int>(static_cast<int64_t>(x) * iw / w);
+            int x1 = static_cast<int>(static_cast<int64_t>(x + 1) * iw / w);
+            if (x1 <= x0) x1 = x0 + 1;
+            unsigned r = 0, g = 0, b = 0, n = 0;
+            for (int yy = y0; yy < y1; ++yy) {
+                const uint8_t* p = data + (static_cast<size_t>(yy) * iw + x0) * 4u;
+                for (int xx = x0; xx < x1; ++xx, p += 4) { r += p[0]; g += p[1]; b += p[2]; ++n; }
+            }
+            out[static_cast<size_t>(y) * w + x] = MakeColorBgra(static_cast<uint8_t>(r / n),
+                                                                static_cast<uint8_t>(g / n),
+                                                                static_cast<uint8_t>(b / n), 255);
+        }
+    }
+    stbi_image_free(data);
+    width = w;
+    height = h;
+    return true;
+}
+
 CoverArtService::~CoverArtService() {
     if (m_workerStarted) {
         pthread_mutex_lock(&m_jobMutex);

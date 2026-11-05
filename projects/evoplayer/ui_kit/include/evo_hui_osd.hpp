@@ -47,6 +47,10 @@ class OsdScreen
     std::string chapter_title_, scrub_chapter_title_, ends_at_, remaining_;   /* #150 / #151 */
     std::vector<double> chapter_starts_;
     std::vector<std::string> sub_lines_, sub2_lines_;
+    /* The music card's cover: our own copy, so it never dangles. */
+    std::vector<std::uint32_t> cover_;
+    int cover_w_ = 0, cover_h_ = 0;
+    unsigned cover_gen_ = ~0u;
 
     bool hud_on_ = false;
     std::string hud_lines_[8];

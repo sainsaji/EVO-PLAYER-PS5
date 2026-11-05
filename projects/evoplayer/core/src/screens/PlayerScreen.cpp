@@ -1161,6 +1161,8 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         p.debug_overlay = evo_fps_counter_enabled();
         p.music_mode = playback->isMusicMode() ? 1 : 0;
         p.music_codec = "AUDIO";
+        p.music_cover = playback->musicCover(&p.music_cover_w, &p.music_cover_h,
+                                             &p.music_cover_gen);
 
         /* #150: chapters. */
         static double chapterStarts[128];

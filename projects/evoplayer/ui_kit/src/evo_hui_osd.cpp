@@ -2,6 +2,7 @@
  * evo_hui_osd.cpp - the player OSD on ps5-homebrew-ui. See the header.
  */
 #include "evo_hui_osd.hpp"
+#include "evo_hui_cover.hpp"
 
 #include "ui/glyphs.hpp"
 
@@ -182,6 +183,20 @@ void OsdScreen::set(const evo_playback_osd_params_t &p)
     raw_.skip_label = nullptr;
     sub_lines_ = split_lines(p.subtitle_text);
     sub2_lines_ = split_lines(p.subtitle_text2);
+    if (p.music_cover_gen != cover_gen_)
+    {
+        cover_gen_ = p.music_cover_gen;
+        cover_.clear();
+        cover_w_ = cover_h_ = 0;
+        if (p.music_cover && p.music_cover_w > 0 && p.music_cover_h > 0)
+        {
+            cover_.assign(p.music_cover,
+                          p.music_cover + static_cast<std::size_t>(p.music_cover_w) * p.music_cover_h);
+            cover_w_ = p.music_cover_w;
+            cover_h_ = p.music_cover_h;
+        }
+    }
+    raw_.music_cover = nullptr;
     raw_.title = raw_.metadata = nullptr; /* never read the copied pointers */
     hud_on_ = p.show_stats != 0;
 }
@@ -551,10 +566,19 @@ void OsdScreen::draw_music(DrawList &list, const Context &ctx) const
     list.rounded_rect(card, page::kRadiusCard, kWhite.with_alpha(0.06f));
     list.bordered_rect(card, page::kRadiusCard, kClear, 1.5f, kWhite.with_alpha(0.12f));
     const Rect art{card.x + 50, card.y + 50, 280, 280};
-    list.gradient_rect(art, page::kRadiusTile, p.accent, p.accent_alt);
-    const std::uint32_t icon = ctx.textures.icon("../icons/icon_volume.png");
-    if (icon)
-        list.image(icon, art.inset(90), ::hui::gfx::kFullUv, kWhite);
+    const std::uint32_t cover =
+        cover_.empty() ? 0 : ctx.textures.pixels(cover_.data(), cover_w_, cover_h_, cover_gen_);
+    if (cover)
+    {
+        list.image(cover, art, cover_uv(cover_w_, cover_h_, art.w, art.h), kWhite, page::kRadiusTile);
+    }
+    else
+    {
+        list.gradient_rect(art, page::kRadiusTile, p.accent, p.accent_alt);
+        const std::uint32_t icon = ctx.textures.icon("../icons/icon_volume.png");
+        if (icon)
+            list.image(icon, art.inset(90), ::hui::gfx::kFullUv, kWhite);
+    }
     const float x = art.x + art.w + 50;
     ui::text(list, fonts.semibold, raw_.paused ? "PAUSED" : "NOW PLAYING", x, card.y + 92, 18, p.accent,
              Align::left, 3.0f);
