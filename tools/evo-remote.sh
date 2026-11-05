@@ -105,6 +105,14 @@
 #                                           and nothing EVO injects reaches it
 #   kbdone                                  press DONE on the virtual keyboard
 #   kbclose                                 cancel any open keyboard, the native IME too
+#   weburl <url>                            Web section: open <url> in its tab
+#                                           (data: URLs too) - engine tests
+#                                           without typing an address
+#   pointer <x> <y>                         Web section: move the free pointer to
+#                                           (x, y) in 1920x1080 UI pixels (rail
+#                                           included) - the left stick, which
+#                                           `key` cannot send. `key cross` then
+#                                           clicks there
 #   ui [--line]                             #115: the UI state as text - screen,
 #                                           focused element, its list, modal,
 #                                           toast, player OSD - from
@@ -661,6 +669,11 @@ type)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh type [--submit] <text>"
         true ;;
 kbdone) put_cmd "kbdone" ;;
 kbclose) put_cmd "kbclose" ;;
+weburl) [[ -n "${1:-}" ]] || die "usage: evo-remote.sh weburl <url>  (opens in the Web section; data: URLs work)"
+        put_cmd "weburl $*" ;;
+pointer) [[ "${1:-}" =~ ^[0-9]+$ && "${2:-}" =~ ^[0-9]+$ ]] \
+            || die "usage: evo-remote.sh pointer <x> <y>  (1920x1080 UI pixels, rail included; then key cross to click)"
+         put_cmd "pointer $1 $2" ;;
 upcompare)
     # #103: same paused frame with the upscaler Off / Sharp / AI, no OSD ->
     # output/upcompare/{off,sharp,ai}.bmp (+ compare.png where Pillow exists).

@@ -233,6 +233,22 @@ right stick and triggers, D-pad to the page as arrow keys, Triangle for the
 address, Options for the menu, L1/R1 tabs, Circle back). Leaving the section
 sends `VISIBLE 0`, so the engine stops painting while EVO shows anything else.
 
+**Dev remote.** `evo-remote.sh weburl <url>` opens a URL in the tab (http(s)
+only: `data:` URLs show in the address bar but the engine does not load them).
+`evo-remote.sh pointer <x> <y>` puts the free pointer at a 1920x1080 UI pixel
+(rail included), as the left stick would; `key cross` then clicks there. A text
+field opens EVO's keyboard, so with KEYBOARD INPUT = VIRTUAL KEYBOARD
+`type --submit <text>` fills it (console 2026-11-05: prosperostore.net search).
+
+**Idle repaints.** The engine host logs a 5 s damage report to
+`/data/prosperoweb/log.txt` (`evo-host: damage 5s: needsDisplay ...`, the rects
+that repeat most; nothing while a page is idle). Damage is tracked per rect: a
+20 px CSS animation repaints 20x20. But pages with endless animations on large
+elements (prosperostore.net's blurred background art, 30-61 s `breathe`/`drift`
+keyframes) repaint the whole page about 34 times a second, CPU-bound: the engine
+has no accelerated compositing (`wk_web_view.cpp`), so a transform animation is
+a full repaint, where a desktop browser would move a GPU layer.
+
 **Not yet:** playback from pages (Phase 3), downloads, more than one tab,
 emoji icons on the speed dial (the kit fonts show `?`), a restart after the
 engine dies, the RmlUi fallback rail (it has no Web entry).

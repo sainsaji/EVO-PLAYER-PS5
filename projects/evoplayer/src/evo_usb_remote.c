@@ -37,6 +37,8 @@
 extern int    screen;   /* main.c */
 extern void   evo_iobench_run(const char *spec);   /* evo_iobench.c */
 extern void   evo_pt_probe_run(const char *spec);  /* evo_pt_probe.c */
+extern void   evo_hui_web_pointer(int x, int y);   /* ui_kit/src/evo_hui_web.cpp */
+extern void   evo_hui_web_open(const char *url);   /* ui_kit/src/evo_hui_web.cpp */
 
 static long long now_ms_local(void)
 {
@@ -150,6 +152,23 @@ static void run_command(const char *line)
     if (strncmp(buf, "type ", 5) == 0) {
         if (!evo_keyboard_queue_text(buf + 5))
             pp_stage_bc("REMOTE_TYPE?", "no virtual keyboard open");
+        return;
+    }
+    /* `pointer <x> <y>`: the Web section's free pointer to screen pixel (x, y)
+     * of the 1920x1080 UI - the left stick, which `key` cannot send. Then
+     * `key cross` clicks there (a text field opens EVO's keyboard). */
+    if (strncmp(buf, "pointer ", 8) == 0) {
+        int x = -1, y = -1;
+        if (sscanf(buf + 8, "%d %d", &x, &y) == 2 && x >= 0 && x < 1920 && y >= 0 && y < 1080)
+            evo_hui_web_pointer(x, y);
+        else
+            pp_stage_bc("REMOTE_POINTER?", buf + 8);
+        return;
+    }
+    /* `weburl <url>`: open <url> in the Web section (any URL the address bar
+     * takes, data: URLs included) - for engine tests without the keyboard. */
+    if (strncmp(buf, "weburl ", 7) == 0) {
+        evo_hui_web_open(buf + 7);
         return;
     }
     if (strcmp(buf, "kbdone") == 0) {

@@ -103,6 +103,13 @@ enum {
 int  evo_hui_web_input(int what);
 /* Sticks -1..1 (y down), triggers 0..1, every frame the screen is active. */
 void evo_hui_web_sticks(float lx, float ly, float rx, float ry, float l2, float r2, float dt);
+/* Dev remote `pointer x y`: put the free pointer at screen pixel (x, y) of the
+ * 1920x1080 UI (what a screenshot shows, rail included) and leave D-pad mode,
+ * as a left-stick move would. Applied on the next draw. */
+void evo_hui_web_pointer(int x, int y);
+/* Dev remote `weburl <url>`: open <url> in the Web section's tab, as the
+ * address bar would. Frame-loop thread only. */
+void evo_hui_web_open(const char* url);
 /* 1 once after the page focused a text field (EVO opens its keyboard). */
 int  evo_hui_web_take_text_focus(void);
 void evo_hui_web_insert_text(const char* utf8);
