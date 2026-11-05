@@ -60,6 +60,16 @@ void *evo_direct_mem_alloc(size_t bytes);
 void *evo_direct_mem_alloc_gpu(size_t bytes);
 
 /**
+ * A GPU buffer in direct memory of its own, outside the pool: for one big
+ * texture that the 64 MiB pool cannot hold (#237: the browser's 2x page,
+ * ~29 MB each, two of them). 2 MiB-granular; NULL on failure. *len_out and
+ * *phys_out are what evo_direct_mem_unmap_gpu needs back. Free it only once
+ * the GPU is done with it.
+ */
+void *evo_direct_mem_map_gpu(size_t bytes, size_t *len_out, int64_t *phys_out);
+void evo_direct_mem_unmap_gpu(void *ptr, size_t len, int64_t phys);
+
+/**
  * Allocate zero-initialized memory from the direct memory region.
  */
 void *evo_direct_mem_calloc(size_t count, size_t size);

@@ -106,9 +106,15 @@ struct evob_key {
     uint32_t key_code, modifiers, pressed;
 };
 
+/* The page in EVO's UI pixels. scale (optional: an 8-byte RESIZE, or 0,
+ * means 1) is how many buffer pixels per UI pixel EVO wants: the host's view
+ * is width*scale x height*scale at page zoom `scale`, the HELLO answer gives
+ * that buffer size, and POINTER / SCROLL stay in UI pixels. */
 struct evob_size {
     uint32_t width, height;
+    uint32_t scale;
 };
+#define EVOB_SIZE_V1_BYTES 8u   /* width and height only */
 
 struct evob_flag {
     uint32_t value;

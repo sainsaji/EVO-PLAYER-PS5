@@ -249,6 +249,25 @@ keyframes) repaint the whole page about 34 times a second, CPU-bound: the engine
 has no accelerated compositing (`wk_web_view.cpp`), so a transform animation is
 a full repaint, where a desktop browser would move a GPU layer.
 
+**Idle throttle.** After 2 s with no packet from EVO (buffer releases aside),
+no load running and no fullscreen, the host sends at most 10 frames a second
+(`evo-host: idle, ...` / `active, full frame rate` in its log; the damage
+report counts `idle skips`). This cuts the frames EVO copies (prosperostore.net
+at 1x: 34/s to 8/s), but not the WebProcess: it still uses about one core,
+because WebKit keeps rendering the animation whatever the host takes.
+
+**2x page.** EVO presents at 3840x2160, so `RESIZE` asks for scale 2
+(`evob_size.scale`; an 8-byte `RESIZE` means 1). The host's view is then
+3584x1888 at page zoom 2: the layout is still 1792 CSS px wide, the text is
+drawn at 4K, and `POINTER` / `SCROLL` stay in EVO's UI pixels (the host
+multiplies them). The host makes its shared buffers at 3840x2160 once; EVO maps
+the whole buffer (its `fstat` size), not just the first `HELLO`'s rows. Each of
+the kit's two page textures is ~29 MB, more than the 64 MiB pool has left, so a
+texture over 16 MB gets direct memory of its own (`evo_direct_mem_map_gpu`);
+the pool itself is unchanged. Cost: the WebProcess paints 4x the pixels. A
+static page is fine (Wikipedia: ~0.65 core), but prosperostore.net's animated
+page drops to ~2 frames a second at one full core.
+
 **Not yet:** playback from pages (Phase 3), downloads, more than one tab,
 emoji icons on the speed dial (the kit fonts show `?`), a restart after the
 engine dies, the RmlUi fallback rail (it has no Web entry).

@@ -22,6 +22,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/uio.h>
 
@@ -402,7 +403,15 @@ static void handle_hello(const unsigned char *body, size_t len, const int *fds, 
                  h.width, h.height, h.stride, h.format, h.nbuf);
         return;
     }
-    const size_t bytes = (size_t)h.stride * h.height;
+    /* Map the whole buffer, not just this page: a later RESIZE (EVO's 2x
+     * page) may use more rows of it than the first HELLO does. */
+    size_t bytes = (size_t)h.stride * h.height;
+    {
+        struct stat st;
+        if (fstat(fds[0], &st) == 0 && st.st_size > 0 && (size_t)st.st_size > bytes &&
+            (size_t)st.st_size <= (size_t)h.stride * 2160u)
+            bytes = (size_t)st.st_size;
+    }
     for (int i = 0; i < EVOB_MAX_BUFS; ++i) {
         void *p = mmap(NULL, bytes, PROT_READ, MAP_SHARED, fds[i], 0);
         if (p == MAP_FAILED) {
@@ -960,7 +969,8 @@ void evo_browser_text(const char *utf8)
 void evo_browser_resize(int width, int height)
 {
     const int s = channel();
-    const struct evob_size sz = {(uint32_t)width, (uint32_t)height};
+    /* EVO presents at 3840x2160, twice its 1920x1080 UI: a 2x page is sharp. */
+    const struct evob_size sz = {(uint32_t)width, (uint32_t)height, 2u};
     if (s >= 0) frame_send(s, EVOB_RESIZE, &sz, sizeof sz);
 }
 

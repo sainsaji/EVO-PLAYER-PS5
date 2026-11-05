@@ -194,6 +194,55 @@ void evo_direct_mem_shutdown(void)
     pthread_mutex_unlock(&g_direct_pool.lock);
 }
 
+void *evo_direct_mem_map_gpu(size_t bytes, size_t *len_out, int64_t *phys_out)
+{
+    const size_t align_2mb = (size_t)2 * 1024 * 1024;
+    const size_t want = (bytes + align_2mb - 1) & ~(align_2mb - 1);
+    if (len_out) *len_out = 0;
+    if (phys_out) *phys_out = 0;
+    if (bytes == 0) return NULL;
+#if defined(EVO_TARGET_PS5)
+    off_t phys = 0;
+    int ret = sceKernelAllocateDirectMemory(0, (off_t)16 * 1024 * 1024 * 1024ULL, want,
+                                            align_2mb, 3 /* WB_ONION, as the pool */, &phys);
+    if (ret != 0 || phys == 0) {
+        evo_boot_log("direct_mem: own GPU buffer of %zu KB: allocate 0x%08x", want / 1024,
+                     (unsigned)ret);
+        return NULL;
+    }
+    void *mapped = NULL;
+    ret = sceKernelMapDirectMemory(&mapped, want, 0x33 /* PROT_CPU_RW | PROT_GPU_RW */, 0,
+                                   phys, align_2mb);
+    if (ret != 0 || !mapped) {
+        evo_boot_log("direct_mem: own GPU buffer of %zu KB: map 0x%08x", want / 1024,
+                     (unsigned)ret);
+        sceKernelReleaseDirectMemory(phys, want);
+        return NULL;
+    }
+    if (len_out) *len_out = want;
+    if (phys_out) *phys_out = (int64_t)phys;
+    return mapped;
+#else
+    void *p = NULL;
+    if (posix_memalign(&p, align_2mb, want) != 0) return NULL;
+    if (len_out) *len_out = want;
+    return p;
+#endif
+}
+
+void evo_direct_mem_unmap_gpu(void *ptr, size_t len, int64_t phys)
+{
+    if (!ptr) return;
+#if defined(EVO_TARGET_PS5)
+    sceKernelMunmap(ptr, len);
+    sceKernelReleaseDirectMemory((off_t)phys, len);
+#else
+    (void)len;
+    (void)phys;
+    free(ptr);
+#endif
+}
+
 /*
  * heap_fallback: when the pool is full, the CPU-only callers (video scratch,
  * rotate ring) still get memory from malloc(). The GPU callers must not: a

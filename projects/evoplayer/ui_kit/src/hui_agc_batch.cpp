@@ -37,6 +37,8 @@ constexpr float kMeshShape = 9.0f;            /* ui_sdf.pipe: a plain mesh verte
 /* Frames a released texture is kept: the runtime has up to three frames in
  * flight, plus one for luck. */
 constexpr int kFreeDelayFrames = 4;
+/* Textures above this take their own direct memory (make_texture). */
+constexpr std::size_t kOwnMappingBytes = 16u * 1024u * 1024u;
 
 } // namespace
 
@@ -48,6 +50,8 @@ struct AgcBatch::Texture
     int bytes_per_pixel = 4;
     void *pixels = nullptr;     /* 256-byte aligned: what the T# points at */
     void *alloc_base = nullptr; /* what must be freed */
+    std::size_t own_len = 0;    /* non-zero: alloc_base is an own mapping, not the pool */
+    std::int64_t own_phys = 0;
     std::uint32_t descriptor[EVO_AGC_COMBINED_DESCRIPTOR_DWORDS] = {0};
 };
 
@@ -129,7 +133,13 @@ AgcBatch::Texture *AgcBatch::make_texture(int width, int height, int bytes_per_p
     const std::size_t bytes = static_cast<std::size_t>(height) * static_cast<std::size_t>(tex->pitch);
     /* A T# stores the base >> 8: the pixels must start on 256 bytes, and
      * evo_direct_mem_alloc only promises 64 (see CreateTextureInternal). */
-    tex->alloc_base = evo_direct_mem_alloc_gpu(bytes + 255u);
+    /* A texture bigger than kOwnMappingBytes (the browser's 2x page, #237)
+     * gets direct memory of its own: two of them do not fit the 64 MiB pool
+     * the rest of the UI shares. Its mapping is 2 MiB aligned, so 256 holds. */
+    if (bytes > kOwnMappingBytes)
+        tex->alloc_base = evo_direct_mem_map_gpu(bytes, &tex->own_len, &tex->own_phys);
+    else
+        tex->alloc_base = evo_direct_mem_alloc_gpu(bytes + 255u);
     if (!tex->alloc_base)
     {
         evo_agc_runtime_note_drop(1);
@@ -168,7 +178,9 @@ void AgcBatch::destroy(Texture *texture)
 {
     if (!texture)
         return;
-    if (texture->alloc_base)
+    if (texture->own_len)
+        evo_direct_mem_unmap_gpu(texture->alloc_base, texture->own_len, texture->own_phys);
+    else if (texture->alloc_base)
         evo_direct_mem_free(texture->alloc_base);
     delete texture;
 }
