@@ -1034,13 +1034,17 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
         /*
          * No video stream resolved its geometry. Fall back to the first one so
          * an awkward container still plays rather than being refused, and say
-         * so - this is the shape that produced the 0x0 decoder.
+         * so - this is the shape that produced the 0x0 decoder. Cover art
+         * (an attached picture, e.g. in FLAC or MP3) is never the video: it
+         * is one frame with no timestamp, so the clock would never start and
+         * the audio would never play. Such a file plays as audio-only.
          */
         if (video_stream_index < 0) {
             for (unsigned int i = 0; i < play_fmt->nb_streams; ++i) {
                 const AVStream* st = play_fmt->streams[i];
                 if (st && st->codecpar &&
-                    st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+                    st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO &&
+                    !(st->disposition & AV_DISPOSITION_ATTACHED_PIC)) {
                     video_stream_index = static_cast<int>(i);
                     EVO_LOGW("playback", "no video stream resolved its size - "
                            "falling back to stream %d", video_stream_index);
