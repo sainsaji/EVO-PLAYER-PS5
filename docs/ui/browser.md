@@ -268,9 +268,106 @@ the pool itself is unchanged. Cost: the WebProcess paints 4x the pixels. A
 static page is fine (Wikipedia: ~0.65 core), but prosperostore.net's animated
 page drops to ~2 frames a second at one full core.
 
+**Idle animation pause.** On the idle switch the host runs a script that
+pauses every running animation except CSS transitions (kept in
+`window.__evoPaused`) and resumes them on the next input. A mirror of
+prosperostore.net drops to ~0.25 core; the live site still uses about one core.
+
+**GPU compositing (in progress, off unless `/data/prosperoweb/gpu` exists).**
+The real fix for animations is GPU layers, on Sony's own GLES library
+`libSceGLSlimVSH`, which the system browser's WebProcess uses. A payload can load it and create a context,
+but its init asks Sony's compositor service (`/system/sys/AgcCompositor.elf`)
+for memory. A payload is refused on its app category. With the category poked to
+`0x1000000` (common_dialog) at struct proc `+0x4b0`, keeping the payload's own
+authid, the service grants up to 48 MB (64 MB is refused) and GLSlim makes a
+working context: `SlimGL`, OpenGL ES 2.0, max texture 4096. Do not borrow the
+browser's authid: under it every direct-memory map fails `EPERM`. GLSlim talks
+to the service through `libSceCompositeExt.sprx` (not `libSceComposite`). Never
+call `sceCompositorInitWithProcessOrder` a second time: it zeroes the client
+state, command ring included, before its "already initialised" check, and every
+later call then says "disconnected from compositor server". With one init, the GPU runs our frames.
+
+*Frame pacing.* `eglSwapBuffers` is GLSlim's frame boundary (a frame ended by
+`glFinish` alone never lands). The service takes one frame per client per
+60 Hz tick. GLSlim's submit flushes the command buffer to the service and only
+then writes the frame's PostEvent and EndOfFrame commands, without flushing
+them, so a frame only finishes at the next swap: readbacks were one frame
+stale. GLSlim keeps two frame slots; when it reuses one whose GPU label is not
+done, it waits in `sceCompositorWaitEndOfRendering`, and that wait never
+fires for this client (60 s timeout, retried forever): that was the hang on
+back-to-back swaps. Working frame end: take GLSlim's current slot before the
+swap (context from libSceGLSlimVSH `0x13920`; slots at ctx `+0x8e8`, 0x200
+each, index `+0x864`; in a slot, `+0x1d0` label pointer, `+0x1d8` target),
+swap, call `sceCompositorFlush`, then spin until the label reaches its target.
+30 frames run back to back at 60 fps with every readback current; the GPU
+finishes about 0.1 to 0.3 ms after the tick for a light frame.
+
+*Shaders.* GLSlim has no runtime compiler (`glShaderSource` is a stub). Its
+`glShaderBinary` takes Sony-compiled shaders: small AMDGPU ELFs
+(`.shader_text`, `.shader_header` with the `sl00` trailer, `.metadata` with
+uniform names). NK WebKit's TextureMapper set is built into
+`libSceNKWebKitRequirements.sprx`: 108 blobs named
+`shaders/<613|616|main>/texmap/{v,f}<options>.{vert,frag}.bin`, found by the
+SHA-1 of the name (13.60: table at `0x290070`). WebKit passes the shader's
+own type as the binary format. `output/re/scripts/nkshaders.py` extracts them
+(Sony's binaries: never commit them). Option 16384 is the Gaussian blur:
+`u_gaussianKernel[6]`, `u_gaussianKernelOffset[6]`, int
+`u_gaussianKernelHalfSize`, and `u_blurDirection` in texels. Measured at
+1792x944: a two-pass blur of the whole page costs about 0.4 ms of GPU time,
+the first frame that uses a program about 85 ms once, a full readback
+3.5 to 4.5 ms. Option 1 is not a plain copy in this build (the blur program
+with a one-tap kernel copies exactly). Clears seem to be applied lazily: a
+texture seeded only with clears was not seen by later sampling, so the probe
+seeds with `glTexSubImage2D`.
+The service keeps a client's slot until the client sends Quit (command 1 on
+`/system_tmp/GnmCompositor`), and a leftover slot needs a reboot, so the probe
+sends Quit itself on every exit path, crashes included. Probe and helpers:
+`projects/evoplayer/helpers/glslim_probe.c`, `proc_diff.c`, `proc_poke.c`,
+built by `tools/build_glslim_probe.sh`.
+
+*In the engine host* (fork branch `feat/evo-host`). With
+`/data/prosperoweb/gpu` present, the WebProcess starts GLSlim before WebKit
+(`src/ps5/glslim`: category poke, 48 MB grant, a 30-frame self-test) and the UI
+turns accelerated compositing on. Patch `0022-webkit-ps5-glslim-compositing`
+gives WebKit a display on GLSlim with pbuffer contexts, ends each frame with the
+shell's frame end, and loads TextureMapper's programs from Sony's binaries in
+`/data/prosperoweb/shaders` (uploaded by hand, never committed; a missing exact
+program falls back to the uber pair, TextureCopy to the plain RGB program). The
+compositor draws into an FBO; each frame is read back, rows reversed (GL's row
+0 is the bottom; `PROSPEROWEB_GPU_FLIP=0` turns that off), swizzled to BGRA and
+sent to EVO as an ordinary `Update`, acked by `DisplayDidRefresh`, so EVO's side
+is unchanged. On the console at 1792x944: readback 1.5 ms plus swizzle 2.7 ms
+per frame. Clips, rounded clips, opacity and rotated layers draw correctly.
+Rules the console taught:
+
+- Only the compositor thread touches GL. GLSlim aborts (SIGABRT, no message)
+  when a second context is made current on another thread, which WebKit's
+  `BitmapTexturePool` release timer did on the main thread with the sharing
+  context. On PS5 that timer no longer borrows a context; the compositor thread
+  releases unused pool textures after its readback, at most every 500 ms.
+- The page is composited at 1x: the host caps `RESIZE`'s scale at 1 while the
+  flag exists and EVO scales the page up. At 2x the 3584x1888 target alone is
+  27 MB of the 48 MB, and the page's layers came out blank.
+- Memory is still the open problem. prosperostore.net loses its hero text, and
+  a page opened after it loses every composited layer; the same test page
+  opened first draws completely. Next: log pool size and allocation failures,
+  release textures when idle and on navigation, and shrink large layers.
+- On a fatal signal the shell sends Quit first, then writes up to 96 code
+  addresses from the interrupted stack to `glslim.txt` (image addresses as ELF
+  offsets for `llvm-symbolizer`, system-module addresses raw). The console's
+  signal context has rip at word 28 and rsp at word 31; the SDK's `ucontext_t`
+  does not match it. elfldr maps no ELF header, so `__ehdr_start` must not be
+  dereferenced. libc++'s verbose abort is overridden to log its message.
+
+Fallbacks if the 48 MB stays too small: run GLSlim inside EVO (an app, it has a
+pool) with the host sending layers, or EVO composites the layers on its own
+sceAgc path.
+
 **Not yet:** playback from pages (Phase 3), downloads, more than one tab,
-emoji icons on the speed dial (the kit fonts show `?`), a restart after the
-engine dies, the RmlUi fallback rail (it has no Web entry).
+site favicons on the speed dial (they are emoji now, which the kit fonts show
+as `?`), start page and About text still Prospero Browser's ("Native WebKit
+Engine"), a restart after the engine dies, the RmlUi fallback rail (it has no
+Web entry).
 
 **Spike trigger.** With `/mnt/usb0/prosperoweb.elf` present, the spike spawns
 the engine host instead of the frame test. Line 2 of
