@@ -12,6 +12,7 @@
 #include "evo_browser_wire.h"
 #include "evo_boot_log.h"
 #include "evo_elfldr.h"
+#include "evo_gpu_broker.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -612,14 +613,45 @@ static int file_exists(const char *path)
     return 1;
 }
 
+/* #237 GPU broker spike: with /mnt/usb0/evo_gpu_broker present, the spike
+ * spawns this client instead. It gets a GPU broker endpoint as the first
+ * message on its fd 3, draws with Mesa (EGL/GLES over Zink/RADV, submitted by
+ * EVO) and sends frames over the normal wire. */
+#define GPU_TRIGGER    "/mnt/usb0/evo_gpu_broker"
+#define GPU_CLIENT_ELF "/mnt/usb0/evo_gpu_client.elf"
+#define GPU_BROKER_UP_MS 20000
+
+/* After the client is spawned: an endpoint for it, sent on our socket end. */
+static void gpu_client_handoff(int sock, int pid)
+{
+    for (int waited = 0; evo_gpu_broker_state() == 0 && waited < GPU_BROKER_UP_MS; waited += POLL_STEP_MS)
+        usleep(POLL_STEP_MS * 1000);
+    if (evo_gpu_broker_state() != 1) {
+        EVO_LOGW("browser", "gpu spike: broker not running (state %d), client gets no endpoint",
+                 evo_gpu_broker_state());
+        return;
+    }
+    int cookie = -1;
+    const int fd = evo_gpu_broker_open(&cookie);
+    if (fd < 0) {
+        EVO_LOGW("browser", "gpu spike: no broker endpoint");
+        return;
+    }
+    const int sent = send_fd(sock, fd);
+    EVO_LOGI("browser", "gpu spike: endpoint fd %d (cookie %d) sent to pid %d -> %d", fd, cookie, pid, sent);
+    close(fd);
+    evo_gpu_broker_register(cookie, pid);
+}
+
 static void frame_test_start(int broker)
 {
-    g_engine_host = g_engine_elf[0] != 0;
+    const int gpu_client = g_spike && file_exists(GPU_TRIGGER) && file_exists(GPU_CLIENT_ELF);
+    g_engine_host = g_engine_elf[0] != 0 && !gpu_client;
     if (!g_engine_host && !(g_spike && file_exists(FRAME_TEST_ELF))) {
         set_fail("The browser engine (prosperoweb.elf) is not installed");
         return;
     }
-    const char *what = g_engine_host ? "engine host" : "frame test";
+    const char *what = g_engine_host ? "engine host" : gpu_client ? "gpu client" : "frame test";
     int sv[2];
     if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sv) != 0) {
         EVO_LOGW("browser", "S2b: socketpair failed (errno %d)", errno);
@@ -638,6 +670,11 @@ static void frame_test_start(int broker)
                  "{\"op\":\"spawn\",\"elf\":\"%s\",\"argv\":[\"%s\",\"--evo-host\"],"
                  "\"env\":[],\"nfds\":0,\"src_pid\":%d,\"src_fds\":[%d]}",
                  g_engine_elf, g_engine_elf, (int)getpid(), sv[1]);
+    } else if (gpu_client) {
+        snprintf(req, sizeof req,
+                 "{\"op\":\"spawn\",\"elf\":\"" GPU_CLIENT_ELF "\",\"argv\":[\"evo-gpu-client\"],"
+                 "\"env\":[],\"nfds\":0,\"src_pid\":%d,\"src_fds\":[%d]}",
+                 (int)getpid(), sv[1]);
     } else {
         snprintf(req, sizeof req,
                  "{\"op\":\"spawn\",\"elf\":\"" FRAME_TEST_ELF "\",\"argv\":[\"evo-frame-test\"],"
@@ -656,6 +693,8 @@ static void frame_test_start(int broker)
     const char *p = strstr(reply, "\"pid\":");
     EVO_LOGI("browser", "S2b: %s spawned, pid %d, in %lld ms", what,
              p ? atoi(p + 6) : 0, evo_log_mono_ms() - t0);
+    if (gpu_client)
+        gpu_client_handoff(sv[0], p ? atoi(p + 6) : 0);
 
     g_fsock = sv[0];
     pthread_mutex_lock(&g_mu);
@@ -825,6 +864,7 @@ int evo_browser_engine_start(const char *broker_elf_path)
 
 void evo_browser_engine_boot(void)
 {
+    evo_gpu_broker_release_unused();
     FILE *f = fopen(SPIKE_TRIGGER, "r");
     if (!f) return;
     char path[256] = {0};
@@ -840,6 +880,10 @@ void evo_browser_engine_boot(void)
     g_spike = 1;
     if (file_exists(ENGINE_HOST_ELF))
         snprintf(g_engine_elf, sizeof g_engine_elf, "%s", ENGINE_HOST_ELF);
+    if (file_exists(GPU_TRIGGER)) {
+        EVO_LOGI("browser", "gpu spike: starting the GPU broker");
+        evo_gpu_broker_start();
+    }
     EVO_LOGI("browser", "spike S1: starting the broker from %s", path);
     evo_browser_engine_start(path);
 }

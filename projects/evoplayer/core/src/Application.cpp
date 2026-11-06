@@ -51,6 +51,7 @@ extern "C" int perf_render_fps;
 #include "evo_boot_trace.h"
 #include "evo_crash_note.h"
 #include "evo_jailbreak.h"
+#include "evo_gpu_broker.h"
 #include "evo_browser_engine.h"
 #include "evo_vdec.h"
 #include "evo_direct_mem.h"
@@ -372,6 +373,9 @@ bool Application::initHardware() {
     evo_webui_preload();
     evo_boot_log_flush();
 #endif
+    /* #237: the GPU broker's RADV platform (a second sceAgcInit) must run
+     * before the credential swap too, like every GPU-side init above. */
+    evo_gpu_broker_preinit();
 
     evo_jailbreak_self();
     evo_boot_log_flush();

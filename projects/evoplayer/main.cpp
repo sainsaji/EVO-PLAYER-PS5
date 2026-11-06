@@ -2,6 +2,7 @@
 #include "evo_boot_log.h"
 #include "evo_boot_trace.h"
 #include "evo_crash_note.h"
+#include "evo_gpu_broker.h"
 
 #ifdef EVO_HAVE_BUILD_ID
 #include "evo_build_id.h"
@@ -106,6 +107,9 @@ int main(int argc, char* argv[]) {
 #ifdef EVO_APP_MODULE
     evo_install_crash_catcher();
 #endif
+    /* #237: before anything maps, hold the GPU broker clients' address
+     * ranges (released again at engine boot without the spike trigger). */
+    evo_gpu_broker_reserve_early();
 
     auto& app = evo::Application::getInstance();
     if (!app.initialize(argc, argv)) {

@@ -192,6 +192,22 @@ endif
 C_SRCS := $(PP_SRCS) $(UI_SRCS) $(MEDIA_SRCS) $(ADDON_SRCS)
 C_OBJS := $(C_SRCS:.c=.o)
 
+# #237: PS5_Vulkan's GPU broker (owner side), vendored in gpu_broker/. EVO, the
+# app, submits GPU work for the browser engine's processes (payloads cannot).
+# compat/ stands in for the few Mesa util headers radv_ps5_platform.c uses.
+GPUB_OBJS :=
+ifeq ($(AGC_DEVICE),1)
+    GPUB_OBJS := gpu_broker/packet_io.o gpu_broker/radv_ps5_platform.o \
+                 gpu_broker/server.o gpu_broker/evo_gpu_broker.o
+endif
+GPUB_INC := -Igpu_broker -Igpu_broker/compat
+
+gpu_broker/%.o: gpu_broker/%.c
+	$(CCACHE) $(CC) $(CFLAGS) $(GPUB_INC) $(DEPFLAGS) -c -o $@ $<
+
+gpu_broker/%.o: gpu_broker/%.cpp
+	$(CCACHE) $(CXX) $(CXXFLAGS) $(GPUB_INC) $(DEPFLAGS) -c -o $@ $<
+
 CORE_SRCS := \
     main.cpp \
     core/src/Application.cpp \
@@ -321,7 +337,7 @@ browser/%.o: browser/%.cpp
 # real hardware cycles). package-app.sh's app-cflags.stamp only force-cleans on
 # a *flag* change, not a header edit.
 DEPFLAGS := -MMD -MP
-ALL_DEPS := $(C_OBJS:.o=.d) $(RMLUI_OBJS:.o=.d) $(CORE_OBJS:.o=.d) $(HUI_OBJS:.o=.d) $(UI_KIT_OBJS:.o=.d)
+ALL_DEPS := $(GPUB_OBJS:.o=.d) $(C_OBJS:.o=.d) $(RMLUI_OBJS:.o=.d) $(CORE_OBJS:.o=.d) $(HUI_OBJS:.o=.d) $(UI_KIT_OBJS:.o=.d)
 
 # CCACHE=ccache (set by scripts/package-app.sh and build-evoplayer.sh) caches each
 # object by its preprocessed source + flags, so switching between the payload
@@ -348,17 +364,17 @@ all: $(ELF)
 #   print-objects  emit the object paths (relative to this dir), space-separated
 # -----------------------------------------------------------------------------
 .PHONY: objects print-objects
-objects: $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS) $(HUI_OBJS) $(UI_KIT_OBJS)
+objects: $(GPUB_OBJS) $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS) $(HUI_OBJS) $(UI_KIT_OBJS)
 
 print-objects:
-	@echo $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS) $(HUI_OBJS) $(UI_KIT_OBJS)
+	@echo $(GPUB_OBJS) $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS) $(HUI_OBJS) $(UI_KIT_OBJS)
 
-$(ELF): $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS) $(HUI_OBJS) $(UI_KIT_OBJS)
+$(ELF): $(GPUB_OBJS) $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS) $(HUI_OBJS) $(UI_KIT_OBJS)
 	$(CXX) $(CFLAGS) -o $@ $^ $(LIBS)
 	@echo "STAGE=$(STAGE)"
 	@sha256sum $@
 	@ls -la $@
 
 clean:
-	rm -f $(ELF) $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS) $(HUI_OBJS) $(UI_KIT_OBJS) $(ALL_DEPS)
+	rm -f $(ELF) $(GPUB_OBJS) $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS) $(HUI_OBJS) $(UI_KIT_OBJS) $(ALL_DEPS)
 	rm -rf artifacts/4k_stages ui_kit/obj
