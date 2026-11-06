@@ -113,7 +113,19 @@ void *start_body(void *)
     release_placeholders();
     pthread_mutex_unlock(&g_mu);
     mkdir(BROKER_DIR, 0777);
-    ps5_gpu_broker_set_host_limit(PW_GPU_LIMIT);
+    // The host-visible bytes each client may hold. A 2x browser page needs
+    // more than the protocol default of 128 MB (the WebProcess retried failed
+    // allocations at 127 MB until it died) and 384 hangs a 2x scroll, so the
+    // default is 768; /data/evoplayer/evo_gpu_host_mb overrides it (MB).
+    unsigned long long host_limit = (unsigned long long)768 << 20;
+    if (FILE *f = fopen("/data/evoplayer/evo_gpu_host_mb", "r")) {
+        unsigned mb = 0;
+        if (fscanf(f, "%u", &mb) == 1 && mb >= 64 && mb <= 3072)
+            host_limit = (unsigned long long)mb << 20;
+        fclose(f);
+    }
+    const bool limit_ok = ps5_gpu_broker_set_host_limit(host_limit);
+    EVO_LOGI("gpu", "broker host limit %llu MB per client (%s)", host_limit >> 20, limit_ok ? "set" : "refused");
     EVO_LOGI("gpu", "broker starting (dir %s)", BROKER_DIR);
     evo_boot_log_flush();
     const bool ok = ps5_gpu_broker_start(BROKER_DIR, false, true, client_absent);

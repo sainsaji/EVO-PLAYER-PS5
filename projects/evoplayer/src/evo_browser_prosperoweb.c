@@ -710,6 +710,10 @@ static void handle_gpu_client(const unsigned char *body, size_t len)
     memcpy(&g, body, sizeof g);
     EVO_LOGI("browser", "gpu: the engine host gave endpoint cookie %d to pid %d", g.cookie, g.pid);
     if (g.cookie > 0 && g.pid > 0) {
+        /* The spare is taken: g_host_eps counts spares waiting at the host, not every endpoint
+         * ever sent (it used to, so the 5th WebProcess of a session got none, started without a
+         * GPU and exited at once: blank pages). */
+        if (g_host_eps > 0) g_host_eps--;
         evo_gpu_broker_register(g.cookie, g.pid);
         gpu_host_send_endpoint(g_fsock);   /* a spare for the next WebProcess */
     }
