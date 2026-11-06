@@ -438,14 +438,167 @@ GLSlim stays behind its own flag as the fallback.
   `helpers/mesa_bundle_test.c` like the fork's payload, to test the bundle
   outside WebKit through the spike (`/mnt/usb0/evo_gpu_broker`,
   `evo_browser_spike`, `evo_gpu_client.elf`).
-- *Measured* (2026-11-06, PS5 Pro, FW 13.60). prosperostore.net draws
-  completely, hero included (it lost its text under GLSlim), and its carousel
-  animates; EVO stays at 60 fps. WebProcess CPU on that page, idle: 0.75 to
-  0.93 core on the raster path, about 1.06 with Mesa. Mesa does not save CPU
-  yet: Skia still paints every tile on the CPU, and each frame is read back,
-  swizzled and sent whole (6.6 MB, about 9 frames a second) where the raster
-  path sends only damaged rects. Next: hand EVO the frame on the GPU without a
-  readback, read back only damage, then Skia on the GPU.
+- *Options.* Words in `/data/prosperoweb/mesa` (WebProcess, read once):
+  `nodiff` sends every frame whole; `pace=N` is the shortest time between two
+  frames in ms (default 16, 0 = none); `scale2` keeps 2x pages (without it the
+  host holds Mesa at 1x, like GLSlim). `/data/prosperoweb/idle_throttle` brings
+  back the host's idle mode (2 s without input: page animations paused, 10
+  frames/s, and with Mesa the UI side holds the frame ack to 100 ms); it is off
+  by default, so animations run at full rate. `/data/evoplayer/evo_gpu_host_mb`
+  (EVO) sets the host-visible bytes each broker client may hold, 64 to 3072 MB
+  (default 128, `PW_GPU_LIMIT` in the vendored `protocol.h`).
+- *Send only what changed.* The WebProcess keeps the frame it sent last and
+  compares the next read-back with it (16-row bands, 64-pixel blocks); only
+  the changed rects travel, in a bitmap the size of their bounds, an unchanged
+  frame is not sent, and a frame starts at most every `pace` ms. Surface stats
+  (frames, sent, unchanged, render/readback/diff/copy ms) go to `mesa.txt`
+  every 5 s. `ps5_ui_frame_interval_ms` (patch 0022, UI side) delays each
+  frame ack; evo-host sets it only in idle mode.
+- *Trap: the broker budget.* At 2x the WebProcess hit 127 of 128 MB
+  host-visible (`stage=client_budget` in `/data/evoplayer-gpu/gpu-broker-results.txt`),
+  retried the failed allocations until it died, and the next WebProcess could
+  not bind (`ps5_gpu_client_bind` -> 5). It is not a console limit (flexible
+  memory had 679 MB free). 384 MB runs prosperostore.net at 2x with no failures.
+  Pick the default before shipping.
+- *Measured* (2026-11-06, PS5 Pro, FW 13.60, prosperostore.net). EVO stays at
+  60 fps. WebProcess CPU:
+
+  | | raster 2x | Mesa 1x | Mesa 2x |
+  |---|---|---|---|
+  | idle mode (animations paused, 10 frames/s) | 0.75-0.93 | 0.31 | 0.67-0.72 |
+  | animations on | 0.99 at ~3 frames/s | | 1.40 at ~14-20 frames/s |
+
+  Before the changes above Mesa was 1.06 idle. With animations on Mesa draws
+  about 5x the frames for 1.4x the CPU (about 4x cheaper per frame), but
+  nothing is saved yet: raster is CPU-bound at 3 frames/s. The animation
+  redraws nearly the whole page each frame (6.5 of 6.8 Mpx). Mesa 2x per frame:
+  render 22-34 ms, readback 3.8, diff 5.3, copy into EVO's buffer 15; evo-host
+  uses 0.20 core against 0.04 on raster.
+
+  *Correction (2026-11-06, later).* The Mesa numbers in the first draft of that
+  table were taken while EVO showed the home screen, not the Web section (the
+  engine keeps its WebProcess across runs and `weburl` alone does not open the
+  section), so they were not valid. Open the Web section and check with `ui`
+  that focus is `#web-page-content` before measuring. The page also needs the
+  engine restarted for a changed `mesa` flag (a full quit, close, launch).
+
+### Mesa: what we know now (2026-11-06)
+
+- *Whole-frame fast path* (patch 0022, `ps5ReadBackAndSend`): when most of the
+  page changes it flips on the GPU (`glBlitFramebuffer`), reads back
+  `GL_BGRA_EXT` straight into the sent bitmap and skips the CPU diff and
+  swizzle; every 8th frame goes the diff way to re-measure. The "most of the
+  page" test compares the *bounds* of the changed rects (more than 32 rects
+  are merged into their bounds before sending), not the summed area: with the
+  summed area the path switched itself off after ~10 s. `nofast` turns it off.
+- *Broker budget.* At 2x (3584x1888) the first scroll of a busy page with the
+  budget `/data/evoplayer/evo_gpu_host_mb` at 384 stalled one frame for 15.8 s
+  (a GL error, most likely out of GPU memory), the WebProcess missed its IPC
+  deadline, was killed and respawned (15 s to bind the GPU again): the page
+  hangs. 768 does not. Use at least 768 for 2x pages; 512 is untested. The
+  code default is not changed yet.
+- *Idle frames.* A static page (Wikipedia, nothing animating) is rendered and
+  read back at ~62 fps, ~95% of the frames unchanged, ~0.5-0.6 core spent
+  comparing identical frames (render 1.2 ms, readback 2.4, diff 6.4 per
+  frame). Not fixed: the host should draw only when WebKit reports damage.
+- *EVO's view size* is sent when the Web section opens (`EVOB_RESIZE`, scale
+  2); an engine that never saw it stays at its default 1920x1080.
+- *Endpoint cap (fixed 2026-11-06).* EVO hands the engine host a spare GPU
+  endpoint for the next WebProcess. `GPU_HOST_MAX_EPS` (4) used to count every
+  endpoint ever sent, so from the 5th WebProcess of a session the host got
+  `endpoint -1`, the WebProcess started with no GPU, exited (exit 0) within
+  seconds and the page stayed white. It now counts only spares waiting at the
+  host (`handle_gpu_client` drops it when a WebProcess takes one). Symptom to
+  look for: `gpu: endpoint -1` in `evo.log`, or a spawn with `fds=[..->3]`
+  only. The broker host budget default is now 768 MB in code
+  (`/data/evoplayer/evo_gpu_host_mb` still overrides it).
+- *Spawn time.* Each new WebProcess (every cross-site navigation, then a
+  prewarm) takes 2-10 s to spawn through the broker (1.9 s idle, 6-10 s with a
+  busy page open). Cause not found yet.
+- *Blank card icons under Skia GPU (fixed, fork 003caf7).* Icons came out
+  blank or as noise. `HAVE_GL_FENCE` is not defined for PlayStation, so
+  `GLFence::create()` returns null and `SkiaGPUAtlas::uploadImages` had no
+  sync: the Skia worker threads (own GL contexts) sampled the image atlas
+  before the upload reached the GPU. Now `glFinish()` after the upload when
+  there is no fence (patch 0022). Found by bisecting a copy of the real page
+  (`tools/bench/ps_*.html`, `<base href>` to the site) with one CSS feature
+  removed each; the noise gave the race away.
+
+### Scroll benchmark
+
+A page that does not animate scrolls fine on every setting, so the numbers
+that count come from an animated page.
+
+- *Pages* (fork `tools/bench/`): `article.html` (long text page: headings,
+  floated images, tables, quotes) and `cards.html` (store-like grid), the same
+  file, the type comes from the file name. Both animate: a spinner, a sliding
+  bar and a marquee in the header (compositor-only), moving gradients,
+  pulsing shadows and shimmer (repaint), a script-driven canvas. Text and
+  colours come from a seeded generator. `file://` pages do not run scripts in
+  the engine: serve the folder from the PC (`python3 -m http.server 8123
+  --bind 0.0.0.0` in `third_party/ProsperoWeb/tools/bench`).
+- *Driver.* Dropping `/data/prosperoweb/bench_go` (`speed=800 secs=30 warm=3`)
+  makes the engine host scroll the open page with wheel events (the path a
+  pad scroll takes) at `speed` UI px/s, 60 events a second, down for half the
+  time and up for the other half. Touching `/data/prosperoweb/cpu_now` makes
+  every process print its CPU line at once; the host touches it at both ends,
+  so each process reports exactly the scroll window. The page's own report
+  (page fps, px/s scrolled, frame gap p50/p95/worst, frames over 50 ms) is
+  drawn on the page at the end; screenshot it.
+- *Run it:* `tools/webbench/runbench.sh article 800 30` (add `NAV=1` the first
+  time to open the Web section). It prints the host lines, the CPU of the
+  window, the surface stats and EVO's frame counts, and leaves the screenshot
+  in `output/screenshots/latest.png`.
+- *Animation check:* `tools/webbench/anim_one.sh <bg|canvas|shadow|spin|text>`
+  opens one animation per page (`animtest.html` copied to `t_<kind>.html`) and
+  diffs three screenshots; for flicker, watch the screen.
+
+Results, 2x (3584x1888), article page, 800 px/s for 30 s, PS5 Pro:
+
+| | WebProcess CPU | host CPU | frames to EVO | page worst frame |
+|---|---|---|---|---|
+| Mesa, Skia on the CPU | 1.41 core (user 13.9 s, **sys 28.5 s**) | 0.09 | 6.5 fps | 407 ms (p95 367) |
+| Mesa, Skia on the GPU | 1.52 core (user 20.9 s, sys 24.6 s) | 0.41 | 31 fps | 114 ms (p95 65) |
+
+The same page without animations: Mesa 2x, 43.7 fps, WebProcess 0.66, host
+0.72, worst frame 63 ms. Two things stand out: more than half of the CPU is
+*kernel* time (a fresh 27 MB shared bitmap per frame: page faults and
+mapping), and the host burns as much as the WebProcess when frames flow. Not
+measured yet on this benchmark: raster, Mesa 1x, and Skia GPU after the canvas
+change below.
+
+### Skia on the GPU (opt-in: the word `skia` in `/data/prosperoweb/mesa`)
+
+Skia's GL backend was already compiled into the fork's `libSkia.a`; what
+was missing was the PlayStation glue. Patch 0022 builds WebKit's upstream GPU
+tile path for PS5 (`PlatformDisplaySkia.cpp`: `ps5_skia_gpu()`, a Skia GL
+context per thread, 48 MB resource cache each; `WebProcessPlayStation.cpp`
+turns `setCanUseAcceleratedBuffers` on). Mesa dispatches GL per thread
+(Sony's GLES library does not), which is why this works here. The
+`SkiaGPUWorker` threads paint tiles into pool textures that the compositor
+takes whole (`swapTexture`) or copies in part (`glCopyTexSubImage2D`).
+
+- A tile's GPU work is awaited on the painting thread (`submit` with a CPU
+  wait) instead of handing the compositor a fence: the fence did not explain
+  the faults below, the wait is kept as the safer choice.
+- `tiles:` lines in `mesa.txt` (every 5 s) count whole swaps, partial copies,
+  updates without a texture and CPU uploads.
+- *Canvas.* One animation per page on the console (`tools/webbench/anim_one.sh`):
+  moving gradient, pulsing shadow and text work; a `<canvas>` flickered and
+  never updated with the GPU canvas backend (it draws on the page's main
+  thread). Canvases now stay on the CPU (`ImageBufferSkiaAcceleratedBackend`
+  returns null for them under PS5); tiles keep painting on the GPU. Also seen:
+  a small flicker at the start, end and middle of the transform-only spin
+  page. Open.
+
+### Building the engine
+
+CI takes 7-8 minutes a push (the disk cleanup now runs in the background).
+`tools/local-build/` in the fork builds the same engine in Docker on the PC
+(`run.sh setup`, then `run.sh build`; the build tree and ccache live in the
+`pw-work` volume). The first build has no ccache (GitHub's cache cannot be
+downloaded and would not match anyway) and compiles all of WebKit, hours;
+after it a one-file change should rebuild in a few minutes. See its README.
 
 **Not yet:** playback from pages (Phase 3), downloads, more than one tab,
 site favicons on the speed dial (they are emoji now, which the kit fonts show
