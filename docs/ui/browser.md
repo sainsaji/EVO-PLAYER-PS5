@@ -359,9 +359,56 @@ Rules the console taught:
   does not match it. elfldr maps no ELF header, so `__ehdr_start` must not be
   dereferenced. libc++'s verbose abort is overridden to log its message.
 
-Fallbacks if the 48 MB stays too small: run GLSlim inside EVO (an app, it has a
-pool) with the host sending layers, or EVO composites the layers on its own
-sceAgc path.
+*Why not Mesa in the WebProcess.* A payload cannot drive the GPU itself, so a
+Mesa driver (ps5-opengl or RADV) cannot run inside the WebProcess on its own.
+Measured with `projects/evoplayer/helpers/agc_probe.c` (sent to elfldr with EVO
+running, log `/data/prosperoweb/agc_probe.log`; FW 13.60, Pro):
+
+- Direct memory: a payload gets 4 MB at most (8 MB fails `0x80020023`); the
+  rest of the pool is EVO's. Flexible memory with CPU+GPU protection (`0x33`)
+  maps up to 256 MB, but GPU access to it is untested.
+- Loading `libSceAgcDriver.sprx` kills the payload at once, with no signal and
+  no exit line. `libSceAgc.sprx` pulls it in and dies the same way.
+- The sysmodules GLSlim needs load `libSceAgcVsh.sprx`: the command builders
+  (`sceAgcInit` works, DMA and release-mem packets), but no submit.
+- `libSceGnmDriver.sprx` loads, but its init ioctl on `/dev/gc` (`0xc008811b`)
+  fails with EAGAIN, and its submit then crashes on a null pointer. Setting the
+  category at `proc+0x4b0` to EVO's (0, game) changes nothing; the driver load
+  then hangs instead.
+- Likely cause: a payload starts with no GPU address space (`vm#0, dmem#0` in
+  klog's EXEC line), and that is set when the process is created.
+
+ps5-opengl has two more problems here: it opens VideoOut on its first draw
+(`runtime_video_acquire`), which panics in a payload, and it is desktop GL
+only, while WebKit's PlayStation port expects GLES.
+
+*Way forward.* EVO, which is an app, owns the GPU and submits for the
+WebProcess. Prospero Browser's GPU broker already works this way: the WebProcess
+runs Mesa EGL + Zink + RADV (GLES 3.2, a real GLSL compiler) as a client, its
+memory is shared memory from the app, and the app submits its command buffers.
+WebKit pages rendered on the GPU through it in a helper process (Prospero
+Browser `docs/knowledge`, 2026-10-17 to 10-21). Until that port is done, GLSlim
+stays the GPU path. The other fallback is to cut GLSlim's memory use on heavy
+pages.
+
+*GPU broker in EVO (spike, off by default).* The broker's owner side is vendored
+in `projects/evoplayer/gpu_broker/` (PS5_Vulkan's `server.cpp`/`packet_io.c`,
+LGPL-2.1+; PS5_Mesa's `radv_ps5_platform.c`, MIT; `compat/` stands in for the
+few Mesa util headers, on pthreads). EVO holds the clients' address ranges
+(`0x240000000` + 512 MB, `0x3000000000` + 16 GB) from `main()` on and gives
+them back at engine boot unless `/mnt/usb0/evo_gpu_broker` exists; RADV's
+platform init (a second `sceAgcInit`) runs before unjail, like EVO's other GPU
+inits. The broker starts on a worker thread (its warm-up submit can block).
+With that file and `/mnt/usb0/evo_browser_spike` present, the spike spawns
+`/mnt/usb0/evo_gpu_client.elf` (`helpers/gpu_client_spike.cpp`, built by
+`tools/build_gpu_client.sh` in the `prospero-gpu-dev:llvm18` image against
+Prospero Browser's `output/gpu`) and sends it an endpoint as the first message
+on its fd 3. Console 2026-11-06: OpenGL ES 3.2 on `zink Vulkan 1.4 (PlayStation
+5 GPU (RADV NAVI21))`, GLSL ES 3.20 compiled at run time, 1 GB of textures
+without an error (the test's cap; the broker offers 8 GB per client), 300
+frames at 1280x720 with draw 0.26 ms and readback 0.78 ms, EVO at 60 fps.
+Open: EVO does not yet close a client's broker slot when it exits, so its memory
+stays until EVO quits.
 
 **Not yet:** playback from pages (Phase 3), downloads, more than one tab,
 site favicons on the speed dial (they are emoji now, which the kit fonts show

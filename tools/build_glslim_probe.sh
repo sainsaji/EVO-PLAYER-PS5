@@ -16,3 +16,6 @@ echo "  ok proc diff payload: $(wc -c < output/proc_diff.elf) bytes -> output/pr
 "${SDK}/bin/prospero-clang" -O2 -Wall -Werror \
     -o output/proc_poke.elf projects/evoplayer/helpers/proc_poke.c
 echo "  ok proc poke payload: $(wc -c < output/proc_poke.elf) bytes -> output/proc_poke.elf"
+"${SDK}/bin/prospero-clang" -O2 -Wall -Werror \
+    -o output/agc_probe.elf projects/evoplayer/helpers/agc_probe.c -lpthread -lSceSysmodule
+echo "  ok agc probe payload: $(wc -c < output/agc_probe.elf) bytes -> output/agc_probe.elf"
