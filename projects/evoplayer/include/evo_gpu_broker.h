@@ -6,7 +6,8 @@
  * process builds RADV command buffers in memory EVO shares with it, and EVO
  * submits them. See docs/ui/browser.md, "GPU broker".
  *
- * Off unless /mnt/usb0/evo_gpu_broker exists (spike).
+ * Started when the Web section opens; switched off by
+ * /data/evoplayer/evo_gpu_broker_off (or /mnt/usb0/evo_gpu_broker_off).
  */
 #ifndef EVO_GPU_BROKER_H
 #define EVO_GPU_BROKER_H
@@ -37,7 +38,7 @@ static inline uint64_t evo_gpu_broker_last_frame(void *out, size_t cap, unsigned
  * so EVO's own mappings stay out of them. No-op without the trigger file. */
 void evo_gpu_broker_reserve_early(void);
 
-/* Once the sandbox is open: gives the ranges back if the trigger is absent. */
+/* Once the sandbox is open: gives the ranges back if the broker is switched off. */
 void evo_gpu_broker_release_unused(void);
 
 /* Before evo_jailbreak_self(): RADV's platform init (sceAgcInit), which like
@@ -55,8 +56,9 @@ int evo_gpu_broker_state(void);
  * broker's id for it. */
 int evo_gpu_broker_open(int *cookie);
 
-/* The client process behind cookie: the broker frees its memory only after
- * this pid is gone. */
+/* The client process behind cookie: once this pid is gone, EVO closes the
+ * client's slot and the broker frees its memory. Called again for the same
+ * cookie, it moves the slot to a new pid (engine host -> its WebProcess). */
 void evo_gpu_broker_register(int cookie, int pid);
 
 /* Frames the broker's display received from clients (swapchain presents). */

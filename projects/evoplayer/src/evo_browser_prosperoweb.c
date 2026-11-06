@@ -34,6 +34,7 @@
 #define ELFLDR_SEND_MS    10000     /* the loader reads the whole ELF first */
 #define BROKER_UP_MS      10000     /* broker binds 17771 after it starts */
 #define BROKER_PING_MS    5000
+#define SPAWN_REPLY_MS    30000     /* the loader reads the whole engine ELF first */
 #define POLL_STEP_MS      100
 
 static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -524,6 +525,8 @@ static void handle_frame(const unsigned char *body, size_t len)
     }
 }
 
+static void handle_gpu_client(const unsigned char *body, size_t len);
+
 static void *frame_worker(void *arg)
 {
     (void)arg;
@@ -570,6 +573,8 @@ static void *frame_worker(void *arg)
                 handle_frame(pkt + sizeof h, h.len);
             } else if (h.type == EVOB_EVENT) {
                 handle_event(pkt + sizeof h, h.len);
+            } else if (h.type == EVOB_GPU_CLIENT) {
+                handle_gpu_client(pkt + sizeof h, h.len);
             } else if (h.type == EVOB_BYE) {
                 why = "host said BYE";
                 for (int i = 0; i < nfds; ++i) close(fds[i]);
@@ -643,6 +648,73 @@ static void gpu_client_handoff(int sock, int pid)
     evo_gpu_broker_register(cookie, pid);
 }
 
+/* The engine host's GPU endpoints (#237). EVO sends one right after the spawn
+ * (the first message on the channel, before the host makes its web view) and
+ * a fresh one each time the host reports that a WebProcess took the last. A
+ * slot first belongs to the host's pid, then to the WebProcess's. */
+#define GPU_HOST_UP_MS   5000
+#define GPU_HOST_MAX_EPS 4
+static int g_host_pid, g_host_eps;
+
+static int frame_send_fd(int s, int type, const void *body, uint32_t len, int fd)
+{
+    unsigned char pkt[sizeof(struct evob_hdr) + 64];
+    if (len > 64) return -1;
+    const struct evob_hdr h = {EVOB_MAGIC, EVOB_VERSION, (uint16_t)type, len};
+    memcpy(pkt, &h, sizeof h);
+    if (len) memcpy(pkt + sizeof h, body, len);
+    struct iovec iov = {pkt, sizeof h + len};
+    union { struct cmsghdr h; char buf[CMSG_SPACE(sizeof(int))]; } ctl;
+    memset(&ctl, 0, sizeof ctl);
+    struct msghdr m;
+    memset(&m, 0, sizeof m);
+    m.msg_iov = &iov;
+    m.msg_iovlen = 1;
+    if (fd >= 0) {
+        m.msg_control = ctl.buf;
+        m.msg_controllen = sizeof ctl.buf;
+        struct cmsghdr *c = CMSG_FIRSTHDR(&m);
+        c->cmsg_level = SOL_SOCKET;
+        c->cmsg_type = SCM_RIGHTS;
+        c->cmsg_len = CMSG_LEN(sizeof(int));
+        memcpy(CMSG_DATA(c), &fd, sizeof(int));
+    }
+    return sendmsg(s, &m, 0) == (ssize_t)(sizeof h + len) ? 0 : -1;
+}
+
+static void gpu_host_send_endpoint(int sock)
+{
+    if (evo_gpu_broker_state() == 0)
+        for (int waited = 0; evo_gpu_broker_state() == 0 && waited < GPU_HOST_UP_MS; waited += POLL_STEP_MS)
+            usleep(POLL_STEP_MS * 1000);
+    struct evob_gpu g = {-1, 0};
+    int fd = -1;
+    if (evo_gpu_broker_state() == 1 && g_host_eps < GPU_HOST_MAX_EPS)
+        fd = evo_gpu_broker_open(&g.cookie);
+    if (fd < 0)
+        g.cookie = -1;
+    const int sent = frame_send_fd(sock, EVOB_GPU_ENDPOINT, &g, sizeof g, fd);
+    EVO_LOGI("browser", "gpu: endpoint %d (cookie %d, broker state %d) to the engine host -> %s", fd,
+             g.cookie, evo_gpu_broker_state(), sent == 0 ? "sent" : "send failed");
+    if (fd >= 0) {
+        close(fd);
+        g_host_eps++;
+        evo_gpu_broker_register(g.cookie, g_host_pid);   /* the host holds it for now */
+    }
+}
+
+static void handle_gpu_client(const unsigned char *body, size_t len)
+{
+    struct evob_gpu g;
+    if (len < sizeof g) return;
+    memcpy(&g, body, sizeof g);
+    EVO_LOGI("browser", "gpu: the engine host gave endpoint cookie %d to pid %d", g.cookie, g.pid);
+    if (g.cookie > 0 && g.pid > 0) {
+        evo_gpu_broker_register(g.cookie, g.pid);
+        gpu_host_send_endpoint(g_fsock);   /* a spare for the next WebProcess */
+    }
+}
+
 static void frame_test_start(int broker)
 {
     const int gpu_client = g_spike && file_exists(GPU_TRIGGER) && file_exists(GPU_CLIENT_ELF);
@@ -682,7 +754,13 @@ static void frame_test_start(int broker)
                  (int)getpid(), sv[1]);
     }
     const long long t0 = evo_log_mono_ms();
+    /* The spawn answers once the loader has read the whole ELF: 4.4 s for the
+     * 177 MB engine, more with Mesa linked in (205 MB). The connection's own
+     * 5 s ping timeout is too short for that. */
+    struct timeval spawn_tv = {SPAWN_REPLY_MS / 1000, 0}, ping_tv = {BROKER_PING_MS / 1000, 0};
+    setsockopt(broker, SOL_SOCKET, SO_RCVTIMEO, &spawn_tv, sizeof spawn_tv);
     const int ok = broker_send(broker, req) == 0 && broker_recv(broker, reply, sizeof reply) == 0;
+    setsockopt(broker, SOL_SOCKET, SO_RCVTIMEO, &ping_tv, sizeof ping_tv);
     close(sv[1]);   /* the child has its own copy (rdup) once the broker answered */
     if (!ok || !strstr(reply, "\"ok\":true")) {
         EVO_LOGW("browser", "S2b: spawn of the %s failed: %s", what, ok ? reply : "no answer");
@@ -695,6 +773,11 @@ static void frame_test_start(int broker)
              p ? atoi(p + 6) : 0, evo_log_mono_ms() - t0);
     if (gpu_client)
         gpu_client_handoff(sv[0], p ? atoi(p + 6) : 0);
+    if (g_engine_host) {
+        g_host_pid = p ? atoi(p + 6) : 0;
+        g_host_eps = 0;
+        gpu_host_send_endpoint(sv[0]);
+    }
 
     g_fsock = sv[0];
     pthread_mutex_lock(&g_mu);
@@ -927,6 +1010,7 @@ void evo_browser_open(void)
         return;
     }
     EVO_LOGI("browser", "opening: broker %s, engine %s", broker, g_engine_elf);
+    evo_gpu_broker_start();   /* GPU owner for the WebProcess (#237); quick, on its own thread */
     evo_browser_engine_start(broker);
 }
 

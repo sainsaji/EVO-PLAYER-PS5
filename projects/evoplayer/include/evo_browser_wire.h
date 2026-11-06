@@ -39,6 +39,11 @@ enum evob_type {
     EVOB_JS      = 13,  /* payload: a script to run in the main frame */
     /* events, host -> EVO (Phase 1) */
     EVOB_EVENT   = 14,  /* struct evob_event, then its text */
+    /* GPU broker endpoints (#237): EVO is the GPU owner for the WebProcess */
+    EVOB_GPU_ENDPOINT = 15,  /* EVO -> host: struct evob_gpu, the endpoint fd attached
+                                (none: cookie -1, no broker). The host hands it to
+                                the next WebProcess it starts. */
+    EVOB_GPU_CLIENT   = 16,  /* host -> EVO: struct evob_gpu, endpoint cookie went to pid */
 };
 
 enum evob_format {
@@ -137,6 +142,10 @@ enum evob_event_kind {
 
 struct evob_event {
     uint32_t kind, arg;
+};
+
+struct evob_gpu {
+    int32_t cookie, pid;
 };
 
 #endif

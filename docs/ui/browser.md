@@ -382,33 +382,70 @@ ps5-opengl has two more problems here: it opens VideoOut on its first draw
 (`runtime_video_acquire`), which panics in a payload, and it is desktop GL
 only, while WebKit's PlayStation port expects GLES.
 
-*Way forward.* EVO, which is an app, owns the GPU and submits for the
-WebProcess. Prospero Browser's GPU broker already works this way: the WebProcess
-runs Mesa EGL + Zink + RADV (GLES 3.2, a real GLSL compiler) as a client, its
-memory is shared memory from the app, and the app submits its command buffers.
-WebKit pages rendered on the GPU through it in a helper process (Prospero
-Browser `docs/knowledge`, 2026-10-17 to 10-21). Until that port is done, GLSlim
-stays the GPU path. The other fallback is to cut GLSlim's memory use on heavy
-pages.
+*Mesa through EVO's GPU broker.* EVO, which is an app, owns the GPU and
+submits for the WebProcess. The WebProcess runs Mesa EGL 1.5 + OpenGL ES 3.2
+over Zink on RADV as a client of PS5_Vulkan's GPU broker: its GPU memory is
+shared memory from EVO, and EVO submits its command buffers. No 48 MB grant,
+no Sony shader binaries (WebKit's own GLSL compiles). This is the GPU path;
+GLSlim stays behind its own flag as the fallback.
 
-*GPU broker in EVO (spike, off by default).* The broker's owner side is vendored
-in `projects/evoplayer/gpu_broker/` (PS5_Vulkan's `server.cpp`/`packet_io.c`,
-LGPL-2.1+; PS5_Mesa's `radv_ps5_platform.c`, MIT; `compat/` stands in for the
-few Mesa util headers, on pthreads). EVO holds the clients' address ranges
-(`0x240000000` + 512 MB, `0x3000000000` + 16 GB) from `main()` on and gives
-them back at engine boot unless `/mnt/usb0/evo_gpu_broker` exists; RADV's
-platform init (a second `sceAgcInit`) runs before unjail, like EVO's other GPU
-inits. The broker starts on a worker thread (its warm-up submit can block).
-With that file and `/mnt/usb0/evo_browser_spike` present, the spike spawns
-`/mnt/usb0/evo_gpu_client.elf` (`helpers/gpu_client_spike.cpp`, built by
-`tools/build_gpu_client.sh` in the `prospero-gpu-dev:llvm18` image against
-Prospero Browser's `output/gpu`) and sends it an endpoint as the first message
-on its fd 3. Console 2026-11-06: OpenGL ES 3.2 on `zink Vulkan 1.4 (PlayStation
-5 GPU (RADV NAVI21))`, GLSL ES 3.20 compiled at run time, 1 GB of textures
-without an error (the test's cap; the broker offers 8 GB per client), 300
-frames at 1280x720 with draw 0.26 ms and readback 0.78 ms, EVO at 60 fps.
-Open: EVO does not yet close a client's broker slot when it exits, so its memory
-stays until EVO quits.
+- *EVO side.* The broker's owner code is vendored in
+  `projects/evoplayer/gpu_broker/` (PS5_Vulkan's `server.cpp`/`packet_io.c`,
+  LGPL-2.1+; PS5_Mesa's `radv_ps5_platform.c`, MIT; `compat/` stands in for the
+  few Mesa util headers, on pthreads). API: `include/evo_gpu_broker.h`. EVO
+  holds the clients' address ranges (`0x240000000` + 512 MB, `0x3000000000` +
+  16 GB, address space only) from `main()` on; RADV's platform init (a second
+  `sceAgcInit`) runs before unjail, like EVO's other GPU inits. The broker
+  starts on a worker thread when the Web section opens (about 11 ms).
+  `/data/evoplayer/evo_gpu_broker_off` (or `/mnt/usb0/evo_gpu_broker_off`)
+  switches it off and gives the ranges back at boot.
+- *Handing the endpoint over.* Right after spawning the engine host, EVO sends
+  it `EVOB_GPU_ENDPOINT` with a broker endpoint fd attached (cookie -1 and no
+  fd when there is no broker). The host's spawn glue hands it to the next
+  WebProcess as an inherited fd named by `PROSPEROWEB_GPU_FD` and answers
+  `EVOB_GPU_CLIENT` (cookie, pid); EVO then sends a spare for the next
+  WebProcess (at most 4 per host). With `/data/prosperoweb/mesa` present a
+  WebProcess spawn waits up to 3 s for an endpoint.
+- *Slots.* EVO registers each endpoint's cookie with the host's pid, then
+  moves it to the WebProcess's pid. A reaper thread checks every 0.5 s
+  (`kill(pid,0)` = ESRCH; the ProsperoWeb broker reaps its children) and calls
+  `ps5_gpu_broker_close`, which frees the client's memory while EVO runs.
+- *WebProcess side* (fork `feat/evo-host`, `src/ps5/mesa`, behind
+  `/data/prosperoweb/mesa`). A constructor reserves the two ranges before
+  WebKit's static initialisers; `ps5_mesa_start()` binds the endpoint, sets
+  Zink, no shader cache, no gallium thread, raises every new thread's stack to
+  2 MiB, and runs a self-test (EGL, ES 3 context, a GLSL ES 3.00 shader, an FBO
+  clear read back). The GL link stubs resolve through `ps5_mesa_proc()` first,
+  then GLSlim. Patch 0022 then makes surfaceless contexts, skips GLSlim's frame
+  end and compiles TextureMapper's GLSL; the FBO, readback, row flip and
+  `Update` path are shared with GLSlim. Pages stay at 1x for now. Log:
+  `/data/prosperoweb/mesa.txt`.
+- *The Mesa stack in the fork.* One relocatable object, `ps5_mesa_gpu.o`
+  (`tools/build_mesa_bundle.sh`, run in the `prospero-gpu-dev:llvm18` image):
+  Prospero Browser's Mesa/Zink/RADV, broker client and libps5platform
+  pre-linked with `ld -r`; every symbol is local except
+  `mesa_eglGetProcAddress` and `ps5_gpu_client_*`, so nothing clashes with
+  WebKit's libraries. Against the fork's SDK v0.41.1 only `__dso_handle` stays
+  open (the crt has it). The fork's CI fetches it from the fork's release
+  `mesa-bundle-1` (`scripts/ps5/fetch-mesa-bundle.sh`, pinned by SHA-256);
+  without it the build goes on with GLSlim and raster. The engine ELF grows
+  from 177 to 205 MB. Licences: Mesa MIT, broker client LGPL-2.1+,
+  libps5platform GPL-3.0+.
+- *Traps the console taught.* Zink starts its submit thread at the first
+  flush; on the default 64 KiB stack the process dies with no signal at the
+  first `glReadPixels`. A 205 MB engine takes longer than 5 s to spawn, so EVO
+  waits up to 30 s for that reply. `tools/build_mesa_bundle_test.sh` builds
+  `helpers/mesa_bundle_test.c` like the fork's payload, to test the bundle
+  outside WebKit through the spike (`/mnt/usb0/evo_gpu_broker`,
+  `evo_browser_spike`, `evo_gpu_client.elf`).
+- *Measured* (2026-11-06, PS5 Pro, FW 13.60). prosperostore.net draws
+  completely, hero included (it lost its text under GLSlim), and its carousel
+  animates; EVO stays at 60 fps. WebProcess CPU on that page, idle: 0.75 to
+  0.93 core on the raster path, about 1.06 with Mesa. Mesa does not save CPU
+  yet: Skia still paints every tile on the CPU, and each frame is read back,
+  swizzled and sent whole (6.6 MB, about 9 frames a second) where the raster
+  path sends only damaged rects. Next: hand EVO the frame on the GPU without a
+  readback, read back only damage, then Skia on the GPU.
 
 **Not yet:** playback from pages (Phase 3), downloads, more than one tab,
 site favicons on the speed dial (they are emoji now, which the kit fonts show

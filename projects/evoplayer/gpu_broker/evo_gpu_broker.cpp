@@ -30,7 +30,8 @@ extern "C" {
 
 extern "C" int sceKernelReserveVirtualRange(void **addr, size_t len, int flags, size_t align);
 
-#define TRIGGER "/mnt/usb0/evo_gpu_broker"
+#define OFF_USB "/mnt/usb0/evo_gpu_broker_off"
+#define OFF_DATA "/data/evoplayer/evo_gpu_broker_off"
 #define BROKER_DIR "/data/evoplayer-gpu"
 
 namespace {
@@ -60,13 +61,19 @@ unsigned g_w, g_h, g_pitch;
 bool g_bgra;
 uint64_t g_frames;
 
-bool trigger_present()
+bool file_present(const char *path)
 {
-    FILE *f = fopen(TRIGGER, "rb");
+    FILE *f = fopen(path, "rb");
     if (!f)
         return false;
     fclose(f);
     return true;
+}
+
+// The broker is on unless this file exists (USB stick or EVO's data folder).
+bool off_present()
+{
+    return file_present(OFF_USB) || file_present(OFF_DATA);
 }
 
 void hold(int i, uintptr_t base, size_t bytes)
@@ -201,18 +208,26 @@ extern "C" void evo_gpu_broker_preinit(void)
 
 extern "C" void evo_gpu_broker_release_unused(void)
 {
-    if (trigger_present())
+    /* The Web section starts the broker whenever it opens, so the ranges stay
+     * held (address space only) unless the broker is switched off. */
+    if (!off_present())
         return;
     pthread_mutex_lock(&g_mu);
     const bool had = g_held[0] || g_held[1];
     release_placeholders();
     pthread_mutex_unlock(&g_mu);
     if (had)
-        EVO_LOGI("gpu", "no %s: placeholders released", TRIGGER);
+        EVO_LOGI("gpu", "GPU broker switched off (%s): placeholders released", OFF_DATA);
 }
 
 extern "C" int evo_gpu_broker_start(void)
 {
+    if (off_present()) {
+        pthread_mutex_lock(&g_mu);
+        g_state = -1;
+        pthread_mutex_unlock(&g_mu);
+        return -1;
+    }
     pthread_mutex_lock(&g_mu);
     if (g_state == 1 || g_starting) {
         pthread_mutex_unlock(&g_mu);
@@ -259,13 +274,76 @@ extern "C" int evo_gpu_broker_open(int *cookie)
     return fd;
 }
 
+// Closes a client's broker slot once its process is gone, so its memory comes
+// back while EVO runs. ps5_gpu_broker_close blocks (it joins the client's
+// server thread and drains the GPU), so it never runs on the caller's thread.
+static bool g_reaper_running;
+
+static void *reaper_body(void *)
+{
+    for (;;) {
+        Client gone[32];
+        int ngone = 0;
+        pthread_mutex_lock(&g_mu);
+        for (int i = 0; i < g_nclients;) {
+            if (client_absent(g_clients[i].pid)) {
+                gone[ngone++] = g_clients[i];
+                g_clients[i] = g_clients[--g_nclients];
+            } else {
+                ++i;
+            }
+        }
+        const bool more = g_nclients > 0;
+        if (!more && !ngone)
+            g_reaper_running = false;
+        pthread_mutex_unlock(&g_mu);
+        for (int i = 0; i < ngone; ++i) {
+            const long long t0 = evo_log_mono_ms();
+            ps5_gpu_broker_close(gone[i].cookie, gone[i].pid);
+            EVO_LOGI("gpu", "client cookie %d (pid %d) gone: slot closed in %lld ms", gone[i].cookie, gone[i].pid,
+                     evo_log_mono_ms() - t0);
+            evo_boot_log_flush();
+        }
+        if (!more && !ngone)
+            return nullptr;
+        usleep(500 * 1000);
+    }
+}
+
 extern "C" void evo_gpu_broker_register(int cookie, int pid)
 {
+    if (cookie <= 0 || pid <= 0) {
+        EVO_LOGW("gpu", "client cookie %d pid %d: not tracked, its slot stays until EVO quits", cookie, pid);
+        return;
+    }
     pthread_mutex_lock(&g_mu);
-    if (g_nclients < 32)
+    bool known = false;   // a cookie moves on: the engine host's, then its WebProcess's
+    for (int i = 0; i < g_nclients; ++i)
+        if (g_clients[i].cookie == cookie) {
+            g_clients[i].pid = pid;
+            known = true;
+        }
+    if (!known && g_nclients < 32)
         g_clients[g_nclients++] = Client{cookie, pid};
+    const bool start = !g_reaper_running;
+    g_reaper_running = true;
     pthread_mutex_unlock(&g_mu);
     EVO_LOGI("gpu", "client cookie %d is pid %d", cookie, pid);
+    if (!start)
+        return;
+    pthread_t th;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_attr_setstacksize(&attr, 256u << 10);
+    const int rc = pthread_create(&th, &attr, reaper_body, nullptr);
+    pthread_attr_destroy(&attr);
+    if (rc != 0) {
+        pthread_mutex_lock(&g_mu);
+        g_reaper_running = false;
+        pthread_mutex_unlock(&g_mu);
+        EVO_LOGW("gpu", "client reaper not created (%d)", rc);
+    }
 }
 
 extern "C" uint64_t evo_gpu_broker_frames(void)
