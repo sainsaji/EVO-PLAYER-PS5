@@ -73,6 +73,11 @@ typedef struct {
     /* Settings -> DEFAULT FONT STYLE for both captions:
      * 0 standard, 1 light, 2 rounded, 3 bold (prospero_subtitle_style). */
     int subtitle_style;
+    /* #231: the primary caption's colour, lift and background
+     * (prospero_subtitle_color / _lift / _background). */
+    int subtitle_color;
+    int subtitle_lift;
+    int subtitle_background;
     int chrome_hidden;
     /* GL-5 (#81): dev FPS pill (#fps-pill), independent of the OSD chrome. */
     int fps;
@@ -193,7 +198,11 @@ enum {
     EVO_RMLUI_PREVIEW_ASK_STREAM,   /* live channel tile to quality dialog */
     EVO_RMLUI_PREVIEW_DEBUG_OVERLAY,/* live stats box over video frame */
     EVO_RMLUI_PREVIEW_PORT,         /* phone link QR + URL + port status */
-    EVO_RMLUI_PREVIEW_REPORT        /* #229: report page QR + what to do + save to USB */
+    EVO_RMLUI_PREVIEW_REPORT,       /* #229: report page QR + what to do + save to USB */
+    EVO_RMLUI_PREVIEW_SUB_SIZE,     /* #231: sample line at the chosen size */
+    EVO_RMLUI_PREVIEW_SUB_TEXT_COLOUR, /* #231: sample line in the chosen colour */
+    EVO_RMLUI_PREVIEW_SUB_LIFT,     /* #231: sample line at the chosen height */
+    EVO_RMLUI_PREVIEW_SUB_BACKGROUND /* #231: box, shadow, outline or none */
 };
 
 #define EVO_RMLUI_PREVIEW_CHOICES 12  /* EVO_THEME_MAX, the longest list */

@@ -58,6 +58,10 @@ extern "C" {
     int prospero_secondary_position = 0;
     int prospero_secondary_color = 0;
     int prospero_subtitle_style = 0;
+    int prospero_subtitle_face = 2;        /* #231 */
+    int prospero_subtitle_color = 0;
+    int prospero_subtitle_lift = 0;
+    int prospero_subtitle_background = 0;
 
     void evo_feedback_set_sound(int enabled) { (void)enabled; }
     void evo_feedback_set_lightbar(int enabled) { (void)enabled; }
@@ -113,6 +117,10 @@ extern "C" void test_settings_save_load_roundtrip(void)
     TEST_ASSERT(svc1.getNetworkBuffer() == evo::NetworkBuffer::Sec30, "Initial NetworkBuffer default mismatch");
     TEST_ASSERT(svc1.getAudioDelayMs() == 0, "Initial AudioDelayMs default mismatch");
     TEST_ASSERT(svc1.getSkipSegments() == evo::SkipSegments::Ask, "Initial SkipSegments default mismatch");
+    TEST_ASSERT(svc1.getSubtitleSize() == 1, "Initial SubtitleSize default must be MEDIUM");
+    TEST_ASSERT(svc1.getSubtitleColor() == 0, "Initial SubtitleColor default must be WHITE");
+    TEST_ASSERT(svc1.getSubtitleLift() == 0, "Initial SubtitleLift default must be BOTTOM");
+    TEST_ASSERT(svc1.getSubtitleBackground() == 0, "Initial SubtitleBackground default must be BOX");
     TEST_ASSERT(svc1.getThemeName() == "EVO Dark", "Initial ThemeName default mismatch");
     TEST_ASSERT(evo_log_server_saved_port() == EVO_LOG_SERVER_PORT, "Initial LogServerPort default mismatch");
 
@@ -147,6 +155,11 @@ extern "C" void test_settings_save_load_roundtrip(void)
     svc1.setSubtitleLanguage(evo::PreferredLanguage::English);
     svc1.setAddonAutoPickEnabled(false);
     svc1.setSkipSegments(evo::SkipSegments::Auto);
+    svc1.setSubtitleSize(3);
+    svc1.setSubtitleColor(2);
+    svc1.setSubtitleLift(1);
+    svc1.setSubtitleBackground(2);
+    svc1.setSubtitleColor(9);   /* out of range: refused, CYAN stays */
     svc1.setThemeName("CARBON");
     evo_log_server_set_port(9812);
 
@@ -193,6 +206,11 @@ extern "C" void test_settings_save_load_roundtrip(void)
     TEST_ASSERT(svc2.getSubtitleLanguage() == evo::PreferredLanguage::English, "SubtitleLanguage round-trip mismatch");
     TEST_ASSERT(svc2.isAddonAutoPickEnabled() == false, "AddonAutoPick round-trip mismatch");
     TEST_ASSERT(svc2.getSkipSegments() == evo::SkipSegments::Auto, "SkipSegments round-trip mismatch");
+    TEST_ASSERT(svc2.getSubtitleSize() == 3, "SubtitleSize round-trip mismatch");
+    TEST_ASSERT(prospero_subtitle_face == 4, "SubtitleSize must push face 4 (extra large)");
+    TEST_ASSERT(svc2.getSubtitleColor() == 2, "SubtitleColor round-trip mismatch");
+    TEST_ASSERT(svc2.getSubtitleLift() == 1, "SubtitleLift round-trip mismatch");
+    TEST_ASSERT(svc2.getSubtitleBackground() == 2, "SubtitleBackground round-trip mismatch");
     TEST_ASSERT(svc2.getThemeName() == "CARBON", "ThemeName round-trip mismatch");
     TEST_ASSERT(evo_log_server_saved_port() == 9812, "Log server saved port round-trip mismatch");
 
@@ -268,6 +286,9 @@ extern "C" void test_settings_legacy_compat(void)
     TEST_ASSERT(svc.getSubtitleLanguage() == evo::PreferredLanguage::Auto, "Missing SubtitleLanguage must default to Auto");
     TEST_ASSERT(svc.isAddonAutoPickEnabled() == true, "Missing AddonAutoPick must default to on");
     TEST_ASSERT(svc.getSkipSegments() == evo::SkipSegments::Ask, "Missing SkipSegments must default to Ask");
+    TEST_ASSERT(svc.getSubtitleSize() == 1 && svc.getSubtitleColor() == 0 &&
+                svc.getSubtitleLift() == 0 && svc.getSubtitleBackground() == 0,
+                "Missing #231 subtitle lines must keep the old look");
 
     /* All 26 preceding settings must be restored correctly */
     TEST_ASSERT(svc.isResumePlaybackEnabled() == false, "Legacy resumePlaybackEnabled mismatch");

@@ -48,6 +48,14 @@ public:
     void setSecondarySubtitlePosition(int position) override;
     int getSecondarySubtitleColor() const override { return m_secondarySubtitleColor; }
     void setSecondarySubtitleColor(int color) override;
+    int getSubtitleSize() const override { return m_subtitleSize; }
+    void setSubtitleSize(int size) override;
+    int getSubtitleColor() const override { return m_subtitleColor; }
+    void setSubtitleColor(int color) override;
+    int getSubtitleLift() const override { return m_subtitleLift; }
+    void setSubtitleLift(int lift) override;
+    int getSubtitleBackground() const override { return m_subtitleBackground; }
+    void setSubtitleBackground(int background) override;
 
     int getKeyboardType() const override { return m_keyboardType; }
     void setKeyboardType(int type) override;
@@ -128,6 +136,10 @@ private:
     bool m_soundFeedbackEnabled = true;
     bool m_lightbarFeedbackEnabled = true;
     int m_subtitleFontFace = 0; // STANDARD (prospero_subtitle_style)
+    int m_subtitleSize = 1;       // #231: MEDIUM (prospero_subtitle_face - 1)
+    int m_subtitleColor = 0;      // #231: WHITE
+    int m_subtitleLift = 0;       // #231: BOTTOM
+    int m_subtitleBackground = 0; // #231: BOX
     bool m_askStream = true;    // Live TV: pick the stream yourself
     int m_secondarySubtitlePosition = 0; // #110: stacked above the primary
     int m_secondarySubtitleColor = 0;    // #110: yellow

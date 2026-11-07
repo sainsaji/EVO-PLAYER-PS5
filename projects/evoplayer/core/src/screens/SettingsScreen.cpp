@@ -61,6 +61,10 @@ enum class SettingKey : int {
     AutoSubtitles,
     SubtitleLanguage,
     SubtitleFont,
+    SubtitleSize,
+    SubtitleColour,
+    SubtitlePosition,
+    SubtitleBackground,
     SecondaryPosition,
     SecondaryColour,
     /* INTERFACE & STORAGE */
@@ -153,6 +157,14 @@ const PreviewSpec kPreviews[] = {
     {SettingKey::NavigationSounds, EVO_RMLUI_PREVIEW_NAV_SOUNDS, "A soft click when you move and press buttons."},
     {SettingKey::AutoSubtitles, EVO_RMLUI_PREVIEW_SUB_AUTO, "Loads subtitles on its own when a file has them."},
     {SettingKey::SubtitleFont, EVO_RMLUI_PREVIEW_SUB_FONT, "Picks the typeface for on-screen subtitles."},
+    {SettingKey::SubtitleSize, EVO_RMLUI_PREVIEW_SUB_SIZE,
+     "How big subtitles are. The size button in the player's subtitle menu changes it for one session."},
+    {SettingKey::SubtitleColour, EVO_RMLUI_PREVIEW_SUB_TEXT_COLOUR,
+     "The colour of the main subtitle line. Picture subtitles (Blu-ray, DVD) keep their own colours."},
+    {SettingKey::SubtitlePosition, EVO_RMLUI_PREVIEW_SUB_LIFT,
+     "Raises subtitles from the bottom, for TVs that cut the edge or films with text low in the frame."},
+    {SettingKey::SubtitleBackground, EVO_RMLUI_PREVIEW_SUB_BACKGROUND,
+     "What sits behind the text so it stays readable on bright scenes. Subtitles burned into a server transcode are part of the picture and cannot change."},
     {SettingKey::SecondaryPosition, EVO_RMLUI_PREVIEW_SUB_POS,
      "Where the second line of dialogue goes when two tracks are shown."},
     {SettingKey::SecondaryColour, EVO_RMLUI_PREVIEW_SUB_COLOUR, "A different colour keeps the two lines apart."},
@@ -194,7 +206,8 @@ const SettingKey kAudioKeys[] = {
 };
 const SettingKey kSubtitleKeys[] = {
     SettingKey::AutoSubtitles, SettingKey::SubtitleLanguage, SettingKey::SubtitleFont,
-    SettingKey::SecondaryPosition, SettingKey::SecondaryColour,
+    SettingKey::SubtitleSize, SettingKey::SubtitleColour, SettingKey::SubtitlePosition,
+    SettingKey::SubtitleBackground, SettingKey::SecondaryPosition, SettingKey::SecondaryColour,
 };
 const SettingKey kInterfaceKeys[] = {
     SettingKey::Theme, SettingKey::Lightbar, SettingKey::FoldersFirst,
@@ -475,6 +488,47 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         d = valueDef(key, "DEFAULT FONT STYLE", "SUBTITLE TYPEFACE",
                      "../icons/icon_type.png", 4, face);
         for (int i = 0; i < 4; ++i) d.opt_label[i] = kFaces[i];
+        break;
+    }
+
+    /* #231: the main caption's look. */
+    case SettingKey::SubtitleSize: {
+        static const char* kSizes[] = {"SMALL", "MEDIUM", "LARGE", "EXTRA LARGE"};
+        int v = settings->getSubtitleSize();
+        if (v < 0 || v >= 4) v = 1;
+        d = valueDef(key, "SUBTITLE SIZE", "HOW BIG SUBTITLES ARE",
+                     "../icons/icon_type.png", 4, v);
+        for (int i = 0; i < 4; ++i) d.opt_label[i] = kSizes[i];
+        break;
+    }
+
+    case SettingKey::SubtitleColour: {
+        static const char* kColours[] = {"WHITE", "YELLOW", "CYAN", "GREEN"};
+        int v = settings->getSubtitleColor();
+        if (v < 0 || v >= 4) v = 0;
+        d = valueDef(key, "SUBTITLE COLOUR", "THE MAIN LINE OF DIALOGUE",
+                     "../icons/icon_palette.png", 4, v);
+        for (int i = 0; i < 4; ++i) d.opt_label[i] = kColours[i];
+        break;
+    }
+
+    case SettingKey::SubtitlePosition: {
+        static const char* kLifts[] = {"BOTTOM", "RAISED", "HIGHER"};
+        int v = settings->getSubtitleLift();
+        if (v < 0 || v >= 3) v = 0;
+        d = valueDef(key, "SUBTITLE POSITION", "RAISE SUBTITLES FROM THE BOTTOM",
+                     "../icons/icon_subtitles.png", 3, v);
+        for (int i = 0; i < 3; ++i) d.opt_label[i] = kLifts[i];
+        break;
+    }
+
+    case SettingKey::SubtitleBackground: {
+        static const char* kBackgrounds[] = {"BOX", "SHADOW", "OUTLINE", "NONE"};
+        int v = settings->getSubtitleBackground();
+        if (v < 0 || v >= 4) v = 0;
+        d = valueDef(key, "SUBTITLE BACKGROUND", "KEEPS TEXT READABLE ON BRIGHT SCENES",
+                     "../icons/icon_subtitles.png", 4, v);
+        for (int i = 0; i < 4; ++i) d.opt_label[i] = kBackgrounds[i];
         break;
     }
 
@@ -847,6 +901,10 @@ void applyOption(SettingKey key, int opt) {
     case SettingKey::AudioDelay:     st->setAudioDelayMs((opt - 10) * 50); break;
     case SettingKey::OutputChannels: st->setAudioOutputChannels(static_cast<AudioOutputChannels>(opt)); break;
     case SettingKey::SubtitleFont:   st->setSubtitleFontFace(opt); break;
+    case SettingKey::SubtitleSize:   st->setSubtitleSize(opt); break;
+    case SettingKey::SubtitleColour: st->setSubtitleColor(opt); break;
+    case SettingKey::SubtitlePosition: st->setSubtitleLift(opt); break;
+    case SettingKey::SubtitleBackground: st->setSubtitleBackground(opt); break;
     case SettingKey::SecondaryPosition: st->setSecondarySubtitlePosition(opt); break;
     case SettingKey::SecondaryColour:   st->setSecondarySubtitleColor(opt); break;
     case SettingKey::KeyboardInput:  st->setKeyboardType(opt); break;

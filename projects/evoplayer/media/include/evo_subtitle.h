@@ -78,6 +78,15 @@ extern int prospero_secondary_color;              /* 0 yellow, 1 cyan, 2 white  
 /* Settings -> DEFAULT FONT STYLE, for both captions. */
 #define PROSPERO_SUBTITLE_STYLES 4                 /* 0 standard, 1 light, 2 rounded, 3 bold */
 extern int prospero_subtitle_style;
+/* #231: Settings -> Subtitles, the primary caption's look. prospero_subtitle_face
+ * is its size (1 small, 2 medium, 3 large, 4 extra large). */
+#define PROSPERO_SUBTITLE_SIZES       4            /* face 1..4 */
+#define PROSPERO_SUBTITLE_COLORS      4            /* 0 white, 1 yellow, 2 cyan, 3 green */
+#define PROSPERO_SUBTITLE_LIFTS       3            /* 0 bottom, 1 raised, 2 higher */
+#define PROSPERO_SUBTITLE_BACKGROUNDS 4            /* 0 box, 1 shadow, 2 outline, 3 none */
+extern int prospero_subtitle_color;
+extern int prospero_subtitle_lift;
+extern int prospero_subtitle_background;
 
 /* Written by main.c's seek / start_video_playback flush path (A5 cleans up). */
 extern AVCodecContext *prospero_embedded_subtitle_ctx;

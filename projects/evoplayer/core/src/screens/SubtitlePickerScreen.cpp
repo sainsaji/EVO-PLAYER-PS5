@@ -307,11 +307,13 @@ void SubtitlePickerScreen::cycleSize() {
      * third was the only one that did anything, which is why the size looked
      * like it never changed.
      */
-    if (prospero_subtitle_face < 1 || prospero_subtitle_face > 3)
+    if (prospero_subtitle_face < 1 || prospero_subtitle_face > PROSPERO_SUBTITLE_SIZES)
         prospero_subtitle_face = 2;              /* MEDIUM, the documented default */
-    prospero_subtitle_face = (prospero_subtitle_face % 3) + 1;   /* 1 -> 2 -> 3 -> 1 */
+    /* 1 -> 2 -> 3 -> 4 -> 1; #231 added EXTRA LARGE. This is for this session
+     * only: Settings -> SUBTITLE SIZE is the saved default. */
+    prospero_subtitle_face = (prospero_subtitle_face % PROSPERO_SUBTITLE_SIZES) + 1;
 
-    const char* names[] = { "SMALL", "MEDIUM", "LARGE" };
+    const char* names[] = { "SMALL", "MEDIUM", "LARGE", "EXTRA LARGE" };
     toast("SUBTITLE SIZE", names[prospero_subtitle_face - 1]);
 }
 

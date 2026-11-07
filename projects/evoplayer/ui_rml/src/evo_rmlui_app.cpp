@@ -2811,7 +2811,7 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
             if (!state.subtitle_text.empty()) {
                 el_sub_box->SetClass("sub-small",  state.subtitle_face == 1);
                 el_sub_box->SetClass("sub-medium", state.subtitle_face == 2);
-                el_sub_box->SetClass("sub-large",  state.subtitle_face == 3);
+                el_sub_box->SetClass("sub-large",  state.subtitle_face >= 3);   /* #231: XL too */
                 el_sub_box->SetClass("sub-light",  state.subtitle_style == 1);
             }
             el_sub_layer->SetClass("raised", state.subtitle_raised);

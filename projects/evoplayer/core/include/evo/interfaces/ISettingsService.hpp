@@ -61,6 +61,15 @@ public:
     virtual void setSecondarySubtitlePosition(int position) = 0;
     virtual int getSecondarySubtitleColor() const = 0;
     virtual void setSecondarySubtitleColor(int color) = 0;
+    // #231: the primary caption's look (indexes, see evo_subtitle.h)
+    virtual int getSubtitleSize() const = 0;          // 0 small .. 3 extra large
+    virtual void setSubtitleSize(int size) = 0;
+    virtual int getSubtitleColor() const = 0;
+    virtual void setSubtitleColor(int color) = 0;
+    virtual int getSubtitleLift() const = 0;
+    virtual void setSubtitleLift(int lift) = 0;
+    virtual int getSubtitleBackground() const = 0;
+    virtual void setSubtitleBackground(int background) = 0;
 
     virtual int getKeyboardType() const = 0;
     virtual void setKeyboardType(int type) = 0;

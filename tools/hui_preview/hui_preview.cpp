@@ -717,6 +717,13 @@ int main(int argc, char **argv)
         {"osd_captions_only", 4, [&] { clear_focus(); op.scrub_active = 0; op.alpha = 0; op.chrome_hidden = 1;
                                         op.subtitle_text = "Cells interlinked.";
                                         op.subtitle_text2 = "Cellules interconnectees."; }},
+        /* #231: the main caption's look - yellow outline raised, then extra large with a shadow. */
+        {"osd_captions_outline", 4, [&] { clear_focus(); op.subtitle_text2 = nullptr;
+                                           op.subtitle_color = 1; op.subtitle_lift = 1; op.subtitle_background = 2; }},
+        {"osd_captions_xl_shadow", 4, [&] { clear_focus(); op.subtitle_face = 4; op.subtitle_color = 0;
+                                             op.subtitle_lift = 0; op.subtitle_background = 1; }},
+        {"osd_captions_reset", 4, [&] { clear_focus(); op.subtitle_face = 2; op.subtitle_background = 0;
+                                         op.subtitle_text2 = "Cellules interconnectees."; }},
         {"osd_stats", 4, [&] { clear_focus(); op.chrome_hidden = 0; op.alpha = 255; op.subtitle_text2 = nullptr;
                                 op.show_stats = 1; op.loading = 1; }},
         {"osd_skip", 4, [&] { clear_focus(); op.show_stats = 0; op.loading = 0; op.subtitle_text = nullptr;
@@ -739,6 +746,10 @@ int main(int argc, char **argv)
         {"settings_pv_sub_font", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "sub_font"); }},
         {"settings_pv_sub_pos", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "sub_pos"); }},
         {"settings_pv_sub_colour", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "sub_colour"); }},
+        {"settings_pv_sub_size", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "sub_size"); }},
+        {"settings_pv_sub_text_colour", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "sub_text_colour"); }},
+        {"settings_pv_sub_lift", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "sub_lift"); }},
+        {"settings_pv_sub_background", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "sub_background"); }},
         {"settings_pv_theme", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "theme"); }},
         {"settings_pv_lightbar", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "lightbar"); }},
         {"settings_pv_channels", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "channels"); }},
