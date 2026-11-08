@@ -1851,16 +1851,12 @@ bool EvoRmlProviderHost::RenderKit(int width, int height)
          ? std::string("../icons/") + m_provider->icon : std::string();
     p.provider_icon = icon.c_str();
     /* In-provider OPTIONS hint */
-    if (m_provider_id == "addons" || m_provider_id == "nuvio")
-        p.options_hint = "Add & manage addons";
-    else if (m_provider_id == "emby" || m_provider_id == "jellyfin")
-        p.options_hint = "Edit server";
-    else if (m_provider_id == "iptv")
+    if (m_provider_id == "iptv")
         p.options_hint = "Playlist & guide";
     else if (m_provider_id == "xtream")
         p.options_hint = "Account";
     else
-        p.options_hint = "";
+        p.options_hint = "Options";
     p.breadcrumb = m_model.breadcrumb.c_str();
     p.status = m_model.status.c_str();
     p.query = m_model.query.c_str();
@@ -2361,6 +2357,26 @@ void evo_rmlui_provider_reload(void)
     EvoRmlProviderHost::Instance().ReloadCurrentLevel();
 }
 
+int evo_rmlui_provider_shelves_active(void)
+{
+    return EvoRmlProviderHost::Instance().ShelvesActive() ? 1 : 0;
+}
+
+const char* evo_rmlui_provider_current_shelf_parent(void)
+{
+    return EvoRmlProviderHost::Instance().CurrentShelfParent();
+}
+
+const char* evo_rmlui_provider_current_shelf_title(void)
+{
+    return EvoRmlProviderHost::Instance().CurrentShelfTitle();
+}
+
+int evo_rmlui_provider_open_current_shelf_library(void)
+{
+    return EvoRmlProviderHost::Instance().OpenCurrentShelfLibrary() ? 1 : 0;
+}
+
 } /* extern "C" */
 
 /* ------------------------------------------------------------------------- */
@@ -2389,6 +2405,34 @@ bool EvoRmlProviderHost::ShelvesActive() const
 {
     return m_shelves_on && m_stack.empty() && m_model.query.empty() && !m_setup_shown &&
            !m_is_usb_picker && ShelvesWithCards() > 0;
+}
+
+const char* EvoRmlProviderHost::CurrentShelfParent() const
+{
+    if (ShelvesActive() && m_shelf_row >= 0 && m_shelf_row < (int)m_shelves.size()) {
+        return m_shelves[m_shelf_row].parent.c_str();
+    }
+    return "";
+}
+
+const char* EvoRmlProviderHost::CurrentShelfTitle() const
+{
+    if (ShelvesActive() && m_shelf_row >= 0 && m_shelf_row < (int)m_shelves.size()) {
+        return m_shelves[m_shelf_row].title.c_str();
+    }
+    return "";
+}
+
+bool EvoRmlProviderHost::OpenCurrentShelfLibrary()
+{
+    if (ShelvesActive() && m_shelf_row >= 0 && m_shelf_row < (int)m_shelves.size()) {
+        const EvoShelf& sh = m_shelves[m_shelf_row];
+        if (!sh.parent.empty()) {
+            OpenLevel(sh.parent.c_str(), sh.title.c_str());
+            return true;
+        }
+    }
+    return false;
 }
 
 int EvoRmlProviderHost::ShelvesWithCards() const

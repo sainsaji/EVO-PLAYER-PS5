@@ -163,6 +163,12 @@ void prospero_secondary_nudge_delay(int delta_ms);
 int  prospero_secondary_subtitle_text_at(double clock_seconds, char *output,
                                          size_t output_size);
 
+/* Sample cue texts for primary and secondary previews: reads from active cues at
+ * clock_seconds or nearest loaded dialogue cues. */
+int  prospero_subtitle_sample_cue_text(double clock_seconds,
+                                       char *primary_out, size_t primary_sz,
+                                       char *secondary_out, size_t secondary_sz);
+
 /* Media clock -> subtitle timeline: clock * scale - delay, floored at 0. */
 double prospero_subtitle_position(double clock_seconds);
 

@@ -420,7 +420,22 @@ void SubtitlePickerScreen::render(uint32_t* framebuffer, int width, int height) 
         params.sync2_str = "";
     }
 
-    params.preview_text = "The quick brown fox jumps over the lazy dog";
+    static char s_primaryPreview[PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE];
+    static char s_secondaryPreview[PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE];
+    double currentPos = 0.0;
+    auto playback = Application::getInstance().getPlaybackController();
+    if (playback) {
+        currentPos = playback->getPositionSeconds();
+    }
+    prospero_subtitle_sample_cue_text(currentPos, s_primaryPreview, sizeof(s_primaryPreview),
+                                      s_secondaryPreview, sizeof(s_secondaryPreview));
+
+    params.preview_text = s_primaryPreview;
+    params.preview_text2 = s_secondaryPreview;
+    params.has_secondary = (prospero_subtitle_enabled && prospero_secondary_subtitle_active()) ? 1 : 0;
+    params.secondary_position = prospero_secondary_position;
+    params.secondary_color = prospero_secondary_color;
+    params.primary_color = prospero_subtitle_color;
     params.preview_face = size_idx;
 
     int total = static_cast<int>(m_tracks.size());

@@ -269,9 +269,14 @@ typedef struct {
     const char* sync_str;
     const char* sync2_str;   /* #110: the secondary track's sync pill, NULL/"" hides it */
     const char* preview_text;
-    int preview_face; // 0=small, 1=medium, 2=large
+    int preview_face; // 0=small, 1=medium, 2=large, 3=extra large
     int track_count;
     evo_rmlui_subtitles_track_t tracks[8];
+    int has_secondary;       /* 1 if dual subtitles active */
+    const char* preview_text2;
+    int secondary_position;  /* 0=stacked, 1=top */
+    int secondary_color;     /* 0=yellow, 1=cyan, 2=white */
+    int primary_color;       /* 0=white, 1=yellow, 2=cyan, 3=green */
 } evo_rmlui_subtitles_params_t;
 
 typedef struct {

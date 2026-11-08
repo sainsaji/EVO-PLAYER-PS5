@@ -1626,6 +1626,12 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
     if (pressed & PadButtons::Right)
         return evo_rmlui_provider_key(EvoRmlProviderHost::KeyRight) != 0;
     if (pressed & PadButtons::L1) {
+        if (evo_rmlui_provider_shelves_active()) {
+            if (evo_rmlui_provider_open_current_shelf_library()) {
+                evo_feedback(EVO_FB_OPEN);
+                return true;
+            }
+        }
         evo_feedback(EVO_FB_MOVE);
         return evo_rmlui_provider_key(EvoRmlProviderHost::KeyPageUp) != 0;
     }
@@ -1695,41 +1701,47 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
         if (toggleFocusedFavorite()) return true;
     }
 
+
+    /*
+     * R2: Dedicated shortcut to open Sort & filter for the active library.
+     */
+    if (pressed & PadButtons::R2) {
+        const evo_provider_t* ip = evo_provider_find(m_providerId.c_str());
+        if (ip && ip->panel) {
+            const char* cur = evo_rmlui_provider_current_parent();
+            const char* sparent = evo_rmlui_provider_current_shelf_parent();
+            const char* target = (cur && cur[0]) ? cur : (sparent && sparent[0]) ? sparent : nullptr;
+            if (target && target[0]) {
+                evo_feedback(EVO_FB_OPEN);
+                openRowsPanel(ip, target, "browse", "Sort & filter");
+                return true;
+            } else {
+                toast("BROWSE", "Sort & filter is available in a library");
+                return true;
+            }
+        }
+    }
+
     /*
      * OPTIONS, not Triangle.
      *
-     * Triangle is the virtual keyboard's own "Quick Done" (evo_keyboard.c),
-     * so opening the editor with it submitted the prompt on the spot: the
-     * hardware log showed seven "source set to <unchanged url>" lines from
-     * seven presses, each one closing and reopening the host - which is what
-     * the flashing was. Options is free on this screen and is where a console
-     * user looks for settings anyway.
+     * Triangle is the virtual keyboard's own "Quick Done" (evo_keyboard.c).
+     * Inside a provider, Options opens an in-screen options side-panel (Sort & filter,
+     * search, server edit, etc.) without leaving the provider.
      */
     if (pressed & PadButtons::Options) {
         evo_feedback(EVO_FB_OPEN);
         const evo_provider_t* op = evo_provider_find(m_providerId.c_str());
-        if (op && (isNativeWeb(op) || op->ui_embedded)) {
-            /* No setup page: the chooser's menu for this provider is where
-             * the address is edited, the user switched and the web version
-             * opened. */
-            std::string id = op->id;
-            enterPicker();
-            for (int i = 0; i < (int)m_pickIds.size(); ++i)
-                if (m_pickIds[i] == id) m_pickIndex = i;
-            if (m_picking) openPickerMenu();
-            /* From inside Stremio, OPTIONS is "Add & manage addons": start on Add. */
-            if (id == "addons")
-                for (int i = 0; i < (int)m_menu.size(); ++i)
-                    if (m_menu[i].id == "address") m_menuIndex = i;
-            if (id == "nuvio")
-                for (int i = 0; i < (int)m_menu.size(); ++i)
-                    if (m_menu[i].id == "addaddon") m_menuIndex = i;
-        } else if (op && std::strcmp(op->id, "iptv") == 0 &&
-                   !evo_rmlui_provider_get_query()[0]) {
+        if (op && std::strcmp(op->id, "iptv") == 0 &&
+            !evo_rmlui_provider_get_query()[0]) {
             openProviderMenu();     /* playlist or guide, for the one on screen */
         } else if (op && std::strcmp(op->id, "xtream") == 0 &&
                    !evo_rmlui_provider_get_query()[0]) {
             openXtreamMenu();       /* account or XMLTV guide (#149) */
+        } else if (op && (isNativeWeb(op) || std::strcmp(op->id, "plex") == 0)) {
+            openMediaServerMenu();  /* Sort & filter, library jump, search, server config */
+        } else if (op && op->ui_embedded) {
+            openAddonsMenu();       /* Stremio / Nuvio addons management & search */
         } else {
             evo_rmlui_provider_show_setup();
         }
@@ -2031,6 +2043,162 @@ void ProviderHostScreen::openXtreamMenu(int focus)
     pb.rows.push_back(r);
 
     pb.show("", "XTREAM", "Options", xtream_get_config()->host, "", "", "SELECT", "CLOSE", focus);
+}
+
+void ProviderHostScreen::openMediaServerMenu(int focus)
+{
+    evo_feedback(EVO_FB_OPEN);
+    m_panelPage = "mediaserver";
+
+    const evo_provider_t* p = evo_provider_find(m_providerId.c_str());
+    if (!p) return;
+
+    const char* cur = evo_rmlui_provider_current_parent();
+    const char* sparent = evo_rmlui_provider_current_shelf_parent();
+    const char* stitle = evo_rmlui_provider_current_shelf_title();
+    const bool on_shelves = evo_rmlui_provider_shelves_active() != 0;
+    const char* target_lib = (cur && cur[0]) ? cur : (sparent && sparent[0]) ? sparent : nullptr;
+    const bool has_lib = (target_lib && target_lib[0]);
+
+    PanelBuild pb;
+    PanelBuild::Row r;
+
+    // 1. Sort & filter
+    if (p->panel && has_lib) {
+        r.id = "menu:browse";
+        r.title = "Sort & filter";
+        r.detail = "Sort order, unplayed, favorites, genres and years";
+        r.icon = "/assets/icons/icon_palette.png";
+        r.chevron = 1;
+        pb.rows.push_back(r);
+    }
+
+    // 2. Browse library (instant jump from shelf)
+    if (on_shelves && sparent && sparent[0]) {
+        r = PanelBuild::Row();
+        r.id = "menu:open_lib";
+        r.title = (stitle && stitle[0]) ? (std::string("Browse ") + stitle) : "Browse library";
+        r.detail = "Open the full library grid for this shelf";
+        r.icon = "/assets/icons/icon_folder.png";
+        r.chevron = 1;
+        pb.rows.push_back(r);
+    }
+
+    // 3. Search
+    if (p->caps & EVO_PROVIDER_CAP_SEARCH) {
+        r = PanelBuild::Row();
+        r.id = "menu:search";
+        r.title = "Search";
+        r.detail = "Find movies and series by name";
+        r.icon = "/assets/icons/icon_recent_files.png";
+        r.chevron = 1;
+        pb.rows.push_back(r);
+    }
+
+    // 4. Edit server
+    if (p->caps & EVO_PROVIDER_CAP_CONFIG) {
+        const char* src = p->get_source ? p->get_source() : "";
+        r = PanelBuild::Row();
+        r.id = "menu:edit_server";
+        r.title = "Edit server";
+        r.detail = (src && src[0]) ? (std::string("Server address: ") + src) : "Set server address";
+        r.icon = "/assets/icons/icon_tv.png";
+        r.chevron = 1;
+        pb.rows.push_back(r);
+    }
+
+    // 5. Switch user
+    const bool signedIn = p->is_signed_in && p->is_signed_in();
+    if (p->sign_in || p->qc_start) {
+        r = PanelBuild::Row();
+        r.id = "menu:switch_user";
+        r.title = signedIn ? "Switch user" : "Sign in";
+        r.detail = signedIn ? "Switch to another account on this server" : "Sign in with username & password";
+        r.icon = "/assets/icons/icon_type.png";
+        r.chevron = 1;
+        pb.rows.push_back(r);
+    }
+
+    // 6. Web version
+    if (p->caps & EVO_PROVIDER_CAP_WEBUI) {
+        r = PanelBuild::Row();
+        r.id = "menu:webui";
+        r.title = "Web version";
+        r.detail = "Open server web interface in browser";
+        r.icon = "/assets/icons/icon_emby.png";
+        r.chevron = 1;
+        pb.rows.push_back(r);
+    }
+
+    // 7. Sign out
+    if (signedIn && p->sign_out) {
+        r = PanelBuild::Row();
+        r.id = "menu:signout";
+        r.title = "Sign out";
+        r.detail = "Forget saved login session";
+        r.icon = "/assets/icons/icon_power.png";
+        r.chevron = 0;
+        pb.rows.push_back(r);
+    }
+
+    pb.show("", p->name, "Options", p->name, "", "", "SELECT", "CLOSE", focus);
+}
+
+void ProviderHostScreen::openAddonsMenu(int focus)
+{
+    evo_feedback(EVO_FB_OPEN);
+    m_panelPage = "addons";
+
+    const evo_provider_t* p = evo_provider_find(m_providerId.c_str());
+    if (!p) return;
+
+    PanelBuild pb;
+    PanelBuild::Row r;
+
+    // 1. Add addon
+    r.id = "menu:edit_server";
+    r.title = "Add addon";
+    r.detail = "Type an addon's manifest URL (https://.../manifest.json)";
+    r.icon = "/assets/icons/icon_keyboard.png";
+    r.chevron = 1;
+    pb.rows.push_back(r);
+
+    // 2. Search
+    if (p->caps & EVO_PROVIDER_CAP_SEARCH) {
+        r = PanelBuild::Row();
+        r.id = "menu:search";
+        r.title = "Search";
+        r.detail = "Search titles";
+        r.icon = "/assets/icons/icon_recent_files.png";
+        r.chevron = 1;
+        pb.rows.push_back(r);
+    }
+
+    // 3. Stremio sign in / account
+    if (m_providerId == "addons" && p->qc_start) {
+        const bool signedIn = p->is_signed_in && p->is_signed_in();
+        r = PanelBuild::Row();
+        r.id = "menu:switch_user";
+        r.title = signedIn ? "Switch Stremio account" : "Sign in with Stremio";
+        r.detail = signedIn ? "Sign in with another account" : "Sync addons and library from link.stremio.com";
+        r.icon = "/assets/icons/icon_type.png";
+        r.chevron = 1;
+        pb.rows.push_back(r);
+    }
+
+    // 4. Sign out
+    const bool signedIn = p->is_signed_in && p->is_signed_in();
+    if (signedIn && p->sign_out) {
+        r = PanelBuild::Row();
+        r.id = "menu:signout";
+        r.title = "Sign out";
+        r.detail = "Forget Stremio account";
+        r.icon = "/assets/icons/icon_power.png";
+        r.chevron = 0;
+        pb.rows.push_back(r);
+    }
+
+    pb.show("", p->name, "Options", p->name, "", "", "SELECT", "CLOSE", focus);
 }
 
 void ProviderHostScreen::openGuidePicker()
@@ -2349,6 +2517,38 @@ void ProviderHostScreen::applyChoice(const std::string& id)
     if (id == "panel:back") {
         if (m_panelPage == "guide") openProviderMenu(1);
         else evo_rmlui_provider_hide_panel();
+    } else if (id == "menu:browse") {
+        const evo_provider_t* ip = evo_provider_find(m_providerId.c_str());
+        if (!ip || !ip->panel) return;
+        const char* cur = evo_rmlui_provider_current_parent();
+        const char* sparent = evo_rmlui_provider_current_shelf_parent();
+        const char* target = (cur && cur[0]) ? cur : (sparent && sparent[0]) ? sparent : nullptr;
+        if (target && target[0]) {
+            openRowsPanel(ip, target, "browse", "Sort & filter");
+        } else {
+            toast("BROWSE", "Sort & filter is available in a library");
+        }
+    } else if (id == "menu:open_lib") {
+        evo_rmlui_provider_hide_panel();
+        evo_rmlui_provider_open_current_shelf_library();
+    } else if (id == "menu:search") {
+        evo_rmlui_provider_hide_panel();
+        openSearch();
+    } else if (id == "menu:edit_server") {
+        evo_rmlui_provider_hide_panel();
+        openSourceEditor();
+    } else if (id == "menu:switch_user") {
+        evo_rmlui_provider_hide_panel();
+        beginSignIn();
+    } else if (id == "menu:webui") {
+        evo_rmlui_provider_hide_panel();
+        openWebProvider();
+    } else if (id == "menu:signout") {
+        evo_rmlui_provider_hide_panel();
+        const evo_provider_t* ip = evo_provider_find(m_providerId.c_str());
+        if (ip && ip->sign_out) ip->sign_out();
+        toast(ip ? ip->name : "Provider", "Signed out");
+        evo_rmlui_provider_show_setup();
     } else if (id == "menu:playlist") {
         evo_rmlui_provider_hide_panel();
         evo_rmlui_provider_show_setup();

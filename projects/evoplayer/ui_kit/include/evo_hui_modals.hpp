@@ -28,8 +28,12 @@ class SubtitlePicker
     };
     hui::gfx::Rect track_rect(int index) const;
 
-    std::string eyebrow_, title_, size_, sync_, sync2_, preview_;
+    std::string eyebrow_, title_, size_, sync_, sync2_, preview_, preview2_;
     int preview_face_ = 1;
+    bool has_secondary_ = false;
+    int secondary_position_ = 0;
+    int secondary_color_ = 0;
+    int primary_color_ = 0;
     std::vector<Track> tracks_;
     hui::tween::Spring open_;
     hui::ui::SpringRect ring_;

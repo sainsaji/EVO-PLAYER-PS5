@@ -2930,6 +2930,134 @@ int prospero_secondary_subtitle_text_at(
     return output[0] != 0;
 }
 
+static void clean_sample_str(char *str) {
+    if (!str) return;
+    for (char *p = str; *p; p++) {
+        if (*p == '\r' || *p == '\n') *p = ' ';
+    }
+    char *dst = str;
+    int space = 0;
+    for (char *src = str; *src; src++) {
+        if (*src == ' ') {
+            if (!space) { *dst++ = ' '; space = 1; }
+        } else {
+            *dst++ = *src;
+            space = 0;
+        }
+    }
+    *dst = '\0';
+}
+
+int prospero_subtitle_sample_cue_text(double clock_seconds,
+                                      char *primary_out, size_t primary_sz,
+                                      char *secondary_out, size_t secondary_sz)
+{
+    if (primary_out && primary_sz > 0) primary_out[0] = 0;
+    if (secondary_out && secondary_sz > 0) secondary_out[0] = 0;
+
+    /* 1. Active cues at clock_seconds */
+    if (prospero_subtitle_enabled && primary_out && primary_sz > 0) {
+        if (prospero_subtitle_use_external) {
+            const ProsperoSubtitleCue *cue = prospero_subtitle_active_cue(clock_seconds);
+            if (cue && cue->text[0])
+                snprintf(primary_out, primary_sz, "%s", cue->text);
+        } else if (prospero_embedded_subtitle_stream_index >= 0) {
+            prospero_embedded_subtitle_text_at(clock_seconds, primary_out, primary_sz);
+        }
+    }
+
+    if (prospero_secondary_subtitle_active() && secondary_out && secondary_sz > 0) {
+        prospero_secondary_subtitle_text_at(clock_seconds, secondary_out, secondary_sz);
+    }
+
+    /* 2. Nearest cue in primary if still empty */
+    if (prospero_subtitle_enabled && primary_out && primary_sz > 0 && primary_out[0] == 0) {
+        if (prospero_subtitle_use_external && prospero_subtitle_count > 0) {
+            int best = -1;
+            double min_diff = 1e9;
+            for (int i = 0; i < prospero_subtitle_count; ++i) {
+                if (!prospero_subtitle_cues[i].text[0]) continue;
+                double diff = fabs(prospero_subtitle_cues[i].start_seconds - clock_seconds);
+                if (diff < min_diff) {
+                    min_diff = diff;
+                    best = i;
+                }
+            }
+            if (best >= 0) {
+                snprintf(primary_out, primary_sz, "%s", prospero_subtitle_cues[best].text);
+            }
+        } else if (prospero_embedded_subtitle_stream_index >= 0) {
+            pthread_mutex_lock(&prospero_sub_slot[0].ring_mutex);
+            int cnt = *prospero_sub_slot[0].count;
+            int best = -1;
+            double min_diff = 1e9;
+            for (int i = 0; i < cnt && i < PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES; ++i) {
+                if (!prospero_sub_slot[0].cues[i].text[0]) continue;
+                double diff = fabs(prospero_sub_slot[0].cues[i].start_seconds - clock_seconds);
+                if (diff < min_diff) {
+                    min_diff = diff;
+                    best = i;
+                }
+            }
+            if (best >= 0) {
+                snprintf(primary_out, primary_sz, "%s", prospero_sub_slot[0].cues[best].text);
+            }
+            pthread_mutex_unlock(&prospero_sub_slot[0].ring_mutex);
+        }
+    }
+
+    /* 3. Nearest cue in secondary if still empty */
+    if (prospero_secondary_subtitle_active() && secondary_out && secondary_sz > 0 && secondary_out[0] == 0) {
+        if (prospero_secondary_use_external && prospero_subtitle_count > 0) {
+            int best = -1;
+            double min_diff = 1e9;
+            for (int i = 0; i < prospero_subtitle_count; ++i) {
+                if (!prospero_subtitle_cues[i].text[0]) continue;
+                double diff = fabs(prospero_subtitle_cues[i].start_seconds - clock_seconds);
+                if (diff < min_diff) {
+                    min_diff = diff;
+                    best = i;
+                }
+            }
+            if (best >= 0) {
+                snprintf(secondary_out, secondary_sz, "%s", prospero_subtitle_cues[best].text);
+            }
+        } else if (prospero_secondary_subtitle_stream_index >= 0) {
+            pthread_mutex_lock(&prospero_sub_slot[1].ring_mutex);
+            int cnt = *prospero_sub_slot[1].count;
+            int best = -1;
+            double min_diff = 1e9;
+            for (int i = 0; i < cnt && i < PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES; ++i) {
+                if (!prospero_sub_slot[1].cues[i].text[0]) continue;
+                double diff = fabs(prospero_sub_slot[1].cues[i].start_seconds - clock_seconds);
+                if (diff < min_diff) {
+                    min_diff = diff;
+                    best = i;
+                }
+            }
+            if (best >= 0) {
+                snprintf(secondary_out, secondary_sz, "%s", prospero_sub_slot[1].cues[best].text);
+            }
+            pthread_mutex_unlock(&prospero_sub_slot[1].ring_mutex);
+        }
+    }
+
+    if (primary_out && primary_sz > 0) {
+        clean_sample_str(primary_out);
+        if (primary_out[0] == 0) {
+            snprintf(primary_out, primary_sz, "The quick brown fox jumps over the lazy dog");
+        }
+    }
+    if (secondary_out && secondary_sz > 0) {
+        clean_sample_str(secondary_out);
+        if (secondary_out[0] == 0) {
+            snprintf(secondary_out, secondary_sz, "Sphinx of black quartz, judge my vow");
+        }
+    }
+
+    return 1;
+}
+
 /*
  * Make `track` the primary: -1 for the external SRT, or an embedded stream
  * index. In place, exactly as the secondary switches: the demuxer already

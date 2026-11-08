@@ -334,7 +334,11 @@ bool ProviderGridScreen::setup_shown() const
         return false;
     if (variant_ == EVO_HUI_PROVIDER_LIVETV)
         return !in_folder_;
-    return variant_ == EVO_HUI_PROVIDER_XTREAM;
+    if (variant_ == EVO_HUI_PROVIDER_XTREAM)
+        return true;
+    if (variant_ == EVO_HUI_PROVIDER_MEDIASERVER && setup_focus_ >= 0)
+        return true;
+    return false;
 }
 
 Rect ProviderGridScreen::card_rect(int index) const
@@ -1368,9 +1372,13 @@ void ProviderGridScreen::draw(DrawList &list, const Context &ctx) const
                 hints.push_back({ui::Button::triangle, "More"});
             else if (has_selected_ && !sel_folder_)
                 hints.push_back({ui::Button::triangle, "Favorite"});
-            if (multi_page_)
+            if (shelves_active_)
+                hints.push_back({ui::Button::l1, "Browse library"});
+            else if (multi_page_)
                 hints.push_back({ui::Button::l1, "Page", ui::Button::r1});
-            hints.push_back({ui::Button::options, options_hint_.empty() ? "Edit server" : options_hint_.c_str()});
+            if (shelves_active_ || strncmp(crumb_.c_str(), "lib:", 4) == 0 || variant_ == EVO_HUI_PROVIDER_MEDIASERVER)
+                hints.push_back({ui::Button::r2, "Sort & filter"});
+            hints.push_back({ui::Button::options, options_hint_.empty() ? "Options" : options_hint_.c_str()});
         }
         draw_page_hints(list, fonts, hints.data(), static_cast<int>(hints.size()));
     }

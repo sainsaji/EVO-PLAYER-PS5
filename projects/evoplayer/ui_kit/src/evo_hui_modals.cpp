@@ -67,7 +67,12 @@ void SubtitlePicker::set(const evo_rmlui_subtitles_params_t &p)
     sync_ = unprefix(str(p.sync_str), "SYNC: ");
     sync2_ = unprefix(str(p.sync2_str), "2ND: ");
     preview_ = str(p.preview_text);
+    preview2_ = str(p.preview_text2);
     preview_face_ = p.preview_face;
+    has_secondary_ = p.has_secondary != 0;
+    secondary_position_ = p.secondary_position;
+    secondary_color_ = p.secondary_color;
+    primary_color_ = p.primary_color;
     tracks_.clear();
     for (int i = 0; i < p.track_count && i < 8; ++i)
     {
@@ -198,35 +203,93 @@ void SubtitlePicker::draw(DrawList &list, const Context &ctx) const
     list.pop_transform();
 
     /* The preview caption, in the size that is selected, where it will show. */
-    if (!preview_.empty() && o > 0.01f)
+    if ((!preview_.empty() || !preview2_.empty()) && o > 0.01f)
     {
+        static const Color kSub1[4] = {
+            Color::rgb(0xffffff), Color::rgb(0xffe14d), Color::rgb(0x66e3ff), Color::rgb(0x7dff8a)
+        };
+        static const Color kSub2[3] = {
+            Color::rgb(0xffe14d), Color::rgb(0x66e3ff), Color::rgb(0xffffff)
+        };
+
         const float size = preview_face_ == 0 ? 40.0f : (preview_face_ == 2 ? 60.0f : (preview_face_ == 3 ? 72.0f : 50.0f));
         const float cx = kSheetX * 0.5f;
-        list.push_opacity(o);
-        ui::text(list, fonts.semibold, "PREVIEW", cx, 700, 14, p.text_faint, Align::center, 3.0f);
-        /* Wrapped like a real caption (two lines at most, balanced so one word
-         * is not left alone), first line on 800 and growing down. */
         const float max_w = kSheetX - 120;
-        std::vector<std::string> lines = fonts.semibold.font->wrap(preview_, size, max_w);
-        if (lines.size() > 1)
+        list.push_opacity(o);
+
+        auto wrap_lines = [&](const std::string &text, float sz) -> std::vector<std::string> {
+            if (text.empty()) return {};
+            std::vector<std::string> lines = fonts.semibold.font->wrap(text, sz, max_w);
+            if (lines.size() > 1)
+            {
+                const float even = fonts.semibold.measure(text, sz) / static_cast<float>(lines.size()) * 1.15f;
+                std::vector<std::string> balanced = fonts.semibold.font->wrap(text, sz, std::min(even, max_w));
+                if (balanced.size() == lines.size())
+                    lines = std::move(balanced);
+            }
+            if (lines.size() > 2)
+                lines.resize(2);
+            return lines;
+        };
+
+        auto draw_block = [&](const std::vector<std::string> &lines, float top_y, float sz, Color ink) {
+            const float line_h = sz * 1.25f;
+            float y = top_y;
+            for (const std::string &line : lines)
+            {
+                const float w = std::min(fonts.semibold.measure(line, sz), max_w);
+                list.rounded_rect({cx - w * 0.5f - 18, y - sz * 0.95f, w + 36, line_h}, 10, kBlack.with_alpha(0.55f));
+                ui::text(list, fonts.semibold, fit(fonts.semibold, line, sz, max_w), cx, y, sz, ink,
+                         Align::center);
+                y += line_h;
+            }
+        };
+
+        const Color col1 = kSub1[std::clamp(primary_color_, 0, 3)];
+        const Color col2 = kSub2[std::clamp(secondary_color_, 0, 2)];
+        const float sz2 = size * 0.85f;
+
+        std::vector<std::string> lines1 = wrap_lines(preview_, size);
+        std::vector<std::string> lines2 = has_secondary_ ? wrap_lines(preview2_, sz2) : std::vector<std::string>();
+
+        if (has_secondary_ && secondary_position_ == 1)
         {
-            const float even = fonts.semibold.measure(preview_, size) / static_cast<float>(lines.size()) * 1.15f;
-            std::vector<std::string> balanced = fonts.semibold.font->wrap(preview_, size, std::min(even, max_w));
-            if (balanced.size() == lines.size())
-                lines = std::move(balanced);
+            // Secondary at TOP
+            if (!lines2.empty())
+            {
+                ui::text(list, fonts.semibold, "SECONDARY (TOP)", cx, 140, 13, p.text_faint, Align::center, 2.5f);
+                draw_block(lines2, 175, sz2, col2);
+            }
+            if (!lines1.empty())
+            {
+                ui::text(list, fonts.semibold, "PREVIEW (PRIMARY)", cx, 730, 14, p.text_faint, Align::center, 3.0f);
+                draw_block(lines1, 770, size, col1);
+            }
         }
-        if (lines.size() > 2)
-            lines.resize(2);
-        const float line_h = size * 1.25f;
-        float y = 800;
-        for (const std::string &line : lines)
+        else if (has_secondary_)
         {
-            const float w = std::min(fonts.semibold.measure(line, size), kSheetX - 120);
-            list.rounded_rect({cx - w * 0.5f - 18, y - size * 0.95f, w + 36, line_h}, 10, kBlack.with_alpha(0.55f));
-            ui::text(list, fonts.semibold, fit(fonts.semibold, line, size, kSheetX - 120), cx, y, size, kWhite,
-                     Align::center);
-            y += line_h;
+            // Secondary STACKED directly above primary
+            const float h1 = static_cast<float>(lines1.size()) * size * 1.25f;
+            const float h2 = static_cast<float>(lines2.size()) * sz2 * 1.25f;
+            const float primary_top = 840.0f - h1;
+            const float sec_top = primary_top - h2 - 16.0f;
+
+            ui::text(list, fonts.semibold, "PREVIEW (DUAL SUBTITLES)", cx, sec_top - sz2 * 0.95f - 24.0f, 14, p.text_faint, Align::center, 3.0f);
+            if (!lines2.empty())
+                draw_block(lines2, sec_top, sz2, col2);
+            if (!lines1.empty())
+                draw_block(lines1, primary_top, size, col1);
         }
+        else
+        {
+            // Single primary preview
+            if (!lines1.empty())
+            {
+                ui::text(list, fonts.semibold, "PREVIEW", cx, 730, 14, p.text_faint, Align::center, 3.0f);
+                draw_block(lines1, 770, size, col1);
+            }
+        }
+
         list.pop_opacity();
     }
 }

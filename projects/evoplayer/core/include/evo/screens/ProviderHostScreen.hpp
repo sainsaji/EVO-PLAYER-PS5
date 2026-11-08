@@ -175,6 +175,8 @@ private:
     bool m_addNuvioAddon = false;   /* the open keyboard adds a Nuvio addon, not a server */
     void openXtreamMenu(int focus = 0);   /* Xtream: account + XMLTV guide (#149) */
     void openProviderMenu(int focus = 0); /* IPTV: Options -> side panel        */
+    void openMediaServerMenu(int focus = 0); /* Media servers: Sort & filter, browse, edit server */
+    void openAddonsMenu(int focus = 0);      /* Stremio/Nuvio: Addons, search, sign in */
     void openGuidePicker();
     void applyChoice(const std::string& id);
     void openItemMenu(const struct evo_provider* p);

@@ -279,6 +279,9 @@ public:
 
     /* The shelves home (media servers): rows of posters instead of one level. */
     bool ShelvesActive() const;
+    const char* CurrentShelfParent() const;
+    const char* CurrentShelfTitle() const;
+    bool OpenCurrentShelfLibrary();
 
 private:
     EvoRmlProviderHost() = default;
@@ -600,5 +603,11 @@ void        evo_rmlui_provider_reload(void);
 const char* evo_rmlui_provider_current_parent(void);
 /* Open `id` as a new level under the focused row, as activating a folder would. */
 void        evo_rmlui_provider_open_level(const char *id, const char *title);
+
+/* Shelves helpers (media servers / Stremio) */
+int         evo_rmlui_provider_shelves_active(void);
+const char* evo_rmlui_provider_current_shelf_parent(void);
+const char* evo_rmlui_provider_current_shelf_title(void);
+int         evo_rmlui_provider_open_current_shelf_library(void);
 
 } /* extern "C" */
