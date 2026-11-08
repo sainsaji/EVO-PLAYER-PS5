@@ -234,6 +234,32 @@ void SettingsService::setWebBrowserEnabled(bool enabled) {
     }
 }
 
+/* #231: the primary caption's look, pushed to the subtitle engine like the
+ * secondary's. Size index 0..3 is prospero_subtitle_face 1..4. */
+void SettingsService::setSubtitleSize(int size) {
+    if (size < 0 || size >= PROSPERO_SUBTITLE_SIZES) return;
+    m_subtitleSize = size;
+    prospero_subtitle_face = size + 1;
+}
+
+void SettingsService::setSubtitleColor(int color) {
+    if (color < 0 || color >= PROSPERO_SUBTITLE_COLORS) return;
+    m_subtitleColor = color;
+    prospero_subtitle_color = color;
+}
+
+void SettingsService::setSubtitleLift(int lift) {
+    if (lift < 0 || lift >= PROSPERO_SUBTITLE_LIFTS) return;
+    m_subtitleLift = lift;
+    prospero_subtitle_lift = lift;
+}
+
+void SettingsService::setSubtitleBackground(int background) {
+    if (background < 0 || background >= PROSPERO_SUBTITLE_BACKGROUNDS) return;
+    m_subtitleBackground = background;
+    prospero_subtitle_background = background;
+}
+
 /* Bumped when a release must reset saved values once on upgrade (see loadSettings). */
 static const int kSettingsSchema = 2;
 
@@ -252,7 +278,7 @@ bool SettingsService::saveSettings() {
     }
 
     std::fprintf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
         0, // legacy dummy profile
         m_resumePlaybackEnabled ? 1 : 0,
         static_cast<int>(m_defaultViewMode),
@@ -288,7 +314,11 @@ bool SettingsService::saveSettings() {
         static_cast<int>(m_subtitleLanguage), // line 33 (preferred subtitle language)
         m_addonAutoPick ? 1 : 0,             // line 34 (addons: play the best stream at once)
         static_cast<int>(m_skipSegments),    // line 35 (skip intros & credits: Off=0, Ask=1, Auto=2)
-        m_webBrowser ? 1 : 0                 // line 36 (experimental: web browser)
+        m_webBrowser ? 1 : 0,                // line 36 (experimental: web browser)
+        m_subtitleSize,                      // line 37 (#231 subtitle size: 0 small .. 3 extra large)
+        m_subtitleColor,                     // line 38 (#231 subtitle colour)
+        m_subtitleLift,                      // line 39 (#231 subtitle position)
+        m_subtitleBackground                 // line 40 (#231 subtitle background)
     );
 
     if (std::fclose(file) != 0)
@@ -340,9 +370,13 @@ bool SettingsService::loadSettings() {
     int rawAddonAutoPick = 1;
     int rawSkipSegments = static_cast<int>(SkipSegments::Ask);
     int rawWebBrowser = 0;
+    int rawSubtitleSize = 1;
+    int rawSubtitleColor = 0;
+    int rawSubtitleLift = 0;
+    int rawSubtitleBackground = 0;
 
     int readCount = std::fscanf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
         &rawProfile,
         &rawResume,
         &rawViewMode,
@@ -378,7 +412,11 @@ bool SettingsService::loadSettings() {
         &rawSubtitleLanguage,
         &rawAddonAutoPick,
         &rawSkipSegments,
-        &rawWebBrowser
+        &rawWebBrowser,
+        &rawSubtitleSize,
+        &rawSubtitleColor,
+        &rawSubtitleLift,
+        &rawSubtitleBackground
     );
 
     std::fclose(file);
@@ -462,7 +500,7 @@ bool SettingsService::loadSettings() {
     }
     /* An older file has no port line: the default stands, and the server may bind it. */
     evo_log_server_set_port(readCount >= 29 ? rawLogPort : evo_log_server_saved_port());   /* ignores out-of-range */
-    EVO_LOGI("settings", "loaded %d of 36 fields from %s", readCount, filePath);
+    EVO_LOGI("settings", "loaded %d of 40 fields from %s", readCount, filePath);
     if (readCount >= 31 && rawHdrPeak >= 0 && rawHdrPeak <= 5) {
         m_hdrPeak = static_cast<HdrPeak>(rawHdrPeak);
     }
@@ -478,6 +516,12 @@ bool SettingsService::loadSettings() {
     }
     if (readCount >= 36) m_webBrowser = (rawWebBrowser != 0);
     s_webBrowserEnabled = m_webBrowser;
+    /* #231: an older file has none of these, so the old look stands. The
+     * setters refuse out-of-range values. */
+    if (readCount >= 37) setSubtitleSize(rawSubtitleSize);
+    if (readCount >= 38) setSubtitleColor(rawSubtitleColor);
+    if (readCount >= 39) setSubtitleLift(rawSubtitleLift);
+    if (readCount >= 40) setSubtitleBackground(rawSubtitleBackground);
 
     /* #233: Deep Blacks, Motion Smoothing and Match Video Rate moved to
      * Experimental, where everything starts off. A file from before that

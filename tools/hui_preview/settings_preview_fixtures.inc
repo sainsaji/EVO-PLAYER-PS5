@@ -213,6 +213,38 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
             {EVO_RMLUI_ROW_TOGGLE, "AUTO SUBTITLES", "AUTOMATICALLY LOAD SUBTITLES ON PLAYBACK", "../icons/icon_subtitles.png", "", 1, 0, "", {}, 0, -1, false}
         });
     }
+    else if (kind == "sub_size")
+    {
+        build_preview_section(p, 2, "Subtitles", "PREFERENCES & APPEARANCE", {
+            {EVO_RMLUI_ROW_VALUE, "DEFAULT FONT STYLE", "ON-SCREEN TEXT TYPEFACE", "../icons/icon_type.png", "STANDARD", 0, 0, "", {"STANDARD", "ROUNDED", "BOLD", "CONDENSED"}, 0, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "SUBTITLE SIZE", "HOW BIG SUBTITLES ARE", "../icons/icon_type.png", "", 0, EVO_RMLUI_PREVIEW_SUB_SIZE, "How big subtitles are.", {"SMALL", "MEDIUM", "LARGE", "EXTRA LARGE"}, 3, 1, false},
+            {EVO_RMLUI_ROW_TOGGLE, "AUTO SUBTITLES", "AUTOMATICALLY LOAD SUBTITLES ON PLAYBACK", "../icons/icon_subtitles.png", "", 1, 0, "", {}, 0, -1, false}
+        });
+    }
+    else if (kind == "sub_text_colour")
+    {
+        build_preview_section(p, 2, "Subtitles", "PREFERENCES & APPEARANCE", {
+            {EVO_RMLUI_ROW_VALUE, "DEFAULT FONT STYLE", "ON-SCREEN TEXT TYPEFACE", "../icons/icon_type.png", "STANDARD", 0, 0, "", {"STANDARD", "ROUNDED", "BOLD", "CONDENSED"}, 0, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "SUBTITLE COLOUR", "THE MAIN LINE OF DIALOGUE", "../icons/icon_palette.png", "", 0, EVO_RMLUI_PREVIEW_SUB_TEXT_COLOUR, "The colour of the main subtitle line.", {"WHITE", "YELLOW", "CYAN", "GREEN"}, 1, 1, false},
+            {EVO_RMLUI_ROW_TOGGLE, "AUTO SUBTITLES", "AUTOMATICALLY LOAD SUBTITLES ON PLAYBACK", "../icons/icon_subtitles.png", "", 1, 0, "", {}, 0, -1, false}
+        });
+    }
+    else if (kind == "sub_lift")
+    {
+        build_preview_section(p, 2, "Subtitles", "PREFERENCES & APPEARANCE", {
+            {EVO_RMLUI_ROW_VALUE, "DEFAULT FONT STYLE", "ON-SCREEN TEXT TYPEFACE", "../icons/icon_type.png", "STANDARD", 0, 0, "", {"STANDARD", "ROUNDED", "BOLD", "CONDENSED"}, 0, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "SUBTITLE POSITION", "RAISE SUBTITLES FROM THE BOTTOM", "../icons/icon_subtitles.png", "", 0, EVO_RMLUI_PREVIEW_SUB_LIFT, "Raises subtitles from the bottom.", {"BOTTOM", "RAISED", "HIGHER"}, 2, 1, false},
+            {EVO_RMLUI_ROW_TOGGLE, "AUTO SUBTITLES", "AUTOMATICALLY LOAD SUBTITLES ON PLAYBACK", "../icons/icon_subtitles.png", "", 1, 0, "", {}, 0, -1, false}
+        });
+    }
+    else if (kind == "sub_background")
+    {
+        build_preview_section(p, 2, "Subtitles", "PREFERENCES & APPEARANCE", {
+            {EVO_RMLUI_ROW_VALUE, "DEFAULT FONT STYLE", "ON-SCREEN TEXT TYPEFACE", "../icons/icon_type.png", "STANDARD", 0, 0, "", {"STANDARD", "ROUNDED", "BOLD", "CONDENSED"}, 0, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "SUBTITLE BACKGROUND", "KEEPS TEXT READABLE ON BRIGHT SCENES", "../icons/icon_subtitles.png", "", 0, EVO_RMLUI_PREVIEW_SUB_BACKGROUND, "What sits behind the text so it stays readable on bright scenes.", {"BOX", "SHADOW", "OUTLINE", "NONE"}, 2, 1, false},
+            {EVO_RMLUI_ROW_TOGGLE, "AUTO SUBTITLES", "AUTOMATICALLY LOAD SUBTITLES ON PLAYBACK", "../icons/icon_subtitles.png", "", 1, 0, "", {}, 0, -1, false}
+        });
+    }
     else if (kind == "theme")
     {
         build_preview_section(p, 3, "Interface & Storage", "THEMES, CONTROLS & BROWSING", {

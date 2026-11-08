@@ -1155,6 +1155,9 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         p.subtitle2_position = prospero_secondary_position;
         p.subtitle2_color = prospero_secondary_color;
         p.subtitle_style = prospero_subtitle_style;
+        p.subtitle_color = prospero_subtitle_color;            /* #231 */
+        p.subtitle_lift = prospero_subtitle_lift;
+        p.subtitle_background = prospero_subtitle_background;
         p.chrome_hidden = 0;
         p.skip_label = g_skip.shown >= 0 ? g_skip.label.c_str() : nullptr;   /* #219 */
         p.fps = perf_render_fps;
@@ -1233,6 +1236,9 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         p.subtitle2_position = prospero_secondary_position;
         p.subtitle2_color = prospero_secondary_color;
         p.subtitle_style = prospero_subtitle_style;
+        p.subtitle_color = prospero_subtitle_color;            /* #231 */
+        p.subtitle_lift = prospero_subtitle_lift;
+        p.subtitle_background = prospero_subtitle_background;
         p.chrome_hidden = 1;
         p.skip_label = g_skip.shown >= 0 ? g_skip.label.c_str() : nullptr;   /* #219 */
         p.alpha = 255;

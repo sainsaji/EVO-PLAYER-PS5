@@ -33,6 +33,10 @@ its real effect (#158). A row can be disabled by another setting, and then says 
 | **Subtitles** | Auto subtitles | on, off (read when a file opens) |
 | | Subtitle language | Auto (English), Italiano, English, Español, Français, Deutsch, Português, Japanese: the embedded track chosen, then online subtitles from Stremio addons ([../providers/media-servers.md](../providers/media-servers.md#online-subtitles)) |
 | | Default font style | Standard, Rounded, Bold, Condensed |
+| | Subtitle size | Small, Medium, Large, Extra large |
+| | Subtitle colour | White, Yellow, Cyan, Green |
+| | Subtitle position | Bottom, Raised, Higher |
+| | Subtitle background | Box, Shadow, Outline, None |
 | | Secondary subtitle position | Stacked above, Top of screen |
 | | Secondary subtitle colour | Yellow, Cyan, White |
 | **Interface & Storage** | Theme | MIDNIGHT, CARBON, EMBER, AURORA, and any `.theme` file ([theming.md](theming.md)) |
@@ -53,7 +57,7 @@ its real effect (#158). A row can be disabled by another setting, and then says 
 | | Match video frame rate | off, on ([../hardware/refresh-rate-modes.md](../hardware/refresh-rate-modes.md)) |
 | | Deep blacks | Off, Low, High (pulls raised shadows to true black on OLED) |
 
-Defaults: the first listed choice, except Default font style (Rounded, the second) and Skip intros & credits (Ask, the second); Phone & log port defaults to 9780; toggles that default on are Resume playback, Auto subtitles, Navigation sounds, Controller lightbar, Folders first and Ask which live stream. Everything in Experimental, Upscaling, Audio passthrough and the Debug overlay defaults off. A fresh install uses the MIDNIGHT theme.
+Defaults: the first listed choice, except Default font style (Rounded, the second), Subtitle size (Medium, the second) and Skip intros & credits (Ask, the second); Phone & log port defaults to 9780; toggles that default on are Resume playback, Auto subtitles, Navigation sounds, Controller lightbar, Folders first and Ask which live stream. Everything in Experimental, Upscaling, Audio passthrough and the Debug overlay defaults off. A fresh install uses the MIDNIGHT theme.
 
 The row titles above are what the dev remote addresses: `evo-remote.sh set audio-delay
 +100` uses the title lower-cased with dashes, `set --list` prints every name with its valid

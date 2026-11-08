@@ -31,6 +31,8 @@ const Color kCyan = Color::rgb(0x4dd8ff);
 const Color kAmber = Color::rgb(0xffb547);
 const Color kGreen = Color::rgb(0x5fe39a);
 const Color kSub2[3] = {Color::rgb(0xffe14d), Color::rgb(0x66e3ff), Color::rgb(0xffffff)};
+/* #231: the primary caption's colour, PROSPERO_SUBTITLE_COLORS order. */
+const Color kSub1[4] = {Color::rgb(0xffffff), Color::rgb(0xffe14d), Color::rgb(0x66e3ff), Color::rgb(0x7dff8a)};
 
 constexpr float kMargin = 96.0f;
 
@@ -128,6 +130,8 @@ float caption_size(int face)
         return 40.0f;
     case 3:
         return 60.0f;
+    case 4: /* #231: extra large */
+        return 72.0f;
     default:
         return 50.0f;
     }
@@ -474,18 +478,39 @@ void OsdScreen::draw_captions(DrawList &list, const Context &ctx, float chrome) 
     const ui::Fonts &fonts = ctx.fonts;
     const float size = caption_size(raw_.subtitle_face);
     const float line_h = size * 1.25f;
+    /* #231: Settings -> SUBTITLE POSITION raises the text captions; the chrome
+     * lift still applies on top, minus what the setting already gave. */
+    static const float kLift[3] = {0.0f, 80.0f, 160.0f};
+    const float lift = kLift[std::clamp(raw_.subtitle_lift, 0, 2)];
     /* Lifted above the timeline while the chrome is up. */
-    const float bottom = 1000.0f - (raw_.subtitle_raised ? 150.0f * chrome : 0.0f);
+    const float bottom =
+        1000.0f - lift - (raw_.subtitle_raised ? std::max(0.0f, 150.0f - lift) * chrome : 0.0f);
 
     const ui::FontRef &font = caption_font(fonts, raw_.subtitle_style);
     const bool heavy = raw_.subtitle_style == 3;
+    const int bg = std::clamp(raw_.subtitle_background, 0, 3); /* 0 box, 1 shadow, 2 outline, 3 none */
     auto block = [&](const std::vector<std::string> &lines, float last_baseline, float sz, Color ink) {
         float y = last_baseline - static_cast<float>(lines.size() - 1) * (sz * 1.25f);
         for (const std::string &l : lines)
         {
             const float w = font.measure(l, sz);
-            list.rounded_rect({960 - w * 0.5f - 18, y - sz * 0.95f, w + 36, sz * 1.25f}, 10,
-                              kBlack.with_alpha(0.55f));
+            if (bg == 0)
+                list.rounded_rect({960 - w * 0.5f - 18, y - sz * 0.95f, w + 36, sz * 1.25f}, 10,
+                                  kBlack.with_alpha(0.55f));
+            else if (bg == 1) /* drop shadow, scaled with the text */
+            {
+                const float o = std::max(2.0f, sz * 0.05f);
+                ui::text(list, font, l, 960 + o, y + o, sz, kBlack.with_alpha(0.85f), Align::center);
+            }
+            else if (bg == 2) /* outline: the line in black, offset all round */
+            {
+                const float o = std::max(2.0f, sz * 0.045f);
+                static const float kDir[8][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1},
+                                                 {-0.7f, -0.7f}, {0.7f, -0.7f}, {-0.7f, 0.7f}, {0.7f, 0.7f}};
+                for (const auto &d : kDir)
+                    ui::text(list, font, l, 960 + d[0] * o, y + d[1] * o, sz, kBlack.with_alpha(0.9f),
+                             Align::center);
+            }
             if (heavy) /* thicken the strokes: the same line 1 px either side */
             {
                 ui::text(list, font, l, 959, y, sz, ink, Align::center);
@@ -516,7 +541,7 @@ void OsdScreen::draw_captions(DrawList &list, const Context &ctx, float chrome) 
         }
     }
     if (!sub_lines_.empty())
-        top = block(sub_lines_, bottom, size, kWhite);
+        top = block(sub_lines_, bottom, size, kSub1[std::clamp(raw_.subtitle_color, 0, 3)]);
     if (!sub2_lines_.empty())
     {
         const Color ink = kSub2[std::clamp(raw_.subtitle2_color, 0, 2)];

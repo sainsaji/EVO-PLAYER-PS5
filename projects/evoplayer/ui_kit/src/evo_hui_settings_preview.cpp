@@ -936,6 +936,68 @@ void draw_sub_font(DrawList &list, const Context &ctx, const Rect &box, const Se
     benefit(list, ctx, a, y + 24.0f, pv.benefit);
 }
 
+/* ---- #231: SUBTITLE SIZE / COLOUR / POSITION / BACKGROUND. One sample line
+ * on the mock scene; only the row's own choice changes, the rest is the
+ * default look. ---- */
+void draw_sub_look(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const ui::Fonts &fonts = ctx.fonts;
+    const float sw = 400.0f, sh = 225.0f;
+    Rect frame{a.x + (a.w - sw) * 0.5f, a.top, sw, sh};
+    mock_scene(list, frame, 0.0f, false);
+    frame_border(list, ctx, frame, true);
+
+    const auto labels = chip_labels(pv);
+    const std::string tag_lbl = (pv.index < static_cast<int>(labels.size())) ? labels[pv.index] : "";
+    tag(list, ctx, frame, tag_lbl, true);
+
+    /* The player's sizes (40/50/60/72 px on 1080) scaled to the 400 px frame. */
+    static const float kSize[4] = {17.0f, 21.0f, 25.0f, 30.0f};
+    static const unsigned kInk[4] = {0xffffff, 0xffe14d, 0x66e3ff, 0x7dff8a};
+    static const float kLift[3] = {0.0f, 17.0f, 34.0f};
+    const int i = std::max(0, pv.index);
+    float fsize = kSize[1];
+    Color ink = kWhite;
+    float lift = 0.0f;
+    int bg = 0;
+    if (pv.kind == EVO_RMLUI_PREVIEW_SUB_SIZE) fsize = kSize[std::min(i, 3)];
+    else if (pv.kind == EVO_RMLUI_PREVIEW_SUB_TEXT_COLOUR) ink = Color::rgb(kInk[std::min(i, 3)]);
+    else if (pv.kind == EVO_RMLUI_PREVIEW_SUB_LIFT) lift = kLift[std::min(i, 2)];
+    else bg = std::min(i, 3);
+
+    const ui::FontRef &face = fonts.semibold;
+    const char *line = "You were right about the lighthouse.";
+    const float max_w = frame.w - 36.0f;
+    std::vector<std::string> lines = face.font->wrap(line, fsize, max_w);
+    if (lines.empty())
+        lines.push_back(line);
+    const float line_h = fsize * 1.25f;
+    const float cx = frame.cx();
+    float y = frame.y + frame.h - 20.0f - lift - static_cast<float>(lines.size() - 1) * line_h;
+    for (const std::string &l : lines)
+    {
+        const float w = face.measure(l, fsize);
+        if (bg == 0)
+            list.rounded_rect({cx - w * 0.5f - 8, y - fsize * 0.95f, w + 16, fsize * 1.25f}, 5,
+                              Color::rgb(0x000000, 0.55f));
+        else if (bg == 1)
+            ui::text(list, face, l, cx + 1.5f, y + 1.5f, fsize, Color::rgb(0x000000, 0.85f), Align::center);
+        else if (bg == 2)
+        {
+            static const float kDir[8][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1},
+                                             {-0.7f, -0.7f}, {0.7f, -0.7f}, {-0.7f, 0.7f}, {0.7f, 0.7f}};
+            for (const auto &d : kDir)
+                ui::text(list, face, l, cx + d[0], y + d[1], fsize, Color::rgb(0x000000, 0.9f), Align::center);
+        }
+        ui::text(list, face, l, cx, y, fsize, ink, Align::center);
+        y += line_h;
+    }
+
+    const float yc = chips(list, ctx, a, frame.y + frame.h + 24.0f, labels, pv.index);
+    benefit(list, ctx, a, yc + 24.0f, pv.benefit);
+}
+
 /* ---- 9. SECONDARY POSITION: stacked above primary vs top of screen. ---- */
 void draw_sub_pos(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
 {
@@ -2001,6 +2063,12 @@ void draw_settings_preview(DrawList &list, const Context &ctx, const Rect &box, 
         break;
     case EVO_RMLUI_PREVIEW_SUB_COLOUR:
         draw_sub_colour(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_SUB_SIZE:
+    case EVO_RMLUI_PREVIEW_SUB_TEXT_COLOUR:
+    case EVO_RMLUI_PREVIEW_SUB_LIFT:
+    case EVO_RMLUI_PREVIEW_SUB_BACKGROUND:
+        draw_sub_look(list, ctx, box, pv);
         break;
     case EVO_RMLUI_PREVIEW_THEME:
         draw_theme(list, ctx, box, pv);

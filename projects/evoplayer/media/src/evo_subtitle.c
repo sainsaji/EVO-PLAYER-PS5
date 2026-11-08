@@ -1588,7 +1588,7 @@ static ProsperoSubtitleCue prospero_subtitle_cues[
 
 int prospero_subtitle_count = 0;
 int prospero_subtitle_enabled = 1;
-int prospero_subtitle_face = 2;  /* 1 SUB (SMALL), 2 MENU (MEDIUM/DEFAULT), 3 TITLE (LARGE) */
+int prospero_subtitle_face = 2;  /* 1 SMALL, 2 MEDIUM (DEFAULT), 3 LARGE, 4 EXTRA LARGE (#231) */
 
 static char prospero_subtitle_path[512] = {0};
 
@@ -2638,6 +2638,9 @@ int prospero_secondary_delay_ms = 0;
 int prospero_secondary_position = PROSPERO_SECONDARY_POS_STACKED;
 int prospero_secondary_color = 0;
 int prospero_subtitle_style = 0;
+int prospero_subtitle_color = 0;       /* #231: white */
+int prospero_subtitle_lift = 0;        /* #231: at the bottom */
+int prospero_subtitle_background = 0;  /* #231: the box EVO always drew */
 
 static char prospero_secondary_media[768] = {0};
 
