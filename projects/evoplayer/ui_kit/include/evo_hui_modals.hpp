@@ -28,8 +28,9 @@ class SubtitlePicker
     };
     hui::gfx::Rect track_rect(int index) const;
 
-    std::string eyebrow_, title_, size_, sync_, sync2_, preview_, preview2_;
+    std::string eyebrow_, title_, size_, size2_, sync_, sync2_, cue_str_, preview_, preview2_;
     int preview_face_ = 1;
+    int preview_face2_ = 1;
     bool has_secondary_ = false;
     int secondary_position_ = 0;
     int secondary_color_ = 0;

@@ -120,7 +120,7 @@ div, span, p {
     letter-spacing: 0.5dp;
 }
 
-#subtitles-size-pill {
+#subtitles-size-pill, #subtitles-size2-pill {
     background-color: #131d2e;
     border-width: 1dp;
     border-color: #243550;
@@ -130,6 +130,17 @@ div, span, p {
     flex-direction: row;
     align-items: center;
     gap: 8dp;
+}
+
+#subtitles-size2-pill {
+    display: none;
+}
+
+#subtitles-size-label, #subtitles-size2-label {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #ffd700;
+    letter-spacing: 0.5dp;
 }
 
 .size-glyph {
@@ -363,6 +374,12 @@ div, span, p {
     font-weight: bold;
 }
 
+#subtitles-preview-text2 {
+    color: #ffe27a;
+    font-weight: bold;
+    margin-bottom: 6dp;
+}
+
 .preview-small {
     font-size: 22dp;
 }
@@ -373,4 +390,8 @@ div, span, p {
 
 .preview-large {
     font-size: 36dp;
+}
+
+.preview-xlarge {
+    font-size: 46dp;
 }

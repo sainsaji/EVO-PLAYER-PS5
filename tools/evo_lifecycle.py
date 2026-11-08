@@ -161,9 +161,9 @@ def foreign(text):
 
 
 def status_fields():
-    t = fetch(STATUS)
+    t = fetch("/data/evoplayer/evo_status")
     if not t:
-        t = fetch("/data/evoplayer/evo_status")
+        t = fetch(STATUS)
     if not t:
         return None
     return dict(tok.split("=", 1) for tok in t.split() if "=" in tok)

@@ -42,11 +42,16 @@ private:
     void activateSelection();
     void activateSecondary();
     void cycleSize();
+    void cycleSecondarySize();
+    void rollRandomCues();
 
     std::vector<SubtitleTrackEntry> m_tracks;
     int m_selectedIndex = 0;
     int m_activeTrackIndex = 0;
     int m_scrollOffset = 0;
+
+    std::string m_previewPrimary;
+    std::string m_previewSecondary;
 };
 
 } // namespace evo

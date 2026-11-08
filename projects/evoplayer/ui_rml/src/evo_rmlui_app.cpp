@@ -2829,9 +2829,11 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
         set_caption(el_sub2_top, on_top ? state.subtitle2_text : std::string());
         for (Rml::Element* box : {el_sub2_box, el_sub2_top}) {
             if (!box) continue;
-            box->SetClass("sub2-small",  state.subtitle_face == 1);
-            box->SetClass("sub2-medium", state.subtitle_face == 2);
-            box->SetClass("sub2-large",  state.subtitle_face == 3);
+            const int s2_face = state.subtitle2_face > 0 ? state.subtitle2_face : state.subtitle_face;
+            box->SetClass("sub2-small",  s2_face == 1);
+            box->SetClass("sub2-medium", s2_face == 2);
+            box->SetClass("sub2-large",  s2_face == 3);
+            box->SetClass("sub2-xlarge", s2_face == 4);
             box->SetClass("sub2-yellow", state.subtitle2_color == 0);
             box->SetClass("sub2-cyan",   state.subtitle2_color == 1);
             box->SetClass("sub2-white",  state.subtitle2_color == 2);
@@ -3635,12 +3637,35 @@ void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
         el_sz->SetProperty("color", to_hex_rgb(m_theme.accent));
     }
 
+    Rml::Element* el_sz2_pill = m_subtitles_doc->GetElementById("subtitles-size2-pill");
+    if (el_sz2_pill) {
+        el_sz2_pill->SetProperty("display", state.has_secondary ? "flex" : "none");
+        el_sz2_pill->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
+    }
+
+    Rml::Element* el_sz2 = m_subtitles_doc->GetElementById("subtitles-size2-label");
+    if (el_sz2) {
+        el_sz2->SetInnerRML(std::string("2ND SIZE: ") + state.size2_str);
+        el_sz2->SetProperty("color", to_hex_rgb(m_theme.accent));
+    }
+
+    Rml::Element* el_pv2 = m_subtitles_doc->GetElementById("subtitles-preview-text2");
+    if (el_pv2) {
+        el_pv2->SetInnerRML(state.preview_text2);
+        el_pv2->SetProperty("display", state.has_secondary && !state.preview_text2.empty() ? "block" : "none");
+        el_pv2->SetClass("preview-small", state.preview_face2 == 0);
+        el_pv2->SetClass("preview-medium", state.preview_face2 == 1);
+        el_pv2->SetClass("preview-large", state.preview_face2 == 2);
+        el_pv2->SetClass("preview-xlarge", state.preview_face2 == 3);
+    }
+
     Rml::Element* el_pv = m_subtitles_doc->GetElementById("subtitles-preview-text");
     if (el_pv) {
         el_pv->SetInnerRML(state.preview_text.empty() ? "Welcome to EVO Player on PlayStation 5" : state.preview_text);
         el_pv->SetClass("preview-small", state.preview_face == 0);
         el_pv->SetClass("preview-medium", state.preview_face == 1);
         el_pv->SetClass("preview-large", state.preview_face == 2);
+        el_pv->SetClass("preview-xlarge", state.preview_face == 3);
     }
 
     for (int i = 0; i < 6; i++) {

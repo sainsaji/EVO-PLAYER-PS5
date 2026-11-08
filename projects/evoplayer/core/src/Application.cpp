@@ -1530,7 +1530,9 @@ int Application::run() {
                 r3IsChapters = true;
             /* #227: on the keyboard's PHONE LINK OFF card, R3 is Set port. */
             const bool r3ToKeyboard = (pressed & PadButtons::R3) && evo_keyboard_wants_r3();
-            if ((pressed & PadButtons::L3) || ((pressed & PadButtons::R3) && !r3IsChapters && !r3ToKeyboard)) {
+            const bool r3ToSubtitles = (pressed & PadButtons::R3) && m_screenManager &&
+                m_screenManager->getCurrentScreenId() == ScreenId::SubtitlePicker;
+            if ((pressed & PadButtons::L3) || ((pressed & PadButtons::R3) && !r3IsChapters && !r3ToKeyboard && !r3ToSubtitles)) {
                 EVO_LOGI("screenshot", "stick click pressed=%#010x", pressed);
                 evo_boot_log_flush();
                 std::string shotPath;
@@ -1551,7 +1553,7 @@ int Application::run() {
                     notifyOnScreen("EVO: screenshot failed");
                     evo_feedback(EVO_FB_BOUNDARY);
                 }
-                pressed &= ~(PadButtons::L3 | ((r3IsChapters || r3ToKeyboard) ? 0u : PadButtons::R3));
+                pressed &= ~(PadButtons::L3 | ((r3IsChapters || r3ToKeyboard || r3ToSubtitles) ? 0u : PadButtons::R3));
             }
 
             /* #120: while the update card is up it has the focus, like a dialog:

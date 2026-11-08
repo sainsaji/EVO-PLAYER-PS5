@@ -45,6 +45,7 @@ struct EvoPlaybackState {
     std::string subtitle2_text;  // #110: secondary caption, same shape as subtitle_text
     int subtitle2_position = 0;  // 0 stacked above the primary, 1 top of screen
     int subtitle2_color = 0;     // 0 yellow, 1 cyan, 2 white
+    int subtitle2_face = 2;      // 1 small, 2 medium, 3 large, 4 extra large
     int subtitle_style = 0;      // 0 standard, 1 light, 2 rounded, 3 bold
     bool chrome_hidden = false;  // render only the caption, hide the OSD chrome
     int fps = 0;                 // #81: dev FPS pill
@@ -71,6 +72,7 @@ struct EvoPlaybackState {
                subtitle2_text == o.subtitle2_text &&
                subtitle2_position == o.subtitle2_position &&
                subtitle2_color == o.subtitle2_color &&
+               subtitle2_face == o.subtitle2_face &&
                subtitle_style == o.subtitle_style &&
                fps == o.fps && debug_overlay == o.debug_overlay &&
                music_mode == o.music_mode && music_codec == o.music_codec;
@@ -181,16 +183,31 @@ struct EvoSubtitlesState {
     std::string eyebrow;
     std::string title;
     std::string size_str;
+    std::string size2_str;
     std::string sync_str;
     std::string sync2_str;       // #110: empty hides the secondary sync pill
+    std::string cue_str;
     std::string preview_text;
-    int preview_face = 1; // 0=small, 1=medium, 2=large
+    std::string preview_text2;
+    int preview_face = 1; // 0=small, 1=medium, 2=large, 3=extra large
+    int preview_face2 = 1;
+    bool has_secondary = false;
+    int secondary_position = 0;
+    int secondary_color = 0;
+    int primary_color = 0;
     std::vector<EvoSubtitlesTrack> tracks;
 
     bool operator==(const EvoSubtitlesState& o) const {
-        return eyebrow == o.eyebrow && title == o.title && size_str == o.size_str &&
+        return eyebrow == o.eyebrow && title == o.title &&
+               size_str == o.size_str && size2_str == o.size2_str &&
                sync_str == o.sync_str && sync2_str == o.sync2_str &&
-               preview_text == o.preview_text && preview_face == o.preview_face &&
+               cue_str == o.cue_str &&
+               preview_text == o.preview_text && preview_text2 == o.preview_text2 &&
+               preview_face == o.preview_face && preview_face2 == o.preview_face2 &&
+               has_secondary == o.has_secondary &&
+               secondary_position == o.secondary_position &&
+               secondary_color == o.secondary_color &&
+               primary_color == o.primary_color &&
                tracks == o.tracks;
     }
     bool operator!=(const EvoSubtitlesState& o) const { return !(*this == o); }

@@ -13,8 +13,10 @@ command -v ffmpeg >/dev/null 2>&1 || { echo "make_sample: ffmpeg not found - run
 mkdir -p "$(dirname "${OUT}")"
 SRT="$(dirname "${OUT}")/evo_sample.srt"
 {
-    printf '1\n00:00:01,000 --> 00:00:06,000\nEVO sample clip - subtitle track 1\n\n'
-    printf '2\n00:00:08,000 --> 00:00:14,000\nThe quick brown fox jumps over the lazy dog\n\n'
+    printf '1\n00:00:00,500 --> 00:00:04,500\nWe need to cross the valley before the storm hits.\n\n'
+    printf '2\n00:00:05,000 --> 00:00:09,000\nAre you certain the mountain pass is still open?\n\n'
+    printf '3\n00:00:09,500 --> 00:00:13,500\nYes, the scouts confirmed the route this morning.\n\n'
+    printf '4\n00:00:14,000 --> 00:00:18,500\nThen gather everyone and prepare to move immediately.\n\n'
 } > "${SRT}"
 ffmpeg -hide_banner -loglevel error -y \
     -f lavfi -i "testsrc2=size=1920x1080:rate=24:duration=20" \

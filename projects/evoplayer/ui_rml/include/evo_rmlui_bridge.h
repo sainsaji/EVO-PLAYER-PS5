@@ -70,6 +70,7 @@ typedef struct {
     const char* subtitle_text2;
     int subtitle2_position;
     int subtitle2_color;
+    int subtitle2_face;
     /* Settings -> DEFAULT FONT STYLE for both captions:
      * 0 standard, 1 light, 2 rounded, 3 bold (prospero_subtitle_style). */
     int subtitle_style;
@@ -266,10 +267,13 @@ typedef struct {
     const char* eyebrow;
     const char* title;
     const char* size_str;
+    const char* size2_str;   /* secondary subtitle size, e.g. "MEDIUM" */
     const char* sync_str;
     const char* sync2_str;   /* #110: the secondary track's sync pill, NULL/"" hides it */
+    const char* cue_str;     /* dialogue cue indicator e.g. "CUE #42" */
     const char* preview_text;
     int preview_face; // 0=small, 1=medium, 2=large, 3=extra large
+    int preview_face2; // 0=small, 1=medium, 2=large, 3=extra large
     int track_count;
     evo_rmlui_subtitles_track_t tracks[8];
     int has_secondary;       /* 1 if dual subtitles active */

@@ -1154,6 +1154,7 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         p.subtitle_text2 = secondarySubText[0] ? secondarySubText : nullptr;
         p.subtitle2_position = prospero_secondary_position;
         p.subtitle2_color = prospero_secondary_color;
+        p.subtitle2_face = prospero_secondary_face;
         p.subtitle_style = prospero_subtitle_style;
         p.subtitle_color = prospero_subtitle_color;            /* #231 */
         p.subtitle_lift = prospero_subtitle_lift;
@@ -1235,6 +1236,7 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         p.subtitle_text2 = secondarySubText[0] ? secondarySubText : nullptr;
         p.subtitle2_position = prospero_secondary_position;
         p.subtitle2_color = prospero_secondary_color;
+        p.subtitle2_face = prospero_secondary_face;
         p.subtitle_style = prospero_subtitle_style;
         p.subtitle_color = prospero_subtitle_color;            /* #231 */
         p.subtitle_lift = prospero_subtitle_lift;

@@ -11,3 +11,5 @@
 int32_t sceAgcDriverSubmitDcb(void *description) { (void)description; return -1; }
 uint32_t sceAgcDriverGetWaitRenderingPacketSizeInDwords(void) { return 0; }
 uint32_t sceAgcDriverWaitUntilSafeForRendering(uint32_t **command, uint32_t packet_size, uint32_t reserved, uint32_t handle, int buffer) { (void)command; (void)packet_size; (void)reserved; (void)handle; (void)buffer; return 0; }
+int32_t sceAgcDriverSetTFRing(uintptr_t address, uint32_t size) { (void)address; (void)size; return 0; }
+int32_t sceAgcDriverSetHsOffchipParam(uint32_t granularity, uint32_t buffering) { (void)granularity; (void)buffering; return 0; }

@@ -55,20 +55,23 @@ void hint_row(DrawList &list, const ui::Fonts &fonts, const ui::Hint *hints, int
 void SubtitlePicker::set(const evo_rmlui_subtitles_params_t &p)
 {
     auto str = [](const char *s) { return std::string(s ? s : ""); };
-    eyebrow_ = str(p.eyebrow);
-    title_ = str(p.title);
-    size_ = str(p.size_str);
     /* The values carry their own "SYNC: " / "2ND: " prefix for the RmlUi
      * screen; the pills here already print a label, so drop it. */
     auto unprefix = [](std::string s, const char *prefix) {
         const std::size_t n = std::char_traits<char>::length(prefix);
         return s.compare(0, n, prefix) == 0 ? s.substr(n) : s;
     };
+    eyebrow_ = str(p.eyebrow);
+    title_ = str(p.title);
+    size_ = str(p.size_str);
+    size2_ = unprefix(str(p.size2_str), "2ND: ");
     sync_ = unprefix(str(p.sync_str), "SYNC: ");
     sync2_ = unprefix(str(p.sync2_str), "2ND: ");
+    cue_str_ = str(p.cue_str);
     preview_ = str(p.preview_text);
     preview2_ = str(p.preview_text2);
     preview_face_ = p.preview_face;
+    preview_face2_ = p.preview_face2;
     has_secondary_ = p.has_secondary != 0;
     secondary_position_ = p.secondary_position;
     secondary_color_ = p.secondary_color;
@@ -143,22 +146,27 @@ void SubtitlePicker::draw(DrawList &list, const Context &ctx) const
     auto pill = [&](const std::string &label, const std::string &value, ui::Button btn = ui::Button::none) {
         if (value.empty())
             return;
-        const std::string t = label + "  " + value;
-        const float text_w = fonts.semibold.measure(t, 16, 1.0f);
-        const float btn_w = (btn != ui::Button::none) ? (ui::button_width(btn, 18.0f) + 8.0f) : 0.0f;
-        const float w = text_w + btn_w + 28.0f;
-        list.rounded_rect({px, sheet.y + 140, w, 34}, 17, kWhite.with_alpha(0.08f));
-        float tx = px + 14.0f;
+        const std::string t = label.empty() ? value : (label + " " + value);
+        const float text_w = fonts.semibold.measure(t, 13.5f, 1.0f);
+        const float btn_w = (btn != ui::Button::none) ? (ui::button_width(btn, 16.0f) + 6.0f) : 0.0f;
+        const float w = text_w + btn_w + 22.0f;
+        list.rounded_rect({px, sheet.y + 142, w, 30}, 15, kWhite.with_alpha(0.08f));
+        float tx = px + 11.0f;
         if (btn != ui::Button::none) {
-            ui::draw_button(list, fonts, ui::GlyphStyle::dark(), btn, tx, sheet.y + 157.0f, 18.0f);
+            ui::draw_button(list, fonts, ui::GlyphStyle::dark(), btn, tx, sheet.y + 157.0f, 16.0f);
             tx += btn_w;
         }
-        ui::text(list, fonts.semibold, t, tx, sheet.y + 163, 16, p.text_muted, Align::left, 1.0f);
-        px += w + 10;
+        ui::text(list, fonts.semibold, t, tx, sheet.y + 162, 13.5f, p.text_muted, Align::left, 1.0f);
+        px += w + 8;
     };
     pill("SIZE", size_, ui::Button::triangle);
+    if (has_secondary_)
+        pill("2ND", size2_, ui::Button::r2);
     pill("SYNC", sync_);
-    pill("SYNC 2", sync2_);
+    if (!sync2_.empty())
+        pill("2ND SYNC", sync2_);
+    if (!cue_str_.empty())
+        pill("DIALOGUE", cue_str_);
 
     list.rounded_rect(ring_.value(), page::kRadiusTile, kWhite);
     for (std::size_t i = 0; i < tracks_.size(); ++i)
@@ -193,12 +201,22 @@ void SubtitlePicker::draw(DrawList &list, const Context &ctx) const
         list.pop_opacity();
     }
 
-    const ui::Hint hints[] = {{ui::Button::cross, "Select"},
-                              {ui::Button::square, "2nd track"},
-                              {ui::Button::triangle, "Size"},
-                              {ui::Button::dpad, "Sync"},
-                              {ui::Button::circle, "Back"}};
-    hint_row(list, fonts, hints, 5, sheet.x + sheet.w - 36, sheet.y + sheet.h - 44);
+    std::vector<ui::Hint> hints;
+    hints.push_back({ui::Button::cross, "Select"});
+    hints.push_back({ui::Button::square, "2nd track"});
+    hints.push_back({ui::Button::triangle, "Size"});
+    if (has_secondary_)
+        hints.push_back({ui::Button::r2, "2nd size"});
+    hints.push_back({ui::Button::dpad, "Sync"});
+    hints.push_back({ui::Button::circle, "Back"});
+
+    ui::HintLayout layout;
+    layout.size = 22;
+    layout.text_size = 15;
+    layout.item_gap = 16.0f;
+    layout.cy = sheet.y + sheet.h - 40;
+    ui::draw_hints(list, fonts, ui::GlyphStyle::dark(), hints.data(), static_cast<int>(hints.size()),
+                   sheet.x + sheet.w - 36, true, layout);
     list.pop_opacity();
     list.pop_transform();
 
@@ -213,6 +231,8 @@ void SubtitlePicker::draw(DrawList &list, const Context &ctx) const
         };
 
         const float size = preview_face_ == 0 ? 40.0f : (preview_face_ == 2 ? 60.0f : (preview_face_ == 3 ? 72.0f : 50.0f));
+        const float sz2_base = preview_face2_ == 0 ? 40.0f : (preview_face2_ == 2 ? 60.0f : (preview_face2_ == 3 ? 72.0f : 50.0f));
+        const float sz2 = sz2_base * 0.85f;
         const float cx = kSheetX * 0.5f;
         const float max_w = kSheetX - 120;
         list.push_opacity(o);
@@ -247,7 +267,6 @@ void SubtitlePicker::draw(DrawList &list, const Context &ctx) const
 
         const Color col1 = kSub1[std::clamp(primary_color_, 0, 3)];
         const Color col2 = kSub2[std::clamp(secondary_color_, 0, 2)];
-        const float sz2 = size * 0.85f;
 
         std::vector<std::string> lines1 = wrap_lines(preview_, size);
         std::vector<std::string> lines2 = has_secondary_ ? wrap_lines(preview2_, sz2) : std::vector<std::string>();
@@ -257,12 +276,12 @@ void SubtitlePicker::draw(DrawList &list, const Context &ctx) const
             // Secondary at TOP
             if (!lines2.empty())
             {
-                ui::text(list, fonts.semibold, "SECONDARY (TOP)", cx, 140, 13, p.text_faint, Align::center, 2.5f);
+                ui::text(list, fonts.semibold, "SECONDARY (TOP) · FROM SUBTITLE FILE", cx, 140, 13, p.text_faint, Align::center, 2.0f);
                 draw_block(lines2, 175, sz2, col2);
             }
             if (!lines1.empty())
             {
-                ui::text(list, fonts.semibold, "PREVIEW (PRIMARY)", cx, 730, 14, p.text_faint, Align::center, 3.0f);
+                ui::text(list, fonts.semibold, "PRIMARY · FROM SUBTITLE FILE", cx, 730, 13, p.text_faint, Align::center, 2.0f);
                 draw_block(lines1, 770, size, col1);
             }
         }
@@ -274,7 +293,7 @@ void SubtitlePicker::draw(DrawList &list, const Context &ctx) const
             const float primary_top = 840.0f - h1;
             const float sec_top = primary_top - h2 - 16.0f;
 
-            ui::text(list, fonts.semibold, "PREVIEW (DUAL SUBTITLES)", cx, sec_top - sz2 * 0.95f - 24.0f, 14, p.text_faint, Align::center, 3.0f);
+            ui::text(list, fonts.semibold, "PREVIEW · ACTUAL DIALOGUE FROM SUBTITLE FILE", cx, sec_top - sz2 * 0.95f - 24.0f, 13, p.text_faint, Align::center, 2.0f);
             if (!lines2.empty())
                 draw_block(lines2, sec_top, sz2, col2);
             if (!lines1.empty())
@@ -285,8 +304,10 @@ void SubtitlePicker::draw(DrawList &list, const Context &ctx) const
             // Single primary preview
             if (!lines1.empty())
             {
-                ui::text(list, fonts.semibold, "PREVIEW", cx, 730, 14, p.text_faint, Align::center, 3.0f);
-                draw_block(lines1, 770, size, col1);
+                const float h1 = static_cast<float>(lines1.size()) * size * 1.25f;
+                const float primary_top = 840.0f - h1;
+                ui::text(list, fonts.semibold, "PREVIEW · ACTUAL DIALOGUE FROM SUBTITLE FILE", cx, primary_top - size * 0.95f - 24.0f, 13, p.text_faint, Align::center, 2.0f);
+                draw_block(lines1, primary_top, size, col1);
             }
         }
 

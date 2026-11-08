@@ -461,6 +461,7 @@ void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* p) {
     state.subtitle2_text = p->subtitle_text2 ? p->subtitle_text2 : "";
     state.subtitle2_position = p->subtitle2_position;
     state.subtitle2_color = p->subtitle2_color;
+    state.subtitle2_face = p->subtitle2_face;
     state.subtitle_style = p->subtitle_style;
     state.chrome_hidden = (p->chrome_hidden != 0);
     state.fps = p->fps;
@@ -691,10 +692,18 @@ void evo_rmlui_update_subtitles(const evo_rmlui_subtitles_params_t* p) {
     state.eyebrow = p->eyebrow ? p->eyebrow : "SUBTITLES & CLOSED CAPTIONS";
     state.title = p->title ? p->title : "SELECT SUBTITLE TRACK";
     state.size_str = p->size_str ? p->size_str : "MEDIUM";
+    state.size2_str = p->size2_str ? p->size2_str : "MEDIUM";
     state.sync_str = p->sync_str ? p->sync_str : "";
     state.sync2_str = p->sync2_str ? p->sync2_str : "";
+    state.cue_str = p->cue_str ? p->cue_str : "";
     state.preview_text = p->preview_text ? p->preview_text : "";
+    state.preview_text2 = p->preview_text2 ? p->preview_text2 : "";
     state.preview_face = p->preview_face;
+    state.preview_face2 = p->preview_face2;
+    state.has_secondary = (p->has_secondary != 0);
+    state.secondary_position = p->secondary_position;
+    state.secondary_color = p->secondary_color;
+    state.primary_color = p->primary_color;
 
     for (int i = 0; i < p->track_count && i < 6; i++) {
         EvoSubtitlesTrack trk;

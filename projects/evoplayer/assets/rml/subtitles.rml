@@ -22,6 +22,10 @@
                         <img src="../icons/btn_triangle.png" class="size-glyph"/>
                         <span id="subtitles-size-label">SIZE: MEDIUM</span>
                     </div>
+                    <div id="subtitles-size2-pill">
+                        <span class="btn-tag">R2</span>
+                        <span id="subtitles-size2-label">2ND: MEDIUM</span>
+                    </div>
                 </div>
             </div>
 
@@ -136,7 +140,11 @@
                 </div>
                 <div class="footer-hint">
                     <div class="glyph-badge"><img src="../icons/btn_triangle.png" class="glyph-badge-img"/></div>
-                    <span class="footer-text">CYCLE SIZE</span>
+                    <span class="footer-text">SIZE</span>
+                </div>
+                <div class="footer-hint">
+                    <span class="btn-tag">R2</span>
+                    <span class="footer-text">2ND SIZE</span>
                 </div>
                 <div class="footer-hint">
                     <span class="btn-tag">&lt; &gt;</span>
@@ -155,7 +163,8 @@
 
         <!-- Live Subtitle Font Size Preview Box -->
         <div id="subtitles-preview-box">
-            <div id="subtitles-preview-label">SUBTITLE PREVIEW</div>
+            <div id="subtitles-preview-label">PREVIEW · ACTUAL DIALOGUE FROM SUBTITLE FILE</div>
+            <div id="subtitles-preview-text2" class="preview-medium" style="display: none;"></div>
             <div id="subtitles-preview-text" class="preview-medium">Welcome to EVO Player on PlayStation 5</div>
         </div>
     </div>

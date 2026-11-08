@@ -75,6 +75,7 @@ extern int prospero_secondary_use_external;       /* the secondary is the SRT   
 extern int prospero_secondary_delay_ms;           /* its own sync, like the primary's */
 extern int prospero_secondary_position;           /* PROSPERO_SECONDARY_POS_*   */
 extern int prospero_secondary_color;              /* 0 yellow, 1 cyan, 2 white  */
+extern int prospero_secondary_face;               /* 1 small, 2 medium, 3 large, 4 extra large */
 /* Settings -> DEFAULT FONT STYLE, for both captions. */
 #define PROSPERO_SUBTITLE_STYLES 4                 /* 0 standard, 1 light, 2 rounded, 3 bold */
 extern int prospero_subtitle_style;
@@ -162,6 +163,22 @@ void prospero_secondary_nudge_delay(int delta_ms);
  * delay applied. Copies "" and returns 0 when nothing shows. */
 int  prospero_secondary_subtitle_text_at(double clock_seconds, char *output,
                                          size_t output_size);
+
+/* Dialogue cues query for preview / dialogue selection */
+int  prospero_subtitle_get_cue_count(int is_secondary);
+int  prospero_subtitle_get_cue_info(int is_secondary, int cue_index,
+                                    double *start_sec, double *end_sec,
+                                    char *text_out, size_t text_sz);
+
+/* Sample random cues from loaded subtitles for primary and secondary preview. */
+int  prospero_subtitle_sample_random_cues(char *primary_out, size_t primary_sz,
+                                         char *secondary_out, size_t secondary_sz);
+
+/* Sample cue texts for primary and secondary previews: reads from dialogue cue at
+ * cue_index (0-based) or falls back to clock_seconds when cue_index < 0. */
+int  prospero_subtitle_sample_cue_text_by_index(double clock_seconds, int cue_index,
+                                               char *primary_out, size_t primary_sz,
+                                               char *secondary_out, size_t secondary_sz);
 
 /* Sample cue texts for primary and secondary previews: reads from active cues at
  * clock_seconds or nearest loaded dialogue cues. */

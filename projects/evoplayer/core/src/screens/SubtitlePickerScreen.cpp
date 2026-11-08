@@ -32,6 +32,7 @@ void SubtitlePickerScreen::onEnter() {
     if (m_selectedIndex >= kVisibleRows) {
         m_scrollOffset = m_selectedIndex - kVisibleRows + 1;
     }
+    rollRandomCues();
 }
 
 void SubtitlePickerScreen::onExit() {
@@ -296,25 +297,34 @@ void SubtitlePickerScreen::activateSecondary() {
 
 void SubtitlePickerScreen::cycleSize() {
     /*
-     * prospero_subtitle_face is 1=SMALL, 2=MEDIUM, 3=LARGE - see its
-     * declaration in evo_subtitle.c, and the classes the player applies:
-     * subtitle_face == 1/2/3 -> sub-small/sub-medium/sub-large.
-     *
-     * This cycled with (face + 1) % 3, which produces 0, 1 and 2. So LARGE was
-     * unreachable, and face 0 matched no class at all and fell through to
-     * #subtitle-box's own font-size - which is 40dp, exactly what sub-medium
-     * sets. Two of the three stops therefore rendered identically and the
-     * third was the only one that did anything, which is why the size looked
-     * like it never changed.
+     * prospero_subtitle_face is 1=SMALL, 2=MEDIUM, 3=LARGE, 4=EXTRA LARGE
+     * See its declaration in evo_subtitle.c.
      */
     if (prospero_subtitle_face < 1 || prospero_subtitle_face > PROSPERO_SUBTITLE_SIZES)
         prospero_subtitle_face = 2;              /* MEDIUM, the documented default */
-    /* 1 -> 2 -> 3 -> 4 -> 1; #231 added EXTRA LARGE. This is for this session
-     * only: Settings -> SUBTITLE SIZE is the saved default. */
     prospero_subtitle_face = (prospero_subtitle_face % PROSPERO_SUBTITLE_SIZES) + 1;
 
     const char* names[] = { "SMALL", "MEDIUM", "LARGE", "EXTRA LARGE" };
-    toast("SUBTITLE SIZE", names[prospero_subtitle_face - 1]);
+    toast("PRIMARY SIZE", names[prospero_subtitle_face - 1]);
+    evo_feedback(EVO_FB_MOVE);
+}
+
+void SubtitlePickerScreen::cycleSecondarySize() {
+    if (prospero_secondary_face < 1 || prospero_secondary_face > PROSPERO_SUBTITLE_SIZES)
+        prospero_secondary_face = 2;
+    prospero_secondary_face = (prospero_secondary_face % PROSPERO_SUBTITLE_SIZES) + 1;
+
+    const char* names[] = { "SMALL", "MEDIUM", "LARGE", "EXTRA LARGE" };
+    toast("2ND SUBTITLE SIZE", names[prospero_secondary_face - 1]);
+    evo_feedback(EVO_FB_MOVE);
+}
+
+void SubtitlePickerScreen::rollRandomCues() {
+    char pBuf[PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE] = {0};
+    char sBuf[PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE] = {0};
+    prospero_subtitle_sample_random_cues(pBuf, sizeof(pBuf), sBuf, sizeof(sBuf));
+    m_previewPrimary = pBuf;
+    m_previewSecondary = sBuf;
 }
 
 bool SubtitlePickerScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t released) {
@@ -334,11 +344,21 @@ bool SubtitlePickerScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t
         return true;
     }
     if (pressed & PadButtons::Triangle) {
-        cycleSize();
+        if (m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_tracks.size()) &&
+            m_tracks[m_selectedIndex].isSecondary) {
+            cycleSecondarySize();
+        } else {
+            cycleSize();
+        }
+        return true;
+    }
+    if (pressed & PadButtons::R2) {
+        cycleSecondarySize();
         return true;
     }
     if (pressed & PadButtons::Square) {
         activateSecondary();
+        rollRandomCues();
         return true;
     }
     if (pressed & (PadButtons::L1 | PadButtons::R1)) {
@@ -351,7 +371,7 @@ bool SubtitlePickerScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t
         evo_feedback(EVO_FB_MOVE);
         return true;
     }
-    if (pressed & (PadButtons::Left | PadButtons::TouchPadLeft | PadButtons::L2)) {
+    if (pressed & (PadButtons::Left | PadButtons::TouchPadLeft)) {
         prospero_subtitle_nudge_delay(-100);
         evo_feedback(EVO_FB_MOVE);
         return true;
@@ -382,16 +402,14 @@ void SubtitlePickerScreen::render(uint32_t* framebuffer, int width, int height) 
     evo_rmlui_subtitles_params_t params;
     std::memset(&params, 0, sizeof(params));
 
-    params.eyebrow = "SUBTITLE CONFIGURATION";
-    params.title = "SUBTITLE TRACKS";
-    /* The picker's own preview classes are 0/1/2 (preview-small/medium/large)
-     * while prospero_subtitle_face is 1/2/3, so this is the one place the two
-     * conventions meet and the conversion has to be explicit. Both used to be
-     * "% 3", which made the label disagree with the size actually applied. */
+    /* Convert 1-based face indices to 0-based preview face */
     const int size_idx = (prospero_subtitle_face >= 1 && prospero_subtitle_face <= PROSPERO_SUBTITLE_SIZES)
                        ? (prospero_subtitle_face - 1) : 1;
+    const int size2_idx = (prospero_secondary_face >= 1 && prospero_secondary_face <= PROSPERO_SUBTITLE_SIZES)
+                        ? (prospero_secondary_face - 1) : 1;
     const char* sizeNames[] = { "SMALL", "MEDIUM", "LARGE", "EXTRA LARGE" };
     params.size_str = sizeNames[size_idx];
+    params.size2_str = sizeNames[size2_idx];
 
     static char s_syncBuf[64];
     if (prospero_subtitle_delay_ms == 0) {
@@ -420,23 +438,22 @@ void SubtitlePickerScreen::render(uint32_t* framebuffer, int width, int height) 
         params.sync2_str = "";
     }
 
-    static char s_primaryPreview[PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE];
-    static char s_secondaryPreview[PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE];
-    double currentPos = 0.0;
-    auto playback = Application::getInstance().getPlaybackController();
-    if (playback) {
-        currentPos = playback->getPositionSeconds();
+    if (m_previewPrimary.empty() && m_previewSecondary.empty()) {
+        rollRandomCues();
     }
-    prospero_subtitle_sample_cue_text(currentPos, s_primaryPreview, sizeof(s_primaryPreview),
-                                      s_secondaryPreview, sizeof(s_secondaryPreview));
 
-    params.preview_text = s_primaryPreview;
-    params.preview_text2 = s_secondaryPreview;
+    params.preview_text = m_previewPrimary.c_str();
+    params.preview_text2 = m_previewSecondary.c_str();
     params.has_secondary = (prospero_subtitle_enabled && prospero_secondary_subtitle_active()) ? 1 : 0;
     params.secondary_position = prospero_secondary_position;
     params.secondary_color = prospero_secondary_color;
     params.primary_color = prospero_subtitle_color;
     params.preview_face = size_idx;
+    params.preview_face2 = size2_idx;
+    params.cue_str = "";
+
+    params.eyebrow = "SUBTITLE CONFIGURATION";
+    params.title = "SUBTITLE TRACKS";
 
     int total = static_cast<int>(m_tracks.size());
     int rowsToDisplay = std::min(kVisibleRows, std::max(0, total - m_scrollOffset));
@@ -461,6 +478,7 @@ void SubtitlePickerScreen::render(uint32_t* framebuffer, int width, int height) 
             params.tracks[i].detail = prospero_subtitle_autosync_detail(s_autoSyncDetail, sizeof(s_autoSyncDetail));
             params.tracks[i].is_current = 0;
             params.tracks[i].is_action = 1;
+            params.tracks[i].tag = "";
             params.tracks[i].is_disabled = !prospero_subtitle_autosync_running() &&
                                            !prospero_subtitle_autosync_available();
         }
