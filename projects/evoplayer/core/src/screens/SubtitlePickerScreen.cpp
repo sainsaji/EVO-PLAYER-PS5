@@ -388,9 +388,9 @@ void SubtitlePickerScreen::render(uint32_t* framebuffer, int width, int height) 
      * while prospero_subtitle_face is 1/2/3, so this is the one place the two
      * conventions meet and the conversion has to be explicit. Both used to be
      * "% 3", which made the label disagree with the size actually applied. */
-    const int size_idx = (prospero_subtitle_face >= 1 && prospero_subtitle_face <= 3)
+    const int size_idx = (prospero_subtitle_face >= 1 && prospero_subtitle_face <= PROSPERO_SUBTITLE_SIZES)
                        ? (prospero_subtitle_face - 1) : 1;
-    const char* sizeNames[] = { "SMALL", "MEDIUM", "LARGE" };
+    const char* sizeNames[] = { "SMALL", "MEDIUM", "LARGE", "EXTRA LARGE" };
     params.size_str = sizeNames[size_idx];
 
     static char s_syncBuf[64];

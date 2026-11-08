@@ -41,8 +41,9 @@ std::string fit(const ui::FontRef &font, const std::string &text, float size, fl
 void hint_row(DrawList &list, const ui::Fonts &fonts, const ui::Hint *hints, int n, float right, float cy = 1030.0f)
 {
     ui::HintLayout layout;
-    layout.size = 30;
-    layout.text_size = 20;
+    layout.size = 28;
+    layout.text_size = 18;
+    layout.item_gap = 26.0f;
     layout.cy = cy;
     ui::draw_hints(list, fonts, ui::GlyphStyle::dark(), hints, n, right, true, layout);
 }
@@ -134,16 +135,23 @@ void SubtitlePicker::draw(DrawList &list, const Context &ctx) const
              sheet.x + 34, sheet.y + 118, 36, kWhite);
     /* Size and sync, as pills under the title. */
     float px = sheet.x + 36;
-    auto pill = [&](const std::string &label, const std::string &value) {
+    auto pill = [&](const std::string &label, const std::string &value, ui::Button btn = ui::Button::none) {
         if (value.empty())
             return;
         const std::string t = label + "  " + value;
-        const float w = fonts.semibold.measure(t, 16, 1.0f) + 28;
+        const float text_w = fonts.semibold.measure(t, 16, 1.0f);
+        const float btn_w = (btn != ui::Button::none) ? (ui::button_width(btn, 18.0f) + 8.0f) : 0.0f;
+        const float w = text_w + btn_w + 28.0f;
         list.rounded_rect({px, sheet.y + 140, w, 34}, 17, kWhite.with_alpha(0.08f));
-        ui::text(list, fonts.semibold, t, px + w * 0.5f, sheet.y + 163, 16, p.text_muted, Align::center, 1.0f);
+        float tx = px + 14.0f;
+        if (btn != ui::Button::none) {
+            ui::draw_button(list, fonts, ui::GlyphStyle::dark(), btn, tx, sheet.y + 157.0f, 18.0f);
+            tx += btn_w;
+        }
+        ui::text(list, fonts.semibold, t, tx, sheet.y + 163, 16, p.text_muted, Align::left, 1.0f);
         px += w + 10;
     };
-    pill("SIZE", size_);
+    pill("SIZE", size_, ui::Button::triangle);
     pill("SYNC", sync_);
     pill("SYNC 2", sync2_);
 
@@ -181,17 +189,18 @@ void SubtitlePicker::draw(DrawList &list, const Context &ctx) const
     }
 
     const ui::Hint hints[] = {{ui::Button::cross, "Select"},
-                              {ui::Button::square, "Size"},
+                              {ui::Button::square, "2nd track"},
+                              {ui::Button::triangle, "Size"},
                               {ui::Button::dpad, "Sync"},
                               {ui::Button::circle, "Back"}};
-    hint_row(list, fonts, hints, 4, sheet.x + sheet.w - 36, sheet.y + sheet.h - 44);
+    hint_row(list, fonts, hints, 5, sheet.x + sheet.w - 36, sheet.y + sheet.h - 44);
     list.pop_opacity();
     list.pop_transform();
 
     /* The preview caption, in the size that is selected, where it will show. */
     if (!preview_.empty() && o > 0.01f)
     {
-        const float size = preview_face_ == 0 ? 40.0f : (preview_face_ == 2 ? 60.0f : 50.0f);
+        const float size = preview_face_ == 0 ? 40.0f : (preview_face_ == 2 ? 60.0f : (preview_face_ == 3 ? 72.0f : 50.0f));
         const float cx = kSheetX * 0.5f;
         list.push_opacity(o);
         ui::text(list, fonts.semibold, "PREVIEW", cx, 700, 14, p.text_faint, Align::center, 3.0f);
