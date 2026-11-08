@@ -2305,7 +2305,7 @@ void ProviderHostScreen::applyChoice(const std::string& id)
         const evo_provider_t* ip = evo_provider_find(m_providerId.c_str());
         if (!ip || !ip->panel) return;
         if (id == "item:details") openRowsPanel(ip, m_itemId.c_str(), "details", m_itemTitle);
-        else                      openRowsPanel(ip, evo_rmlui_provider_current_parent(), "browse", "Sort, filter & genre");
+        else                      openRowsPanel(ip, evo_rmlui_provider_current_parent(), "browse", "Sort & filter");
         return;
     }
     if (id == "item:similar") {
