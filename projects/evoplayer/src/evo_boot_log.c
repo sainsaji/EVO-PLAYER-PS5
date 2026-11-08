@@ -341,7 +341,9 @@ static void *bl_writer(void *arg)
         clock_gettime(CLOCK_MONOTONIC, &now);
         const long since_ms = (long)(now.tv_sec - last_sync.tv_sec) * 1000L +
                               (now.tv_nsec - last_sync.tv_nsec) / 1000000L;
-        const int do_sync = want_sync || since_ms >= BL_SYNC_MS;
+        extern int evo_pb_is_active(void);
+        const int in_pb = evo_pb_is_active();
+        const int do_sync = want_sync || (!in_pb && since_ms >= BL_SYNC_MS);
         /* Re-state the wall clock every 10 minutes so any stretch of the log
          * can be dated, and a rotated file carries its own anchor. */
         if ((now.tv_sec - last_clock.tv_sec) >= 600) {
@@ -622,7 +624,10 @@ void evo_boot_log_kick(void)
         return;
     }
     pthread_mutex_lock(&g_q_lock);
-    g_want_sync = 1;
+    /* Wake the writer thread to drain pending lines to stdio / OS buffer.
+     * Do NOT force a blocking fsync every second - periodic fsync to a USB stick
+     * streaming media causes severe NAND flash block-erase stalls (~850 ms).
+     * fsync is reserved for explicit evo_boot_log_flush() points. */
     pthread_cond_signal(&g_q_cond);
     pthread_mutex_unlock(&g_q_lock);
 }

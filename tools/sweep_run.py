@@ -33,6 +33,8 @@ SKIP = [s.strip().lower()
 
 CMD_PATH = "/mnt/usb0/evo_cmd"
 STATUS_PATH = "/mnt/usb0/evo_status"
+CMD_FALLBACK = "/data/evoplayer/evo_cmd"
+STATUS_FALLBACK = "/data/evoplayer/evo_status"
 
 MEDIA_EXT = (
     ".mp4", ".mkv", ".m4v", ".mov", ".avi", ".webm", ".ts", ".m2ts",
@@ -57,18 +59,26 @@ def connect():
 
 def put_cmd(line):
     with connect() as f:
-        f.storbinary("STOR " + CMD_PATH, io.BytesIO((line + "\n").encode()))
+        data = (line + "\n").encode()
+        for p in [CMD_FALLBACK, CMD_PATH]:
+            try:
+                f.storbinary("STOR " + p, io.BytesIO(data))
+                return
+            except error_perm:
+                pass
 
 
 def get_status():
     try:
         with connect() as f:
-            buf = []
-            try:
-                f.retrbinary("RETR " + STATUS_PATH, buf.append)
-            except error_perm:
-                return None
-            return b"".join(buf).decode("utf-8", "replace").strip()
+            for p in [STATUS_FALLBACK, STATUS_PATH]:
+                buf = []
+                try:
+                    f.retrbinary("RETR " + p, buf.append)
+                    return b"".join(buf).decode("utf-8", "replace").strip()
+                except error_perm:
+                    continue
+            return None
     except Exception:
         return None
 

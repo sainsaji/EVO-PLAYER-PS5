@@ -172,7 +172,7 @@ with FTP() as f:
     except Exception: pass
     cmd_bytes = (sys.argv[1] + "\n").encode()
     sent = False
-    for p in ["/mnt/usb0/evo_cmd", "/data/evoplayer/evo_cmd"]:
+    for p in ["/data/evoplayer/evo_cmd", "/mnt/usb0/evo_cmd"]:
         try:
             f.storbinary("STOR " + p, io.BytesIO(cmd_bytes))
             sent = True
@@ -191,7 +191,11 @@ import os, sys
 from ftplib import FTP, error_perm
 paths = [sys.argv[1]]
 if sys.argv[1].startswith("/mnt/usb0/"):
-    paths.append(sys.argv[1].replace("/mnt/usb0/", "/data/evoplayer/"))
+    alt = sys.argv[1].replace("/mnt/usb0/", "/data/evoplayer/")
+    if "evo_status" in sys.argv[1] or "evo_ui" in sys.argv[1]:
+        paths = [alt, sys.argv[1]]
+    else:
+        paths.append(alt)
 try:
     with FTP() as f:
         f.connect(os.environ["PS5_HOST"], int(os.environ["FTP_PORT"]), timeout=15)

@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include "evo_playback.h"
 #include "evo_demux.h"
@@ -282,21 +283,135 @@ static void write_ui_file(const char *tmp_path, const char *path, unsigned seq, 
     }
 }
 
+static pthread_t       g_remote_th;
+static volatile int    g_remote_up = 0;
+static pthread_mutex_t g_remote_mx = PTHREAD_MUTEX_INITIALIZER;
+static char            g_remote_cmd[600];
+static volatile int    g_remote_cmd_ready = 0;
+
+static char           *g_remote_ui_json = NULL;
+static unsigned        g_remote_ui_seq = 0;
+static long long       g_remote_ui_now = 0;
+static volatile int    g_remote_ui_pending = 0;
+
+static int poll_cmd_file(const char *path, char *out, size_t cap)
+{
+    FILE *cf = fopen(path, "r");
+    if (!cf)
+        return 0;
+
+    char line[600];
+    int  got = (fgets(line, sizeof line, cf) != NULL);
+    int  complete = got && strchr(line, '\n') != NULL;
+    /* A full buffer with no newline is not a partial write, it is junk —
+     * drop it rather than wedging the remote on it forever. */
+    int  junk = got && !complete && strlen(line) >= sizeof line - 1;
+    fclose(cf);
+    if (complete) {
+        remove(path);
+        if (out && cap)
+            snprintf(out, cap, "%s", line);
+        return 1;
+    } else if (junk) {
+        remove(path);
+    }
+    return 0;
+}
+
 /*
- * #115: /mnt/usb0/evo_ui.json - the screen, the focused element, modal, toast
- * and player OSD state as text, so the remote can navigate without a
- * screenshot. The DOM is sampled at 10 Hz and the file is written only when
- * the document differs from the last one written; an idle UI writes nothing.
- * `seq` goes up by one per write, which is how `evo-remote.sh key` tells the
- * state its press produced from the state before it.
- *
- * Written to a temp file and renamed, so an FTP RETR never reads half of it.
+ * Background worker thread: performs all disk/USB file operations off the main
+ * frame loop. This completely insulates the 60/120 Hz render loop from USB
+ * flash drive latencies, FAT32 cluster updates, and write flushes.
+ */
+static void *usb_remote_worker(void *arg)
+{
+    (void)arg;
+    long long last_status = 0;
+    long long last_usb_status = 0;
+    long long last_usb_cmd_check = 0;
+
+    while (g_remote_up) {
+        long long now = now_ms_local();
+        int active = evo_pb_is_active();
+
+        /* 1. Poll command if main thread is ready to receive one */
+        int need_cmd = 0;
+        pthread_mutex_lock(&g_remote_mx);
+        need_cmd = !g_remote_cmd_ready;
+        pthread_mutex_unlock(&g_remote_mx);
+
+        if (need_cmd) {
+            char cmd[600];
+            int got = poll_cmd_file(CMD_FALLBACK, cmd, sizeof cmd);
+            if (!got) {
+                /* When video is active, poll USB command file at relaxed cadence (500ms)
+                 * instead of hammering /mnt/usb0 on every iteration */
+                if (!active || (now - last_usb_cmd_check >= 500)) {
+                    last_usb_cmd_check = now;
+                    got = poll_cmd_file(CMD_PATH, cmd, sizeof cmd);
+                }
+            }
+            if (got) {
+                pthread_mutex_lock(&g_remote_mx);
+                snprintf(g_remote_cmd, sizeof g_remote_cmd, "%s", cmd);
+                g_remote_cmd_ready = 1;
+                pthread_mutex_unlock(&g_remote_mx);
+            }
+        }
+
+        /* 2. Write UI file if main thread staged an update */
+        char *ui_json = NULL;
+        unsigned ui_seq = 0;
+        long long ui_now = 0;
+        pthread_mutex_lock(&g_remote_mx);
+        if (g_remote_ui_pending && g_remote_ui_json) {
+            size_t len = strlen(g_remote_ui_json) + 1;
+            ui_json = malloc(len);
+            if (ui_json)
+                memcpy(ui_json, g_remote_ui_json, len);
+            ui_seq = g_remote_ui_seq;
+            ui_now = g_remote_ui_now;
+            g_remote_ui_pending = 0;
+        }
+        pthread_mutex_unlock(&g_remote_mx);
+
+        if (ui_json) {
+            write_ui_file(UI_TMP_FALLBACK, UI_FALLBACK, ui_seq, ui_now, ui_json);
+            if (!active) {
+                write_ui_file(UI_TMP_PATH, UI_PATH, ui_seq, ui_now, ui_json);
+            }
+            free(ui_json);
+        }
+
+        /* 3. Write status once a second */
+        if (now - last_status >= 1000) {
+            last_status = now;
+            /* Internal storage status is always updated at 1 Hz (SSD, fast) */
+            write_status_to(STATUS_FALLBACK, now, 0);
+
+            /* USB status: during playback, throttle to once every 15 s so the
+             * flash drive's FTL is not overwhelmed by continuous metadata updates.
+             * In menus/idle, update at 1 Hz. */
+            if (!active || (now - last_usb_status >= 15000)) {
+                last_usb_status = now;
+                write_status_to(STATUS_PATH, now, 0);
+            }
+        }
+
+        usleep(50000);  /* 50 ms */
+    }
+    return NULL;
+}
+
+/*
+ * #115: Sample DOM state at 10 Hz in memory. When it changes, stage it for the
+ * worker thread to write out. Zero filesystem I/O happens on this thread.
  */
 static void write_ui_state(long long now)
 {
     static long long last_sample = 0;
-    static char     *last_json;
-    static unsigned  seq;
+    static char     *last_json = NULL;
+    static unsigned  seq = 0;
     const char      *json;
 
     if (now - last_sample < 100)
@@ -308,61 +423,60 @@ static void write_ui_state(long long now)
         return;
     free(last_json);
     {
-        size_t n = strlen(json) + 1;   /* no strdup: see native-libc gaps */
+        size_t n = strlen(json) + 1;
         last_json = malloc(n);
         if (last_json)
             memcpy(last_json, json, n);
     }
 
     ++seq;
-    write_ui_file(UI_TMP_PATH, UI_PATH, seq, now, json);
-    write_ui_file(UI_TMP_FALLBACK, UI_FALLBACK, seq, now, json);
-}
-
-static void poll_cmd_file(const char *path)
-{
-    FILE *cf = fopen(path, "r");
-    if (!cf)
-        return;
-
-    char line[600];
-    int  got = (fgets(line, sizeof line, cf) != NULL);
-    int  complete = got && strchr(line, '\n') != NULL;
-    /* A full buffer with no newline is not a partial write, it is junk —
-     * drop it rather than wedging the remote on it forever. */
-    int  junk = got && !complete && strlen(line) >= sizeof line - 1;
-    fclose(cf);
-    if (complete) {
-        remove(path);
-        run_command(line);
-    } else if (junk) {
-        remove(path);
+    pthread_mutex_lock(&g_remote_mx);
+    free(g_remote_ui_json);
+    g_remote_ui_json = NULL;
+    if (last_json) {
+        size_t n = strlen(last_json) + 1;
+        g_remote_ui_json = malloc(n);
+        if (g_remote_ui_json)
+            memcpy(g_remote_ui_json, last_json, n);
     }
+    g_remote_ui_seq = seq;
+    g_remote_ui_now = now;
+    g_remote_ui_pending = 1;
+    pthread_mutex_unlock(&g_remote_mx);
 }
 
 void evo_usb_remote_poll(void)
 {
-    static long long last_status = 0;
+    if (!g_remote_up) {
+        g_remote_up = 1;
+        if (pthread_create(&g_remote_th, NULL, usb_remote_worker, NULL) == 0) {
+            pthread_detach(g_remote_th);
+        }
+    }
+
+    /* Zero filesystem I/O on the main thread: dispatch any pending command */
+    char cmd[600];
+    int have_cmd = 0;
+    pthread_mutex_lock(&g_remote_mx);
+    if (g_remote_cmd_ready) {
+        snprintf(cmd, sizeof cmd, "%s", g_remote_cmd);
+        g_remote_cmd_ready = 0;
+        have_cmd = 1;
+    }
+    pthread_mutex_unlock(&g_remote_mx);
+
+    if (have_cmd) {
+        run_command(cmd);
+    }
+
+    /* Sample UI in memory for background worker */
     long long now = now_ms_local();
-
-    /*
-     * Command file — consume then delete so each command runs once.
-     * Check both USB stick and fallback internal data directory.
-     */
-    poll_cmd_file(CMD_PATH);
-    poll_cmd_file(CMD_FALLBACK);
-
     write_ui_state(now);
-
-    /* Status once a second. */
-    if (now - last_status < 1000)
-        return;
-    last_status = now;
-    write_status(now, 0);
 }
 
 void evo_usb_remote_mark_parked(void)
 {
+    g_remote_up = 0;
     write_status(now_ms_local(), 1);
 }
 

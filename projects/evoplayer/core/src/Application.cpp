@@ -1363,32 +1363,12 @@ int Application::run() {
         }
 
         /*
-         * USB plug / unplug toast. usbMounts() is cached for 3 s, so polling it
-         * once a second costs one scan of the mounts every 3 s at most. Not
-         * before the sandbox opens: until then every mount looks empty, and the
-         * first look afterwards would announce drives that were there all along.
+         * USB drive detection is strictly on-demand (e.g. BrowserScreen /
+         * SubtitleFileScreen) rather than polled here. Periodic background
+         * polling of usbMounts() from the main frame loop enumerated /mnt/usb*
+         * and opened /dev devices every 3 s, causing ~850 ms main-thread I/O
+         * stalls and severe frame drops while streaming media from USB.
          */
-        static bool s_usb_seen = false;
-        static std::vector<std::string> s_usb_mounts;
-        if ((frame % 60) == 0 && m_fileSystemBrowser && evo_jailbreak_is_open()) {
-            std::vector<std::string> now = m_fileSystemBrowser->usbMounts();
-            if (s_usb_seen && now != s_usb_mounts) {
-                for (const auto& m : now) {
-                    if (std::find(s_usb_mounts.begin(), s_usb_mounts.end(), m) == s_usb_mounts.end()) {
-                        toast("USB CONNECTED", m_fileSystemBrowser->usbMountLabel(m).c_str());
-                        EVO_LOGI("usb", "%s connected", m.c_str());
-                    }
-                }
-                for (const auto& m : s_usb_mounts) {
-                    if (std::find(now.begin(), now.end(), m) == now.end()) {
-                        toast("USB REMOVED", m_fileSystemBrowser->usbMountLabel(m).c_str());
-                        EVO_LOGI("usb", "%s removed", m.c_str());
-                    }
-                }
-            }
-            s_usb_mounts = std::move(now);
-            s_usb_seen = true;
-        }
 
         g_pace.mark(0);   /* pumps: net, bundles, usb remote, web UI, jailbreak */
         // 1. Controller input & auto-repeat
