@@ -55,6 +55,7 @@ ones expensive to relearn on real hardware) are in the root [CLAUDE.md](../CLAUD
 | [upscaler.md](hardware/upscaler.md) | Sharp (FSR 1) and AI (Anime4K) upscaling |
 | [motion-smoothing.md](hardware/motion-smoothing.md) | Frame interpolation (experimental) |
 | [refresh-rate-modes.md](hardware/refresh-rate-modes.md) | VideoOut modes and why 24p is refused on 12.70 |
+| [hdr-sdr-switching.md](hardware/hdr-sdr-switching.md) | Per-video HDR/SDR and 24p switching on 13.60: every test, not solved yet |
 | [psml-research.md](hardware/psml-research.md) | Sony's PSSR on the Pro and what EVO cannot reach |
 
 ## [ui/](ui/): the interface

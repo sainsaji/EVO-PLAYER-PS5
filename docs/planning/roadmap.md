@@ -73,6 +73,7 @@ selection on the played item (#214). See [../../CHANGELOG.md](../../CHANGELOG.md
 | #119 | Deep Blacks shader (`medium`). In as Settings → Experimental → Deep Blacks with a held-frame comparison (`evo-remote.sh dbcompare`); the issue is still open |
 | #123 | A live-action AI upscaler network: ship FSRCNNX (licence checked) (`medium`) |
 | #87 | Analytical anti-aliasing and shadows for UI geometry in the AGC shaders (`medium`) |
+| #244 | Per-video HDR/SDR and 24p output switching: research, not solved ([../hardware/hdr-sdr-switching.md](../hardware/hdr-sdr-switching.md)) |
 | #211 | Decoder, memory, upscaler and test-suite follow-ups |
 
 ## Subtitles and text
