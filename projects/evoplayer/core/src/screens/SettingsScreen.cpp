@@ -20,7 +20,7 @@
 #include <cstring>
 
 #ifndef EVO_PLAYER_VERSION
-#define EVO_PLAYER_VERSION "v0.13.5"
+#define EVO_PLAYER_VERSION "v0.13.6"
 #endif
 
 namespace evo {
@@ -820,7 +820,17 @@ void toggleSetting(SettingKey key) {
     case SettingKey::ResumePlayback:   st->setResumePlaybackEnabled(!st->isResumePlaybackEnabled()); break;
     case SettingKey::AudioPassthrough: st->setAudioPassthroughEnabled(!st->isAudioPassthroughEnabled()); break;
     case SettingKey::MatchVideoRate:   st->setMatchVideoRateEnabled(!st->isMatchVideoRateEnabled()); break;
-    case SettingKey::WebBrowser:       st->setWebBrowserEnabled(!st->isWebBrowserEnabled()); break;
+    case SettingKey::WebBrowser:
+        st->setWebBrowserEnabled(!st->isWebBrowserEnabled());
+        if (auto sm = Application::getInstance().getScreenManager()) {
+            if (!st->isWebBrowserEnabled() &&
+                (sm->getCurrentScreenId() == ScreenId::WebHome ||
+                 sm->getCurrentScreenId() == ScreenId::WebPage)) {
+                sm->navigateTo(ScreenId::MainMenu);
+            }
+            sm->syncNavRail();
+        }
+        break;
     case SettingKey::AskStream:        st->setAskStreamEnabled(!st->isAskStreamEnabled()); break;
     case SettingKey::AddonAutoPick:    st->setAddonAutoPickEnabled(!st->isAddonAutoPickEnabled()); break;
     case SettingKey::AutoSubtitles:    st->setAutoSubtitlesEnabled(!st->isAutoSubtitlesEnabled()); break;

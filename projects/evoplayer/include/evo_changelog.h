@@ -26,6 +26,22 @@ typedef struct evo_changelog_release {
 } evo_changelog_release;
 
 /*
+ * Release 0.13.6
+ *
+ * The full notes are in CHANGELOG.md. The screen scrolls this list (right stick).
+ */
+static const evo_changelog_item EVO_CL_0136[] = {
+    { EVO_CL_FIXED,    "PLAYBACK STUTTER ELIMINATED - ZERO USB I/O OR FSYNC ON THE RENDER THREAD" },
+    { EVO_CL_FIXED,    "FLAC COVER ART FREEZE FIXED - AUDIO FILES WITH EMBEDDED ART PLAY NORMALLY" },
+    { EVO_CL_NEW,      "EMBEDDED ALBUM ART - FLAC AND MP3 FILES SHOW COVERS ON NOW PLAYING" },
+    { EVO_CL_NEW,      "EXPERIMENTAL WEB BROWSER - PROSPERO BROWSER COMPOSITED VIA GPU BROKER" },
+    { EVO_CL_NEW,      "SETTINGS TOGGLE - WEB BROWSER UNDER EXPERIMENTAL (DEFAULT OFF)" },
+    { EVO_CL_IMPROVED, "DYNAMIC NAVIGATION RAIL - SECTIONS RE-INDEX AUTOMATICALLY" },
+    { EVO_CL_IMPROVED, "SHARP 2X WEB RENDERING - CRISP TEXT ON 4K DISPLAYS" },
+    { EVO_CL_FIXED,    "SHADOWMOUNT LAUNCH HOOK STABILITY AND INTERNAL DATA PATH FALLBACKS" }
+};
+
+/*
  * Release 0.13.5
  *
  * The full notes are in CHANGELOG.md. The screen scrolls this list (right stick).
@@ -261,6 +277,7 @@ static const evo_changelog_item EVO_CL_001[] = {
 };
 
 static const evo_changelog_release EVO_CHANGELOG_RELEASES[] = {
+    { "0.13.6", "PLAYBACK STUTTER FIXES & EXPERIMENTAL BROWSER", "NOVEMBER 2026", EVO_CL_0136, sizeof(EVO_CL_0136)/sizeof(EVO_CL_0136[0]) },
     { "0.13.5", "NETWORK SHARES, DETAIL PAGE & STREMIO ACCOUNT", "NOVEMBER 2026", EVO_CL_0135, sizeof(EVO_CL_0135)/sizeof(EVO_CL_0135[0]) },
     { "0.13.0", "UPDATER, CHAPTERS & PROVIDER SHELVES", "OCTOBER 2026", EVO_CL_0130, sizeof(EVO_CL_0130)/sizeof(EVO_CL_0130[0]) },
     { "0.12.5", "PLEX INTEGRATION & MULTI-USB", "OCTOBER 2026", EVO_CL_0125, sizeof(EVO_CL_0125)/sizeof(EVO_CL_0125[0]) },

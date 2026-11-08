@@ -1,6 +1,6 @@
 # Roadmap
 
-What is open, grouped by area, as of **2026-10-24** (v0.13.5 prepared).
+What is open, grouped by area, as of **2026-11-08** (v0.13.6 prepared).
 GitHub is the live source: `gh issue list --state open`, or the "EVO Player Roadmap"
 project board ([project-tracking.md](project-tracking.md)). This page is the map across
 them. Each issue body ends with a "References & sequencing" block naming the docs and files
@@ -14,6 +14,14 @@ The v0.8.0 to v1.1.0 milestones are all closed. v0.11.0 still lists four issues 
 #47, #43) that were never moved; the milestone no longer plans anything. Priority labels
 are `priority: medium` and `priority: low`; `hw-verify-pending` marks code that is in but
 not yet seen on a console.
+
+## Landed in v0.13.6
+
+Playback stutter fixes (zero I/O on render thread, background remote worker, no periodic USB
+fsync during playback, on-demand drive detection), FLAC cover art freeze fix and embedded album art
+on the Now Playing card (#232), experimental ProsperoWeb browser composited via GPU broker on Mesa
+with sharp 2x 4K rendering (#237), Settings → Experimental → WEB BROWSER toggle with dynamic rail
+syncing, and ShadowMount launch stability improvements. See [../../CHANGELOG.md](../../CHANGELOG.md).
 
 ## Landed in v0.13.5
 

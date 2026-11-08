@@ -64,6 +64,8 @@ extern "C" {
     void evo_feedback_refresh_lightbar(void) {}
     void evo_keyboard_set_type(int type) { (void)type; }
     void evo_rmlui_set_theme(const void *theme) { (void)theme; }
+    void evo_browser_engine_boot(void) {}
+    void evo_browser_engine_stop(void) {}
 
     static int s_host_port = EVO_LOG_SERVER_PORT;
     int evo_log_server_port(void) { return s_host_port; }
@@ -112,6 +114,7 @@ extern "C" void test_settings_save_load_roundtrip(void)
     TEST_ASSERT(svc1.getVolumeBoost() == evo::VolumeBoost::Off, "Initial VolumeBoost default mismatch");
     TEST_ASSERT(svc1.getNetworkBuffer() == evo::NetworkBuffer::Sec30, "Initial NetworkBuffer default mismatch");
     TEST_ASSERT(svc1.getAudioDelayMs() == 0, "Initial AudioDelayMs default mismatch");
+    TEST_ASSERT(svc1.isWebBrowserEnabled() == false, "Initial WebBrowserEnabled default mismatch");
     TEST_ASSERT(svc1.getSkipSegments() == evo::SkipSegments::Ask, "Initial SkipSegments default mismatch");
     TEST_ASSERT(svc1.getThemeName() == "EVO Dark", "Initial ThemeName default mismatch");
     TEST_ASSERT(evo_log_server_saved_port() == EVO_LOG_SERVER_PORT, "Initial LogServerPort default mismatch");
@@ -147,6 +150,7 @@ extern "C" void test_settings_save_load_roundtrip(void)
     svc1.setSubtitleLanguage(evo::PreferredLanguage::English);
     svc1.setAddonAutoPickEnabled(false);
     svc1.setSkipSegments(evo::SkipSegments::Auto);
+    svc1.setWebBrowserEnabled(true);
     svc1.setThemeName("CARBON");
     evo_log_server_set_port(9812);
 
@@ -193,6 +197,7 @@ extern "C" void test_settings_save_load_roundtrip(void)
     TEST_ASSERT(svc2.getSubtitleLanguage() == evo::PreferredLanguage::English, "SubtitleLanguage round-trip mismatch");
     TEST_ASSERT(svc2.isAddonAutoPickEnabled() == false, "AddonAutoPick round-trip mismatch");
     TEST_ASSERT(svc2.getSkipSegments() == evo::SkipSegments::Auto, "SkipSegments round-trip mismatch");
+    TEST_ASSERT(svc2.isWebBrowserEnabled() == true, "WebBrowserEnabled round-trip mismatch");
     TEST_ASSERT(svc2.getThemeName() == "CARBON", "ThemeName round-trip mismatch");
     TEST_ASSERT(evo_log_server_saved_port() == 9812, "Log server saved port round-trip mismatch");
 
@@ -294,6 +299,7 @@ extern "C" void test_settings_legacy_compat(void)
     TEST_ASSERT(svc.getDeepBlacks() == evo::DeepBlacks::Off, "Legacy deepBlacks must reset to Off");
     TEST_ASSERT(svc.isAudioPassthroughEnabled() == true, "Legacy audioPassthroughEnabled mismatch");
     TEST_ASSERT(svc.isMatchVideoRateEnabled() == false, "Legacy matchVideoRate must reset to Off");
+    TEST_ASSERT(svc.isWebBrowserEnabled() == false, "Legacy webBrowserEnabled must be false");
     TEST_ASSERT(svc.getVolumeBoost() == evo::VolumeBoost::Plus100, "Legacy volumeBoost mismatch");
     TEST_ASSERT(svc.getNetworkBuffer() == evo::NetworkBuffer::Min1, "Legacy networkBuffer mismatch");
     TEST_ASSERT(svc.getThemeName() == "CARBON", "Legacy themeName mismatch");
@@ -356,6 +362,7 @@ extern "C" void test_settings_legacy_compat(void)
     TEST_ASSERT(svc34.loadSettings(), "loadSettings failed on 34-line legacy configuration");
     TEST_ASSERT(svc34.isAddonAutoPickEnabled() == false, "34-line legacy addonAutoPick mismatch");
     TEST_ASSERT(svc34.getSkipSegments() == evo::SkipSegments::Ask, "Missing 35th line must default to Ask");
+    TEST_ASSERT(svc34.isWebBrowserEnabled() == false, "Missing 36th line must default to false");
 
     TEST_PASS();
 }

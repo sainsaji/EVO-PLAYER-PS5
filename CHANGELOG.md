@@ -5,6 +5,40 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ---
 
+## 0.13.6
+
+![](https://img.shields.io/badge/Release-v0.13.6-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-below%2013.60-blue?style=flat-square)
+
+**Playback stutter fixes, album art on music, and an experimental built-in browser.** 0.13.6 eliminates periodic frame stalls during local and USB playback by moving all USB remote commands and DOM status I/O to a background thread, preventing blocking disk syncs during playback, and removing background drive polling. Music files with embedded album art now display their cover on the player card and no longer freeze at 0:00. It also introduces the initial ProsperoWeb browser engine composited via EVO's GPU broker, gated under Settings → Experimental (off by default) to keep the navigation rail clean until enabled.
+
+Download **`PPSA99039.ffpfsc`** and deploy it with ShadowMountPlus, or the folder-title **`.zip`**, then launch EVO from the Games row. Or install it straight from the console with **[ProsperoStore](https://github.com/blackbearreloaded/ProsperoStore)**. Runs on any jailbroken PS5 on firmware 13.60 and below. PS5 Pro owners can use the `-pro` package for the larger memory mode.
+
+Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47Nc8WtXh)**.
+
+### ![](https://img.shields.io/badge/PLAYBACK-e91e63?style=flat-square) Playback & Performance
+
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Periodic ~850 ms frame drops eliminated during playback.** File polling and UI state serialization for `evo-remote` now execute entirely on a dedicated background pthread (`usb_remote_worker`), leaving the 60/120 Hz render loop with 0 disk I/O.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **No periodic `fsync` during playback.** Removed periodic USB flash drive syncs while media is streaming, eliminating flash block erase stalls. Throttled remote status updates on USB to 15 seconds during active video.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **On-demand USB drive detection.** Replaced continuous background filesystem polling of `/mnt/usb*` in the main loop with on-demand enumeration in file browsers.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **FLAC files with embedded cover art no longer freeze at 0:00 (#232).** The audio fallback no longer mistakes an embedded cover image for a video track, allowing audio-only FLACs at 44.1k to 192k/24 to play uninterrupted to completion.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Embedded album art on the Now Playing card (#232).** FLAC and MP3 files display their embedded cover art on the player card, box-scaled and cached per track.
+
+### ![](https://img.shields.io/badge/EXPERIMENTAL-ff9800?style=flat-square) Experimental Features & Browser (#237)
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Built-in Web Browser (ProsperoWeb).** Composites web pages through EVO's out-of-process GPU broker with Mesa on PS5. Includes speed dial, address bar, history, and bookmarks.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Gated in Settings → Experimental.** The `WEB BROWSER` toggle defaults to **OFF**. The browser process does not start in the background unless enabled.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Dynamic navigation rail.** The "Web" section appears on the sidebar only when enabled; turning it off immediately hides the rail item and redirects any active web view back to the home screen.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Sharp 2x rendering on 4K.** Web pages render with a 2x scale (3584x1888) with crisp text, while retaining 1792 CSS px layout and smooth navigation.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **4-texture ring buffer with dirty rect damage tracking.** Minimizes memory footprint and eliminates GPU texture contention during page updates.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Remote control CLI support.** Control the browser or toggle the setting with `./tools/evo-remote.sh set web-browser on|off`, `pointer <x> <y>`, and `weburl <url>`.
+
+### ![](https://img.shields.io/badge/TOOLING-007acc?style=flat-square) Tooling & System Stability
+
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **ShadowMount launch reliability.** Automated restarts of ShadowMount prior to coldboot launches prevent `0x80940033` launch hook expiration.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Internal SSD fallback paths.** `evo-remote.sh` and `sweep_run.py` now support `/data/evoplayer/` paths for command and status tracking alongside USB.
+
+---
+
 ## 0.13.5
 
 ![](https://img.shields.io/badge/Release-v0.13.5-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-below%2013.60-blue?style=flat-square)

@@ -7,12 +7,7 @@ down. The first engine is ProsperoWeb (kvaps, GPL-3; our fork is
 [sainsaji/ProsperoWeb](https://github.com/sainsaji/ProsperoWeb)); the WPE GPU
 engine from Prospero Browser replaces it behind the same seam later.
 
-Status: Phase 0 spikes S1 (engine lifetime), S2a (transport) and S2b (frames
-drawn as a texture) passed on a PS5 Pro on FW 13.60 with the stock
-ProsperoWeb v0.2.1 broker. S2b measured about 58 drawn frames a second at
-1080p, 0.22 ms and about 0.9 MB per dirty-rect copy, EVO at 60 fps, and
-`map_fail=0`. Phase 1 (the `--evo-host` engine host) is written and
-host-tested; it is not yet built in the fork's CI or run on the console.
+Status: Landed in v0.13.6 as an opt-in experimental feature behind **Settings → Experimental → WEB BROWSER** (defaults to off). When enabled, the Web section sits right of the navigation rail, rendered at sharp 2x on 4K displays and composited on Mesa through EVO's out-of-process GPU broker. Disabling the setting immediately hides the rail tab and releases engine resources. Remote control is supported via `evo-remote.sh pointer`, `weburl`, and `set web-browser on|off`.
 
 ## The seam
 

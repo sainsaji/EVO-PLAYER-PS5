@@ -14,7 +14,17 @@ Plays video from USB drives (exFAT, FAT32 and read-only NTFS), internal storage,
 
 ---
 
-## What's New in v0.13.5
+## What's New in v0.13.6
+
+- **Playback stutter eliminated:** periodic ~850 ms frame drops during USB and local playback have been resolved. Remote command polling and DOM UI status serialization now execute on a dedicated background worker thread, removing all blocking filesystem I/O from the 60/120 Hz render loop.
+- **Flash drive friendly:** eliminated periodic `fsync` calls during media streaming to avoid flash block erase stalls, and throttled USB status writes to 15s during active playback.
+- **On-demand USB detection:** replaced periodic background filesystem polling with on-demand enumeration in file browsers.
+- **Embedded album art & FLAC playback (#232):** FLAC files with embedded cover art no longer freeze at 0:00, and audio tracks (FLAC, MP3) now render their embedded album art directly on the Now Playing player card.
+- **Experimental Web Browser (ProsperoWeb):** out-of-process browser composited via EVO's GPU broker, gated under **Settings → Experimental → WEB BROWSER** (defaults to **OFF**). The navigation rail updates dynamically to show or hide the Web section. Crisp 2x rendering on 4K displays.
+
+Full notes: [CHANGELOG.md](CHANGELOG.md).
+
+### Highlights from v0.13.5
 
 - **Skip intros & credits:** a **Skip intro** / **Skip credits** / **Next episode** button appears while the playhead is inside one, and **TRIANGLE** presses it. **Settings → Video & Display → Skip intros & credits** is Off, Ask (default) or Auto. It works for every file whose chapters are named Intro, Opening, OP, Recap, Credits, Ending, ED or Outro, and uses the media server's own marks on Jellyfin and Emby.
 - **NTFS USB drives:** open read-only. Browse, play, view pictures and load subtitles from them.

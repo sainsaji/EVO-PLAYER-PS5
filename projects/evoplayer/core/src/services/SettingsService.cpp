@@ -1,5 +1,4 @@
 #include "evo/services/SettingsService.hpp"
-#include "evo/Application.hpp"
 #include "evo_browser_engine.h"
 #include "evo_boot_log.h"
 #include "evo_data_path.h"
@@ -221,23 +220,17 @@ void SettingsService::setSubtitleFontFace(int face) {
     prospero_subtitle_style = face;
 }
 
+static bool s_webBrowserEnabled = false;
+
 void SettingsService::setWebBrowserEnabled(bool enabled) {
     if (m_webBrowser == enabled) return;
     m_webBrowser = enabled;
+    s_webBrowserEnabled = enabled;
     saveSettings();
     if (enabled) {
         evo_browser_engine_boot();
     } else {
         evo_browser_engine_stop();
-        if (auto sm = Application::getInstance().getScreenManager()) {
-            if (sm->getCurrentScreenId() == ScreenId::WebHome ||
-                sm->getCurrentScreenId() == ScreenId::WebPage) {
-                sm->navigateTo(ScreenId::MainMenu);
-            }
-        }
-    }
-    if (auto sm = Application::getInstance().getScreenManager()) {
-        sm->syncNavRail();
     }
 }
 
@@ -484,6 +477,7 @@ bool SettingsService::loadSettings() {
         m_skipSegments = static_cast<SkipSegments>(rawSkipSegments);
     }
     if (readCount >= 36) m_webBrowser = (rawWebBrowser != 0);
+    s_webBrowserEnabled = m_webBrowser;
 
     /* #233: Deep Blacks, Motion Smoothing and Match Video Rate moved to
      * Experimental, where everything starts off. A file from before that
@@ -498,6 +492,7 @@ bool SettingsService::loadSettings() {
         m_motionSmoothing = MotionSmoothing::Off;
         m_matchVideoRate = false;
         m_webBrowser = false;
+        s_webBrowserEnabled = false;
     }
     /* DEFAULT FONT STYLE was saved but never drawn before schema 2, and its
      * old default (1) now means LIGHT: start everyone on STANDARD once. */
@@ -534,6 +529,5 @@ void SettingsService::syncThemeToRmlUi() {
 } // namespace evo
 
 extern "C" int evo_settings_web_browser_enabled(void) {
-    auto ss = evo::Application::getInstance().getSettingsService();
-    return (ss && ss->isWebBrowserEnabled()) ? 1 : 0;
+    return evo::s_webBrowserEnabled ? 1 : 0;
 }
