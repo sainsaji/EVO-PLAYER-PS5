@@ -57,11 +57,25 @@ struct ms_client {
     char chosen_item[96];
     char chosen_source[96];
     char chosen_session[64];
-    int  sort, filter;             /* library browsing: see sort_names / filter_names */
+    int  sort, filter;             /* library browsing: see sort_names / ms_filter_names */
+    int  years, rating;            /* #220: index into ms_year_* / ms_rating_*, 0 = any */
     char genre[64];                /* "" = any */
     int  chosen_transcode;         /* the chosen stream is a server transcode */
     char qc_secret[128];           /* Quick Connect in progress */
 };
+
+/* #220: library filters. Each panel row cycles through its list. */
+#define MS_FILTER_COUNT 4
+static const char *const ms_filter_names[MS_FILTER_COUNT] = {
+    "Everything", "Unwatched only", "Watched only", "Favourites only" };
+#define MS_YEAR_COUNT 7
+static const char *const ms_year_names[MS_YEAR_COUNT] = {
+    "Any", "2020s", "2010s", "2000s", "1990s", "1980s", "1970s" };
+static const int ms_year_from[MS_YEAR_COUNT] = { 0, 2020, 2010, 2000, 1990, 1980, 1970 };
+static const int ms_year_to[MS_YEAR_COUNT]   = { 0, 2029, 2019, 2009, 1999, 1989, 1979 };
+#define MS_RATING_COUNT 4
+static const char *const ms_rating_names[MS_RATING_COUNT] = { "Any", "6+", "7+", "8+" };
+static const int ms_rating_min[MS_RATING_COUNT] = { 0, 6, 7, 8 };
 
 static ms_client_t g_clients[2] = {
     { MS_EMBY,     "emby.conf",     "/mnt/usb0/.evo_emby.conf", "/emby",
@@ -888,16 +902,28 @@ int ms_list_catalog(ms_client_t *c, const char *parent_id, int page,
                                              "SortBy=DateCreated,SortName&SortOrder=Descending",
                                              "SortBy=ProductionYear,SortName&SortOrder=Descending",
                                              "SortBy=CommunityRating,SortName&SortOrder=Descending" };
-        static const char *const filters[] = { "", "&Filters=IsUnplayed", "&Filters=IsFavorite" };
+        static const char *const filters[] = { "", "&Filters=IsUnplayed", "&Filters=IsPlayed",
+                                               "&Filters=IsFavorite" };
         char genre[160] = "";
+        char years[96] = "";
+        const int yi = c->years % MS_YEAR_COUNT;
+        if (yi > 0) {   /* Years= takes a comma list on both Emby and Jellyfin */
+            int p = snprintf(years, sizeof years, "&Years=");
+            for (int y = ms_year_from[yi]; y <= ms_year_to[yi] && p < (int)sizeof years - 6; y++)
+                p += snprintf(years + p, sizeof years - p, y == ms_year_from[yi] ? "%d" : ",%d", y);
+        }
+        char rating[40] = "";
+        if (c->rating % MS_RATING_COUNT)
+            snprintf(rating, sizeof rating, "&MinCommunityRating=%d", ms_rating_min[c->rating % MS_RATING_COUNT]);
         if (c->genre[0]) {
             char esc[120];
             if (evo_provider_url_escape(c->genre, esc, sizeof esc) >= 0)
                 snprintf(genre, sizeof genre, "&Genres=%s", esc);
         }
         snprintf(path, sizeof path,
-                 "/Users/%s/Items?ParentId=%s%s&%s%s%s&StartIndex=%d&Limit=%d&%s",
-                 uid, id, include, sorts[c->sort % 4], filters[c->filter % 3], genre,
+                 "/Users/%s/Items?ParentId=%s%s&%s%s%s%s%s&StartIndex=%d&Limit=%d&%s",
+                 uid, id, include, sorts[c->sort % 4], filters[c->filter % MS_FILTER_COUNT], genre,
+                 years, rating,
                  start, limit, MS_FIELDS);
         return items_request(c, path, CTX_LIST, start, 0, cb, ud);
     }
@@ -975,7 +1001,6 @@ int ms_item_action(ms_client_t *c, const char *item_id, const char *action,
     }
     {
         static const char *const sort_names[] = { "Name", "Date added", "Release year", "Rating" };
-        static const char *const filter_names[] = { "Everything", "Unwatched only", "Favourites only" };
         static char msg[96];
         if (!strcmp(action, "sort")) {
             c->sort = (c->sort + 1) % 4;
@@ -984,8 +1009,20 @@ int ms_item_action(ms_client_t *c, const char *item_id, const char *action,
             return 0;
         }
         if (!strcmp(action, "filter")) {
-            c->filter = (c->filter + 1) % 3;
-            snprintf(msg, sizeof msg, "Showing %s", filter_names[c->filter]);
+            c->filter = (c->filter + 1) % MS_FILTER_COUNT;
+            snprintf(msg, sizeof msg, "Showing %s", ms_filter_names[c->filter]);
+            if (cb) cb(1, msg, ud);
+            return 0;
+        }
+        if (!strcmp(action, "years")) {
+            c->years = (c->years + 1) % MS_YEAR_COUNT;
+            snprintf(msg, sizeof msg, c->years ? "Years: %s" : "Any year", ms_year_names[c->years]);
+            if (cb) cb(1, msg, ud);
+            return 0;
+        }
+        if (!strcmp(action, "rating")) {
+            c->rating = (c->rating + 1) % MS_RATING_COUNT;
+            snprintf(msg, sizeof msg, c->rating ? "Rating: %s" : "Any rating", ms_rating_names[c->rating]);
             if (cb) cb(1, msg, ud);
             return 0;
         }
@@ -1131,12 +1168,13 @@ int ms_panel(ms_client_t *c, const char *item_id, const char *kind, evo_provider
     if (!c->cfg.is_connected || !item_id || !kind) return -1;
     if (!strcmp(kind, "browse")) {
         static const char *const sort_names[] = { "Name", "Date added", "Release year", "Rating" };
-        static const char *const filter_names[] = { "Everything", "Unwatched only", "Favourites only" };
-        evo_provider_row_t rows[3];
+        evo_provider_row_t rows[5];
         int n = 0;
-        row_add(rows, &n, 3, "sort", "Sort by", sort_names[c->sort % 4]);
-        row_add(rows, &n, 3, "filter", "Show", filter_names[c->filter % 3]);
-        row_add(rows, &n, 3, "panel:genres", "Genre", c->genre[0] ? c->genre : "Any");
+        row_add(rows, &n, 5, "sort", "Sort by", sort_names[c->sort % 4]);
+        row_add(rows, &n, 5, "filter", "Show", ms_filter_names[c->filter % MS_FILTER_COUNT]);
+        row_add(rows, &n, 5, "panel:genres", "Genre", c->genre[0] ? c->genre : "Any");
+        row_add(rows, &n, 5, "years", "Years", ms_year_names[c->years % MS_YEAR_COUNT]);
+        row_add(rows, &n, 5, "rating", "Rating", ms_rating_names[c->rating % MS_RATING_COUNT]);
         if (cb) cb(1, rows, n, ud);
         return 0;
     }
