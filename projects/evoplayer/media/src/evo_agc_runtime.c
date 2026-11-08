@@ -2400,6 +2400,24 @@ void evo_agc_runtime_frame_end(void)
     g_agc_dev.current_slot = (g_agc_dev.current_slot + 1) % EVO_AGC_FRAME_SLOTS;
     g_agc_dev.frame_counter++;
     g_agc_dev.frame_active = 0;
+
+    /* #237 diagnostic: the capture card shows a black frame about every 2 s while the Web
+     * section runs, with the picture jumping ahead ~3 frames. Log every gap between two
+     * presents over 30 ms; klog prints it beside SceShellCore's 2-second memory statistics. */
+    {
+        static int64_t s_last_present_us;
+        static unsigned s_hitches;
+        struct timespec hts;
+        clock_gettime(CLOCK_MONOTONIC, &hts);
+        const int64_t now_us = (int64_t)hts.tv_sec * 1000000 + hts.tv_nsec / 1000;
+        if (s_last_present_us && now_us - s_last_present_us > 30000 && s_hitches < 400) {
+            ++s_hitches;
+            evo_boot_log("agc hitch: %d ms between presents (frame %u, hitch #%u)",
+                         (int)((now_us - s_last_present_us) / 1000),
+                         (unsigned)g_agc_dev.frame_counter, s_hitches);
+        }
+        s_last_present_us = now_us;
+    }
 }
 
 void evo_agc_runtime_present(void)

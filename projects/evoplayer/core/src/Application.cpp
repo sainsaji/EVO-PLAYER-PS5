@@ -403,8 +403,6 @@ bool Application::initHardware() {
     }
     EnsureDataDirectories();
     evo_crash_note_init();
-    /* #237 spike S1: only with /mnt/usb0/evo_browser_spike; never blocks. */
-    evo_browser_engine_boot();
 
     sceUserServiceInitialize(nullptr);
     scePadInit();
@@ -477,6 +475,9 @@ bool Application::initServices() {
 
     m_soundEffectEngine->initialize();
     m_settingsService->loadSettings();
+    if (m_settingsService->isWebBrowserEnabled()) {
+        evo_browser_engine_boot();
+    }
     evo_speaker_cal_load();
     recent_load();
     favorites_load();
@@ -1327,6 +1328,9 @@ int Application::run() {
             favorites_load();
             if (m_settingsService) {
                 m_settingsService->loadSettings();
+                if (m_settingsService->isWebBrowserEnabled()) {
+                    evo_browser_engine_boot();
+                }
             }
             evo_speaker_cal_load();
             /* #90: every provider re-reads its config from the real data

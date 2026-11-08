@@ -119,10 +119,49 @@ struct WebFrame
         return static_cast<long long>(ts.tv_sec) * 1000000LL + ts.tv_nsec / 1000L;
     }
 
-    std::uint32_t tex[2] = {0, 0};
+    /* #237 diagnostic: the page is opaque, so a transparent pixel along its
+     * right or bottom edge means the frame has missing content there (a black
+     * "L"). Logs the first few such frames with the buffer, sizes and rects. */
+    int edge_logged = 0, diag_logged = 0;
+    long long edge_frames = 0;
+    void edge_check(const evo_browser_frame_t &f)
+    {
+        if (f.width < 64 || f.height < 64 || f.stride < f.width * 4)
+            return;
+        const unsigned char *px = static_cast<const unsigned char *>(f.pixels);
+        int right = 0, bottom = 0;
+        const int offs[3] = {1, 8, 24};
+        for (int k = 0; k < 3; ++k)
+            for (int i = 0; i < 64; ++i)
+            {
+                const int y = 4 + (f.height - 8) * i / 63;
+                const int x = 4 + (f.width - 8) * i / 63;
+                if (px[static_cast<size_t>(y) * f.stride + static_cast<size_t>(f.width - offs[k]) * 4 + 3] != 255)
+                    ++right;
+                if (px[static_cast<size_t>(f.height - offs[k]) * f.stride + static_cast<size_t>(x) * 4 + 3] != 255)
+                    ++bottom;
+            }
+        ++edge_frames;
+        if ((right || bottom) && edge_logged < 40)
+        {
+            ++edge_logged;
+            evo_boot_log("webedge: frame %lld seq %u buf %d: transparent samples right %d bottom %d of 192; page %dx%d stride %d, tex %dx%d, %d rects (first %d,%d %dx%d)",
+                         edge_frames, static_cast<unsigned>(f.seq), f.buf, right, bottom, f.width, f.height, f.stride, tex_w, tex_h, f.nrects,
+                         f.nrects ? f.rects[0][0] : 0, f.nrects ? f.rects[0][1] : 0, f.nrects ? f.rects[0][2] : 0, f.nrects ? f.rects[0][3] : 0);
+        }
+    }
+
+    /* A ring of textures, not two: update_texture is a CPU memcpy into memory
+     * the GPU samples, and up to three frames are in flight, so with two the
+     * CPU could overwrite a texture an earlier frame is still drawing (random
+     * flicker on a page that updates every frame). The texture written now was
+     * last drawn kTex - 1 frames ago. Each texture keeps the box of what changed
+     * since it was last written (pend). */
+    static constexpr int kTex = 4;
+    std::uint32_t tex[kTex] = {};
     int cur = 0;
-    int prev[16][4] = {};       /* the previous frame's rects */
-    int nprev = 0;
+    int pend[kTex][4] = {};     /* x0, y0, x1, y1 of what the texture misses */
+    bool has_pend[kTex] = {};
     int tex_w = 0, tex_h = 0;   /* what the textures were made for */
     int page_w = 0, page_h = 0; /* the page inside them (the last frame's size) */
 
@@ -131,91 +170,134 @@ struct WebFrame
         evo_browser_frame_t f;
         if (!evo_browser_frame_acquire(&f))
             return;
+        /* #237 diagnostic: /data/evoplayer/web_freeze keeps the engine running (GPU as busy as
+         * ever) but draws the last texture, to tell GPU sharing from EVO's own frame handling.
+         * The first frame after a size change still goes through, so a texture exists. */
+        static int s_freeze = 0;
+        static unsigned s_freeze_tick = 0;
+        if ((s_freeze_tick++ % 30) == 0)
+        {
+            int a = 0, b = 0;
+            if (FILE *fa = fopen("/data/evoplayer/web_freeze", "r")) { a = 1; fclose(fa); }
+            if (FILE *fb = fopen("/mnt/usb0/web_freeze", "r")) { b = 1; fclose(fb); }
+            const int now = (a || b) ? 1 : 0;
+            if (now != s_freeze)
+                evo_boot_log("webdiag: freeze switch %d", now);
+            s_freeze = now;
+        }
+        if (s_freeze && tex[0] && f.width == tex_w && f.height == tex_h)
+        {
+            evo_browser_frame_release(f.buf);
+            return;
+        }
         const long long t0 = mono_us();
         long long bytes = 0;
-        /* The textures are as wide as the buffer's rows (stride / 4), not the
-         * page: create_texture wants tight rows, and after a RESIZE to a
-         * narrower page the rows keep the buffer's full width. The page is
-         * the top-left page_w x page_h of them (the drawer's UV). */
+        /* The textures are exactly the page's size (not the buffer's 3840 x
+         * 2160 rows: at 1x that wasted over half of each texture and the ring
+         * overflowed the 64 MB texture pool, so textures failed and the page
+         * froze). create_texture reads tight rows, so each is made from the
+         * buffer's first bytes and then filled properly with the buffer's
+         * stride. Any size change makes them again. */
         const int row_w = f.stride / 4;
         if (f.stride % 4 != 0 || row_w < f.width)
         {
             /* not a layout we can sample */
         }
-        else if (!tex[0] || row_w != tex_w || f.height > tex_h)
+        else if (!tex[0] || f.width != tex_w || f.height != tex_h)
         {
-            /* First frame, or a page grown past the textures (a RESIZE):
-             * make both again from this whole frame. */
             for (std::uint32_t &t : tex)
             {
                 if (t)
                     batch.release_texture(t);
                 t = 0;
             }
-            tex[0] = batch.create_texture(row_w, f.height, f.pixels);
-            tex[1] = batch.create_texture(row_w, f.height, f.pixels);
-            tex_w = row_w;
-            tex_h = f.height;
-            cur = 0;
-            bytes = 2LL * f.stride * f.height;
-            nprev = 0;
-        }
-        else
-        {
-            /* Rect by rect, not one box around them: a caret at the top and
-             * a spinner at the bottom would otherwise copy the whole page. */
-            const int next = cur ^ 1;
-            bool ok = f.nrects > 0 || nprev > 0;
-            long long copied = 0;
-            auto copy = [&](const int r[4]) {
-                if (r[2] <= 0 || r[3] <= 0)
-                    return;
-                if (!batch.update_texture(tex[next], r[0], r[1], r[2], r[3], f.pixels, f.stride))
-                    ok = false;
-                copied += 4LL * r[2] * r[3];
-            };
-            /* ...but when they overlap (this frame's and the last one's are
-             * often the same area) and add up to more than their box, the
-             * box once is cheaper. */
-            int x0 = 1 << 30, y0 = 1 << 30, x1 = 0, y1 = 0;
-            long long sum = 0;
-            auto add = [&](const int r[4]) {
-                if (r[2] <= 0 || r[3] <= 0)
-                    return;
-                x0 = r[0] < x0 ? r[0] : x0;
-                y0 = r[1] < y0 ? r[1] : y0;
-                x1 = r[0] + r[2] > x1 ? r[0] + r[2] : x1;
-                y1 = r[1] + r[3] > y1 ? r[1] + r[3] : y1;
-                sum += static_cast<long long>(r[2]) * r[3];
-            };
-            for (int i = 0; i < f.nrects; ++i)
-                add(f.rects[i]);
-            for (int i = 0; i < nprev; ++i)
-                add(prev[i]);
-            if (sum > 0 && sum >= static_cast<long long>(x1 - x0) * (y1 - y0))
+            bool made = true;
+            for (int i = 0; i < kTex; ++i)
             {
-                const int box[4] = {x0, y0, x1 - x0, y1 - y0};
-                copy(box);
+                has_pend[i] = false;
+                tex[i] = batch.create_texture(f.width, f.height, f.pixels);
+                if (!tex[i] || !batch.update_texture(tex[i], 0, 0, f.width, f.height, f.pixels, f.stride))
+                    made = false;
+            }
+            if (made)
+            {
+                tex_w = f.width;
+                tex_h = f.height;
+                cur = 0;
+                bytes = static_cast<long long>(kTex) * 4 * f.width * f.height;
             }
             else
             {
-                for (int i = 0; i < f.nrects; ++i)
-                    copy(f.rects[i]);
-                for (int i = 0; i < nprev; ++i)
-                    copy(prev[i]);
+                if (diag_logged < 60)
+                {
+                    ++diag_logged;
+                    evo_boot_log("webdiag: page textures %dx%d x%d could not be made, retrying next frame", f.width, f.height, kTex);
+                }
+                for (std::uint32_t &t : tex)
+                {
+                    if (t)
+                        batch.release_texture(t);
+                    t = 0;
+                }
+                tex_w = tex_h = 0;
             }
-            if (ok)
-            {
-                cur = next;
-                bytes = copied;
-            }
-            nprev = f.nrects;
+        }
+        else
+        {
+            /* This frame's changes, as one box added to what every texture
+             * misses; then the texture written next is brought up to date from
+             * the buffer (which holds the whole current page). */
             for (int i = 0; i < f.nrects; ++i)
-                for (int k = 0; k < 4; ++k)
-                    prev[i][k] = f.rects[i][k];
+            {
+                const int *r = f.rects[i];
+                if (r[2] <= 0 || r[3] <= 0)
+                    continue;
+                for (int t = 0; t < kTex; ++t)
+                {
+                    int *p = pend[t];
+                    if (!has_pend[t])
+                    {
+                        p[0] = r[0];
+                        p[1] = r[1];
+                        p[2] = r[0] + r[2];
+                        p[3] = r[1] + r[3];
+                        has_pend[t] = true;
+                    }
+                    else
+                    {
+                        p[0] = r[0] < p[0] ? r[0] : p[0];
+                        p[1] = r[1] < p[1] ? r[1] : p[1];
+                        p[2] = r[0] + r[2] > p[2] ? r[0] + r[2] : p[2];
+                        p[3] = r[1] + r[3] > p[3] ? r[1] + r[3] : p[3];
+                    }
+                }
+            }
+            const int next = (cur + 1) % kTex;
+            if (has_pend[next])
+            {
+                const int *p = pend[next];
+                if (batch.update_texture(tex[next], p[0], p[1], p[2] - p[0], p[3] - p[1], f.pixels, f.stride))
+                {
+                    bytes = 4LL * (p[2] - p[0]) * (p[3] - p[1]);
+                    has_pend[next] = false;
+                    cur = next;
+                }
+                else if (diag_logged < 60)
+                {
+                    ++diag_logged;
+                    evo_boot_log("webdiag: texture copy failed, frame seq %u, box %d,%d-%d,%d, page %dx%d tex %dx%d", static_cast<unsigned>(f.seq),
+                                 p[0], p[1], p[2], p[3], f.width, f.height, tex_w, tex_h);
+                }
+            }
+        }
+        if ((f.width != page_w || f.height != page_h) && diag_logged < 60)
+        {
+            ++diag_logged;
+            evo_boot_log("webdiag: page size %dx%d -> %dx%d (texture %dx%d, stride %d)", page_w, page_h, f.width, f.height, tex_w, tex_h, f.stride);
         }
         page_w = f.width;
         page_h = f.height;
+        edge_check(f);
         evo_browser_frame_release(f.buf);
         evo_browser_frame_note_copy(mono_us() - t0, bytes);
     }
@@ -958,6 +1040,15 @@ int evo_browser_page_texture(std::uint32_t *tex, float *u1, float *v1)
     *tex = w.tex[w.cur];
     *u1 = w.tex_w ? static_cast<float>(w.page_w) / static_cast<float>(w.tex_w) : 1.0f;
     *v1 = w.tex_h ? static_cast<float>(w.page_h) / static_cast<float>(w.tex_h) : 1.0f;
+    static float last_u = -1.0f, last_v = -1.0f;
+    static int uv_logged = 0;
+    if ((*u1 != last_u || *v1 != last_v) && uv_logged < 60)
+    {
+        ++uv_logged;
+        evo_boot_log("webdiag: page uv %.4f x %.4f (page %dx%d, texture %dx%d, cur %d)", *u1, *v1, w.page_w, w.page_h, w.tex_w, w.tex_h, w.cur);
+    }
+    last_u = *u1;
+    last_v = *v1;
     return 1;
 }
 

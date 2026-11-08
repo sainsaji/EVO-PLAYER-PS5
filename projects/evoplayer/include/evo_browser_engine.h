@@ -36,6 +36,9 @@ int evo_browser_engine_start(const char *broker_elf_path);
 /* 1 once the broker answered the ping and EVO holds its connection. */
 int evo_browser_engine_running(void);
 
+/* 1 when Web Browser is enabled in Settings -> Experimental. */
+int evo_settings_web_browser_enabled(void);
+
 /* Soft close, first frame: drop the broker connection so it terminates its
  * children and exits. Never blocks. */
 void evo_browser_engine_stop(void);

@@ -84,6 +84,7 @@ enum class SettingKey : int {
     MotionSmoothing,
     MatchVideoRate,
     DeepBlacks,
+    WebBrowser,
 };
 
 /*
@@ -180,6 +181,8 @@ const PreviewSpec kPreviews[] = {
     {SettingKey::SoftwareUpdate, EVO_RMLUI_PREVIEW_INFO,
      "Checks GitHub for a newer EVO. It downloads only after you say so, checks the file against GitHub's checksum, and replaces the installed image just once, when you confirm. EVO then closes; open it again from the Games row."},
     {SettingKey::QuitEvo, EVO_RMLUI_PREVIEW_INFO, "Releases everything, then close EVO from the switcher."},
+    {SettingKey::WebBrowser, EVO_RMLUI_PREVIEW_INFO,
+     "Enables the built-in Prospero Web browser section on the navigation rail. Unfinished experimental feature."},
 };
 
 const SettingKey kVideoKeys[] = {
@@ -210,6 +213,7 @@ const SettingKey kSystemKeys[] = {
  */
 const SettingKey kExperimentalKeys[] = {
     SettingKey::MotionSmoothing, SettingKey::MatchVideoRate, SettingKey::DeepBlacks,
+    SettingKey::WebBrowser,
 };
 
 struct SectionSpec {
@@ -370,6 +374,11 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         d = toggleDef(key, "MATCH VIDEO FRAME RATE",
                       "24P / 50 HZ OUTPUT DURING PLAYBACK - FALLS BACK TO 120 HZ OR 60 HZ",
                       "../icons/icon_gauge.png", settings->isMatchVideoRateEnabled());
+        break;
+
+    case SettingKey::WebBrowser:
+        d = toggleDef(key, "WEB BROWSER", "BUILT-IN PROSPERO BROWSER ON THE NAVIGATION RAIL",
+                      "../icons/icon_globe.png", settings->isWebBrowserEnabled());
         break;
 
     case SettingKey::HdrOutput:
@@ -811,6 +820,7 @@ void toggleSetting(SettingKey key) {
     case SettingKey::ResumePlayback:   st->setResumePlaybackEnabled(!st->isResumePlaybackEnabled()); break;
     case SettingKey::AudioPassthrough: st->setAudioPassthroughEnabled(!st->isAudioPassthroughEnabled()); break;
     case SettingKey::MatchVideoRate:   st->setMatchVideoRateEnabled(!st->isMatchVideoRateEnabled()); break;
+    case SettingKey::WebBrowser:       st->setWebBrowserEnabled(!st->isWebBrowserEnabled()); break;
     case SettingKey::AskStream:        st->setAskStreamEnabled(!st->isAskStreamEnabled()); break;
     case SettingKey::AddonAutoPick:    st->setAddonAutoPickEnabled(!st->isAddonAutoPickEnabled()); break;
     case SettingKey::AutoSubtitles:    st->setAutoSubtitlesEnabled(!st->isAutoSubtitlesEnabled()); break;

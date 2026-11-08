@@ -121,9 +121,11 @@ third_party/**/src/
 projects/prosperoplayer/
 
 # Local reference clone of the native-app build tail we fork in Phase 1b.
-# Kept on disk, never committed. See third_party/ProsperoLight/README.EVO.md
+# Kept on disk, never committed. See third_party/ProsperoLight/
+third_party/ProsperoWeb/README.EVO.md
 # and docs/evo-pro/phase-1b-app-module.md.
 third_party/ProsperoLight/
+third_party/ProsperoWeb/
 
 # Local reference clone: SvenGDK/SharpProspero (C# app-module SDK). Studied for
 # its sceAgc GPU draw path re: docs/evo-pro/gpu-rendering-plan.md. Never committed.

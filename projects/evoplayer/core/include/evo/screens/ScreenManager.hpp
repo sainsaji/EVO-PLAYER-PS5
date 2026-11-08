@@ -103,6 +103,7 @@ public:
     void activateRail();
 
     bool isNavRailVisible() const;
+    bool isWebEnabled() const;
     int getSectionForScreen(ScreenId screenId) const;
     void syncNavRail();
 

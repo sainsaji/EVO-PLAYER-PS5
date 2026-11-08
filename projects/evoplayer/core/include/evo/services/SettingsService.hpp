@@ -106,6 +106,8 @@ public:
     void setAudioPassthroughEnabled(bool enabled) override { m_audioPassthroughEnabled = enabled; }
     bool isMatchVideoRateEnabled() const override { return m_matchVideoRate; }
     void setMatchVideoRateEnabled(bool enabled) override { m_matchVideoRate = enabled; }
+    bool isWebBrowserEnabled() const override { return m_webBrowser; }
+    void setWebBrowserEnabled(bool enabled) override;
 
     HdrPeak getHdrPeak() const override { return m_hdrPeak; }
     void setHdrPeak(HdrPeak peak) override { m_hdrPeak = peak; }
@@ -149,6 +151,7 @@ private:
     NetworkBuffer m_networkBuffer = NetworkBuffer::Sec30;
     bool m_audioPassthroughEnabled = false;
     bool m_matchVideoRate = false;
+    bool m_webBrowser = false;
     bool m_debugOverlayEnabled = false;
     HdrPeak m_hdrPeak = HdrPeak::Off;
     bool m_addonAutoPick = true;   /* addons: rank the sources, play the best at once */

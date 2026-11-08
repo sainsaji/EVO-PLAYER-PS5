@@ -65,17 +65,25 @@ IScreen* ScreenManager::getScreen(ScreenId screenId) const {
     return nullptr;
 }
 
-/* Rail order: Home, Browse, Providers (when built), Web, Settings, About,
- * then QUIT EVO. P shifts everything after the Providers slot. The kit draws
+/* Rail order: Home, Browse, Providers (when built), Web (when enabled),
+ * Settings, About, then QUIT EVO. P shifts everything after the Providers
+ * slot. W shifts everything after the Web slot when enabled. The kit draws
  * the same list (rail_items in ui_kit/src/evo_hui_screens.cpp). */
 namespace {
 constexpr int P = EVO_ENABLE_EMBY ? 1 : 0;
-constexpr int kSecWeb = 2 + P;
-constexpr int kSecSettings = 3 + P;
-constexpr int kSecAbout = 4 + P;
+}
+
+bool ScreenManager::isWebEnabled() const {
+    auto ss = Application::getInstance().getSettingsService();
+    return ss && ss->isWebBrowserEnabled();
 }
 
 int ScreenManager::getSectionForScreen(ScreenId screenId) const {
+    const int W = isWebEnabled() ? 1 : 0;
+    const int secWeb = W ? (2 + P) : -1;
+    const int secSettings = 2 + P + W;
+    const int secAbout = 3 + P + W;
+
     switch (screenId) {
         case ScreenId::MainMenu:        return 0; // Home
         case ScreenId::UsbBrowser:      return 1; // Browse USB
@@ -86,16 +94,16 @@ int ScreenManager::getSectionForScreen(ScreenId screenId) const {
         case ScreenId::EmbyBrowse:      return 2; // Emby
 #endif
         case ScreenId::WebHome:
-        case ScreenId::WebPage:         return kSecWeb; // the page sits right of the rail
+        case ScreenId::WebPage:         return secWeb; // the page sits right of the rail
         case ScreenId::Settings:
         case ScreenId::SettingsPlayback:
         case ScreenId::SettingsAudio:
         case ScreenId::SettingsSubtitles:
         case ScreenId::SettingsInterface:
         case ScreenId::SettingsSystem:
-        case ScreenId::SettingsExperimental: return kSecSettings; // Settings
+        case ScreenId::SettingsExperimental: return secSettings; // Settings
         case ScreenId::AboutSupport:
-        case ScreenId::Changelog:       return kSecAbout; // About & Support
+        case ScreenId::Changelog:       return secAbout; // About & Support
         default:                        return -1; // Non-rail screens
     }
 }
@@ -134,7 +142,7 @@ void ScreenManager::stepRail(int delta) {
 
 ScreenId ScreenManager::getRootScreenForSection(int section) const {
     /* Must stay the inverse of getSectionForScreen() above, including the
-     * shift when Emby is compiled out. */
+     * shift when Emby is compiled out or Web is disabled. */
     if (section == 0) return ScreenId::MainMenu;
     if (section == 1) return ScreenId::UsbBrowser;
 #if EVO_ENABLE_EMBY
@@ -144,9 +152,14 @@ ScreenId ScreenManager::getRootScreenForSection(int section) const {
      * configured, so the slot is useful before anything is set up. */
     if (section == 2) return ScreenId::EmbyBrowse;
 #endif
-    if (section == kSecWeb) return ScreenId::WebHome;
-    if (section == kSecSettings) return ScreenId::Settings;
-    if (section == kSecAbout) return ScreenId::AboutSupport;
+    const int W = isWebEnabled() ? 1 : 0;
+    const int secWeb = W ? (2 + P) : -1;
+    const int secSettings = 2 + P + W;
+    const int secAbout = 3 + P + W;
+
+    if (W && section == secWeb) return ScreenId::WebHome;
+    if (section == secSettings) return ScreenId::Settings;
+    if (section == secAbout) return ScreenId::AboutSupport;
     return ScreenId::MainMenu;
 }
 
@@ -168,7 +181,8 @@ bool ScreenManager::isPlaybackScreen(ScreenId screenId) const {
 }
 
 int ScreenManager::railSectionCount() const {
-    return kSecAbout + 1;
+    const int W = isWebEnabled() ? 1 : 0;
+    return 4 + P + W;
 }
 
 void ScreenManager::activateRail() {
@@ -198,6 +212,10 @@ void ScreenManager::activateRail() {
 }
 
 void ScreenManager::navigateTo(ScreenId screenId) {
+    if ((screenId == ScreenId::WebHome || screenId == ScreenId::WebPage) && !isWebEnabled()) {
+        screenId = ScreenId::MainMenu;
+    }
+
     if (m_currentScreenId == screenId) {
         m_railFocused = false;
         syncNavRail();

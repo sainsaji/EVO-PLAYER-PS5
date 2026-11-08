@@ -1,4 +1,6 @@
 #include "evo/services/SettingsService.hpp"
+#include "evo/Application.hpp"
+#include "evo_browser_engine.h"
 #include "evo_boot_log.h"
 #include "evo_data_path.h"
 #include "evo_theme.h"
@@ -219,6 +221,26 @@ void SettingsService::setSubtitleFontFace(int face) {
     prospero_subtitle_style = face;
 }
 
+void SettingsService::setWebBrowserEnabled(bool enabled) {
+    if (m_webBrowser == enabled) return;
+    m_webBrowser = enabled;
+    saveSettings();
+    if (enabled) {
+        evo_browser_engine_boot();
+    } else {
+        evo_browser_engine_stop();
+        if (auto sm = Application::getInstance().getScreenManager()) {
+            if (sm->getCurrentScreenId() == ScreenId::WebHome ||
+                sm->getCurrentScreenId() == ScreenId::WebPage) {
+                sm->navigateTo(ScreenId::MainMenu);
+            }
+        }
+    }
+    if (auto sm = Application::getInstance().getScreenManager()) {
+        sm->syncNavRail();
+    }
+}
+
 /* Bumped when a release must reset saved values once on upgrade (see loadSettings). */
 static const int kSettingsSchema = 2;
 
@@ -237,7 +259,7 @@ bool SettingsService::saveSettings() {
     }
 
     std::fprintf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
         0, // legacy dummy profile
         m_resumePlaybackEnabled ? 1 : 0,
         static_cast<int>(m_defaultViewMode),
@@ -272,7 +294,8 @@ bool SettingsService::saveSettings() {
         static_cast<int>(m_audioLanguage),   // line 32 (preferred audio language)
         static_cast<int>(m_subtitleLanguage), // line 33 (preferred subtitle language)
         m_addonAutoPick ? 1 : 0,             // line 34 (addons: play the best stream at once)
-        static_cast<int>(m_skipSegments)     // line 35 (skip intros & credits: Off=0, Ask=1, Auto=2)
+        static_cast<int>(m_skipSegments),    // line 35 (skip intros & credits: Off=0, Ask=1, Auto=2)
+        m_webBrowser ? 1 : 0                 // line 36 (experimental: web browser)
     );
 
     if (std::fclose(file) != 0)
@@ -323,9 +346,10 @@ bool SettingsService::loadSettings() {
     int rawSubtitleLanguage = 0;
     int rawAddonAutoPick = 1;
     int rawSkipSegments = static_cast<int>(SkipSegments::Ask);
+    int rawWebBrowser = 0;
 
     int readCount = std::fscanf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
         &rawProfile,
         &rawResume,
         &rawViewMode,
@@ -360,7 +384,8 @@ bool SettingsService::loadSettings() {
         &rawAudioLanguage,
         &rawSubtitleLanguage,
         &rawAddonAutoPick,
-        &rawSkipSegments
+        &rawSkipSegments,
+        &rawWebBrowser
     );
 
     std::fclose(file);
@@ -444,7 +469,7 @@ bool SettingsService::loadSettings() {
     }
     /* An older file has no port line: the default stands, and the server may bind it. */
     evo_log_server_set_port(readCount >= 29 ? rawLogPort : evo_log_server_saved_port());   /* ignores out-of-range */
-    EVO_LOGI("settings", "loaded %d of 35 fields from %s", readCount, filePath);
+    EVO_LOGI("settings", "loaded %d of 36 fields from %s", readCount, filePath);
     if (readCount >= 31 && rawHdrPeak >= 0 && rawHdrPeak <= 5) {
         m_hdrPeak = static_cast<HdrPeak>(rawHdrPeak);
     }
@@ -458,6 +483,7 @@ bool SettingsService::loadSettings() {
     if (readCount >= 35 && rawSkipSegments >= 0 && rawSkipSegments <= 2) {
         m_skipSegments = static_cast<SkipSegments>(rawSkipSegments);
     }
+    if (readCount >= 36) m_webBrowser = (rawWebBrowser != 0);
 
     /* #233: Deep Blacks, Motion Smoothing and Match Video Rate moved to
      * Experimental, where everything starts off. A file from before that
@@ -465,12 +491,13 @@ bool SettingsService::loadSettings() {
      * for it. Reset them once and save; the user's later choice sticks. */
     const int schema = readCount >= 30 ? rawSchema : 0;
     if (schema < 1) {
-        if (m_deepBlacks != DeepBlacks::Off || m_motionSmoothing != MotionSmoothing::Off || m_matchVideoRate)
-            EVO_LOGW("settings", "experimental settings reset to off (deep blacks %d, motion %d, match rate %d)",
-                     static_cast<int>(m_deepBlacks), static_cast<int>(m_motionSmoothing), m_matchVideoRate ? 1 : 0);
+        if (m_deepBlacks != DeepBlacks::Off || m_motionSmoothing != MotionSmoothing::Off || m_matchVideoRate || m_webBrowser)
+            EVO_LOGW("settings", "experimental settings reset to off (deep blacks %d, motion %d, match rate %d, web %d)",
+                     static_cast<int>(m_deepBlacks), static_cast<int>(m_motionSmoothing), m_matchVideoRate ? 1 : 0, m_webBrowser ? 1 : 0);
         m_deepBlacks = DeepBlacks::Off;
         m_motionSmoothing = MotionSmoothing::Off;
         m_matchVideoRate = false;
+        m_webBrowser = false;
     }
     /* DEFAULT FONT STYLE was saved but never drawn before schema 2, and its
      * old default (1) now means LIGHT: start everyone on STANDARD once. */
@@ -505,3 +532,8 @@ void SettingsService::syncThemeToRmlUi() {
 }
 
 } // namespace evo
+
+extern "C" int evo_settings_web_browser_enabled(void) {
+    auto ss = evo::Application::getInstance().getSettingsService();
+    return (ss && ss->isWebBrowserEnabled()) ? 1 : 0;
+}

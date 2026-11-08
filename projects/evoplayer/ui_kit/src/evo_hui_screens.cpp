@@ -10,6 +10,7 @@
 #include "evo_hui_cover.hpp"
 
 #include "evo_features.h"
+#include "evo_browser_engine.h"
 
 #include "ui/glyphs.hpp"
 #include "ui/components/component.hpp"
@@ -319,7 +320,8 @@ int rail_items(RailItem *out)
     out[n++] = {"Browse", "../icons/icon_browse_usb.png"};
     if (EVO_ENABLE_EMBY)
         out[n++] = {"Providers", "../icons/icon_emby.png"};
-    out[n++] = {"Web", "../icons/icon_globe.png"}; /* #237 */
+    if (evo_settings_web_browser_enabled())
+        out[n++] = {"Web", "../icons/icon_globe.png"}; /* #237 */
     out[n++] = {"Settings", "../icons/icon_settings.png"};
     out[n++] = {"About", "../icons/icon_about_support.png"};
     out[n++] = {"Quit EVO", "../icons/icon_power.png"};

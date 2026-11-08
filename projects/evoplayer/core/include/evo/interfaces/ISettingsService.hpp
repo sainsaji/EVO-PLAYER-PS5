@@ -121,6 +121,10 @@ public:
     virtual bool isMatchVideoRateEnabled() const = 0;
     virtual void setMatchVideoRateEnabled(bool enabled) = 0;
 
+    // Experimental: built-in web browser
+    virtual bool isWebBrowserEnabled() const = 0;
+    virtual void setWebBrowserEnabled(bool enabled) = 0;
+
     // HDR peak mapping (panel peak, Off = the TV tone-maps)
     virtual HdrPeak getHdrPeak() const = 0;
     virtual void setHdrPeak(HdrPeak peak) = 0;
