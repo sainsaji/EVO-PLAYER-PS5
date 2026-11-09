@@ -16,6 +16,8 @@ Plays video from USB drives (exFAT, FAT32 and read-only NTFS), internal storage,
 
 ## What's New in v0.13.6
 
+- **YouTube Cast Receiver (DIAL & Lounge):** Cast YouTube videos straight from your phone (Android or iOS) to EVO Player without signing in. Supports SSDP discovery, DIAL launch, and direct pairing via YouTube Lounge companion screen protocol.
+- **Native Player Casting:** Stream YouTube videos directly in EVO's native hardware player with full controller support, or fall back to the system browser. Configurable via **Settings → Network → CAST TO EVO PLAYER**.
 - **Playback stutter eliminated:** periodic ~850 ms frame drops during USB and local playback have been resolved. Remote command polling and DOM UI status serialization now execute on a dedicated background worker thread, removing all blocking filesystem I/O from the 60/120 Hz render loop.
 - **Flash drive friendly:** eliminated periodic `fsync` calls during media streaming to avoid flash block erase stalls, and throttled USB status writes to 15s during active playback.
 - **On-demand USB detection:** replaced periodic background filesystem polling with on-demand enumeration in file browsers.

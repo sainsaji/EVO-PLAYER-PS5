@@ -21,6 +21,7 @@
 #include "evo/screens/ImageViewerScreen.hpp"
 #include "evo/screens/WebScreens.hpp"
 #include "evo/screens/ChangelogScreen.hpp"
+#include "evo/services/CastService.hpp"
 #include "evo/animation/AnimationManager.hpp"
 
 #include "evo_boot_log.h"
@@ -471,10 +472,12 @@ bool Application::initServices() {
     m_fileSystemBrowser = std::make_unique<FileSystemBrowser>();
     m_playbackController = std::make_unique<PlaybackController>();
     m_fileTransferService = std::make_unique<FileTransferService>();
+    m_castService = std::make_unique<CastService>();
     m_screenManager = std::make_unique<ScreenManager>();
 
     m_soundEffectEngine->initialize();
     m_settingsService->loadSettings();
+    m_castService->initialize();
     if (m_settingsService->isWebBrowserEnabled()) {
         evo_browser_engine_boot();
     }
@@ -569,6 +572,9 @@ void Application::shutdown() {
     }
     if (m_soundEffectEngine) {
         m_soundEffectEngine->shutdown();
+    }
+    if (m_castService) {
+        m_castService->shutdown();
     }
     evo_boot_log("shutdown: media stopped");
     evo_boot_log_flush();
@@ -1576,7 +1582,14 @@ int Application::run() {
             }
 
             if (evo_webui_active()) {
-                /* #101: the system browser is up and owns the controller. */
+                /* #101: the system browser is up and owns the controller.
+                 * If the user presses Options or Triangle, allow closing the browser
+                 * dialog so they can return to EVO Player UI without closing the app. */
+                if (pressed & (PadButtons::Options | PadButtons::Triangle)) {
+                    EVO_LOGI("webui", "User dismissed WebUI browser via controller");
+                    evo_webui_close();
+                    evo_feedback(EVO_FB_CANCEL);
+                }
             } else if (evo_keyboard_is_open()) {
                 evo_keyboard_update();
                 if (pressed) {
@@ -1618,6 +1631,9 @@ int Application::run() {
         /* #102: a finished subtitle auto-sync is applied on this thread. */
         prospero_subtitle_autosync_pump();
         m_screenManager->update(frameDeltaMs);
+        if (m_castService) {
+            m_castService->update(frameDeltaMs);
+        }
         g_pace.mark(2);   /* update */
 
         // 3. Determine if graphics needs to render/present

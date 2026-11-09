@@ -787,7 +787,7 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     if (auto* cover = Application::getInstance().getCoverArtService())
         cover->quiesce();
 
-    char safeBuf[512];
+    char safeBuf[4096];
     evo_url_sanitize(rawUrl.c_str(), safeBuf, sizeof(safeBuf));
     const std::string filePath = safeBuf;
 

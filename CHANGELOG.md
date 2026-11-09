@@ -15,6 +15,13 @@ Download **`PPSA99039.ffpfsc`** and deploy it with ShadowMountPlus, or the folde
 
 Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47Nc8WtXh)**.
 
+### ![](https://img.shields.io/badge/CASTING-00bcd4?style=flat-square) YouTube Cast & DIAL Receiver
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **YouTube DIAL & Lounge Casting:** Cast YouTube videos directly from your mobile phone (Android or iOS) to EVO Player without signing in. Supports SSDP discovery on UDP 1900 and the YouTube Lounge companion protocol over TLS.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Native Player YouTube Playback:** Stream YouTube videos cast from your phone straight in EVO's native player with hardware AGC decode and surround audio, configurable via **Settings → Network → CAST TO EVO PLAYER**.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Bot-check bypass & format resolution:** Multi-client Innertube stream resolution tries `ANDROID_VR` for DASH 4K/1080p MPD manifests, with automated fallback to `ANDROID` mobile client (`21.26.364`) to bypass YouTube bot challenges, plus HLS live stream manifest support.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Browser dismissal shortcut:** Pressing **Options** or **Triangle** while the WebKit browser dialog is displayed immediately dismisses it and returns to the EVO Player UI.
+
 ### ![](https://img.shields.io/badge/PLAYBACK-e91e63?style=flat-square) Playback & Performance
 
 - ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Periodic ~850 ms frame drops eliminated during playback.** File polling and UI state serialization for `evo-remote` now execute entirely on a dedicated background pthread (`usb_remote_worker`), leaving the 60/120 Hz render loop with 0 disk I/O.

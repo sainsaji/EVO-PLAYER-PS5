@@ -138,6 +138,16 @@ public:
     virtual bool isWebBrowserEnabled() const = 0;
     virtual void setWebBrowserEnabled(bool enabled) = 0;
 
+    // Phone casting (DIAL) receiver
+    virtual bool isCastReceiverEnabled() const = 0;
+    virtual void setCastReceiverEnabled(bool enabled) = 0;
+    virtual int getCastPort() const = 0;
+    virtual void setCastPort(int port) = 0;
+    virtual std::string getCastDeviceName() const = 0;
+    virtual void setCastDeviceName(const std::string& name) = 0;
+    virtual bool isCastNativePlayerEnabled() const = 0;
+    virtual void setCastNativePlayerEnabled(bool enabled) = 0;
+
     // HDR peak mapping (panel peak, Off = the TV tone-maps)
     virtual HdrPeak getHdrPeak() const = 0;
     virtual void setHdrPeak(HdrPeak peak) = 0;

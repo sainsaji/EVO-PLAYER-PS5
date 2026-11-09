@@ -126,6 +126,11 @@ typedef void (*evo_net_cb)(int success, int status_code, const char *body, size_
  */
 int evo_net_connect_list(const struct addrinfo *list, int per_addr_timeout_ms);
 
+#ifndef NO_OPENSSL
+struct ssl_ctx_st;
+struct ssl_ctx_st *evo_net_get_ssl_ctx(void);
+#endif
+
 /* One address, the same bounded connect: a connected blocking socket (no
  * timeouts set), or -1 with errno set; *timed_out (may be NULL) says the
  * deadline ran out. For callers outside evo_net (FTP, the server probes). */

@@ -14,8 +14,9 @@ enum class UserAgentMode {
     DesktopChrome,
     DesktopSafari,
     MobileSafari,
+    ChromecastTV,
 };
-constexpr int kUserAgentModeCount = 4;
+constexpr int kUserAgentModeCount = 5;
 const char* user_agent_mode_name(UserAgentMode mode);
 
 struct BrowserSettings {

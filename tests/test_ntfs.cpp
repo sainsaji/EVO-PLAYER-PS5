@@ -112,7 +112,11 @@ static void check_volume(const char *img, const char *name, const char *vol_url)
     TEST_ASSERT(read_all(v + "/a/b/c/d/deep.txt") == "deep\n", "deep path");
     TEST_ASSERT(read_all(v + "/\xc3\x9cn\xc3\xaf""c\xc3\xb6""d\xc3\xa9 \xe6\x97\xa5\xe6\x9c\xac/\xe3\x83\x95\xe3\x82\xa1\xe3\x82\xa4\xe3\x83\xab.txt") == "uni\n",
                 "unicode path");
-    TEST_ASSERT(read_all(v + "/MOVIES/some movie (2019)/MOVIE.MKV") == file_bytes("output/sample/evo_sample.mkv"),
+    const std::string expected_sample =
+        !file_bytes("output/ntfs/sample.mkv").empty()
+            ? file_bytes("output/ntfs/sample.mkv")
+            : file_bytes("output/sample/evo_sample.mkv");
+    TEST_ASSERT(read_all(v + "/MOVIES/some movie (2019)/MOVIE.MKV") == expected_sample,
                 "movie bytes (case-insensitive path)");
 
     const std::string frag = read_all(v + "/frag_c.bin");

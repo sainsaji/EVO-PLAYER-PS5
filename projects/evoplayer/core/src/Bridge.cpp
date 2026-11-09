@@ -272,6 +272,18 @@ int start_video_playback_at(const char *path, double resume_seconds) {
     return 0;
 }
 
+int start_video_playback_source(const char *url, const char *title, double resume_seconds) {
+    if (auto pb = evo::Application::getInstance().getPlaybackController()) {
+        evo::PlaybackSource src;
+        src.url = evo::NetworkStorageService::attachCredentials(url ? url : "");
+        if (title && title[0]) {
+            src.title = title;
+        }
+        return pb->startPlaybackSource(src, resume_seconds) ? 1 : 0;
+    }
+    return 0;
+}
+
 int start_video_playback(const char *path) {
     return start_video_playback_at(path, 0.0);
 }

@@ -178,6 +178,7 @@ static int  s_port       = DEFAULT_PORT;
 static int  s_layout     = -1;       /* fixed layout index, -1 = default mode */
 static int  s_cycle      = 0;        /* run 3: cycle k_layouts */
 static int  s_hold_frames = 25 * 60;
+static int  s_direct     = 0;        /* 1 = direct URL mode (no proxy/hook needed) */
 
 static char s_url[1024];
 static char s_hook_profile[16];      /* "" = media server, "nuvio" */
@@ -1305,19 +1306,22 @@ static void open_dialog(const char *url)
     if (ensure_initialized() != 0) {
         LOG("NO-GO at Initialize");
         s_state = P_OFF;
+        s_direct = 0;
         return;
     }
-    server_start();
-    evo_mkdir(evo_data_path("webui"));
-    char leaf[200];
-    snprintf(leaf, sizeof leaf, "webui/%s_%d.json", s_up.enabled ? s_up.host : "local",
-             s_up.enabled ? s_up.port : s_port);
-    pthread_mutex_lock(&s_store_mx);
-    snprintf(s_store_path, sizeof s_store_path, "%s", evo_data_path(leaf));
-    pthread_mutex_unlock(&s_store_mx);
+    if (!s_direct) {
+        server_start();
+        evo_mkdir(evo_data_path("webui"));
+        char leaf[200];
+        snprintf(leaf, sizeof leaf, "webui/%s_%d.json", s_up.enabled ? s_up.host : "local",
+                 s_up.enabled ? s_up.port : s_port);
+        pthread_mutex_lock(&s_store_mx);
+        snprintf(s_store_path, sizeof s_store_path, "%s", evo_data_path(leaf));
+        pthread_mutex_unlock(&s_store_mx);
+    }
     pthread_mutex_lock(&s_mx);
     s_close_req = 0;                     /* nothing stale from a previous page */
-    s_hook_seen = 0;
+    s_hook_seen = s_direct ? 1 : 0;
     s_entry_failed = 0;
     s_handoff_ready = 0;
     pthread_mutex_unlock(&s_mx);
@@ -1346,14 +1350,15 @@ static void open_dialog(const char *url)
     int rc = sceWebBrowserDialogOpen(&s_param);
     LOG("sceWebBrowserDialogOpen -> 0x%08x", (unsigned)rc);
     if (rc != 0) {
-        if (s_cycle && s_layout + 1 < LAYOUT_COUNT) {
+        if (!s_direct && s_cycle && s_layout + 1 < LAYOUT_COUNT) {
             s_layout++;
             s_state = P_WAIT;
             s_frames = 0;
             return;
         }
-        server_stop();
+        if (!s_direct) server_stop();
         s_state = P_OFF;
+        s_direct = 0;
         return;
     }
     s_state = P_RUN;
@@ -1379,8 +1384,9 @@ static void read_result(void)
 static void finish(void)
 {
     LOG("session closed by %s", s_error_pending ? "EVO (error)" : "the user");
-    server_stop();
+    if (!s_direct) server_stop();
     s_state = P_OFF;
+    s_direct = 0;
 }
 
 static int dialog_gone(int st)
@@ -1521,6 +1527,40 @@ int evo_webui_open_ex(const char *upstream, const char *path, const char *hook_p
     return 0;
 }
 
+int evo_webui_open_direct(const char *url)
+{
+    if (!url || !url[0])
+        return -1;
+    if (s_state != P_OFF)
+        return 1;
+    if (s_preload_rc < 0) {
+        LOG("open refused: the dialog module never loaded (0x%08x)", (unsigned)s_preload_rc);
+        return -2;
+    }
+    s_direct = 1;
+    s_layout = 1; /* Mode 2: beside the rail (x=108, w=1812, parts=0x7, control=0), with browser chrome Close button */
+    s_cycle = 0;
+    s_checked = 1;
+    s_error_pending = 0;
+    s_check_rc = 1;
+    snprintf(s_open_url, sizeof s_open_url, "%s", url);
+    snprintf(s_reopen_url, sizeof s_reopen_url, "%s", url);
+    s_state = P_WAIT;
+    s_frames = OPEN_DELAY_FRAMES - 6;
+    LOG("open direct: %s", s_open_url);
+    return 0;
+}
+
+void evo_webui_close(void)
+{
+    if (s_state == P_RUN && !s_closed_by_evo) {
+        LOG("evo_webui_close: closing dialog");
+        pthread_mutex_lock(&s_mx);
+        s_close_req = 1;
+        pthread_mutex_unlock(&s_mx);
+    }
+}
+
 int evo_webui_take_play(char *url, size_t url_cap, char *title, size_t title_cap)
 {
     if (!s_play_pending) return 0;
@@ -1609,7 +1649,7 @@ void evo_webui_pump(void)
         int cycle_up = s_cycle && s_frames >= s_hold_frames;
         /* A page that failed, or never loaded, has no Back to EVO button and
          * the PS button is a panic risk - so EVO closes it and says why. */
-        int stuck = !s_cycle && !hook_seen && (entry_failed || s_frames >= PAGE_LOAD_FRAMES);
+        int stuck = !s_direct && !s_cycle && !hook_seen && (entry_failed || s_frames >= PAGE_LOAD_FRAMES);
         if (stuck && !dialog_gone(st) && !s_closed_by_evo) {
             char m[256];
             snprintf(m, sizeof m, entry_failed ? "Lost the connection to %s"
@@ -1643,6 +1683,10 @@ void evo_webui_pump(void)
         int st = sceWebBrowserDialogUpdateStatus();
         if (!dialog_gone(st) && ++s_frames < 600) return;
         read_result();
+        if (s_direct) {
+            finish();
+            return;
+        }
         LOG("handing '%s' to the player", s_play_title);
         s_play_pending = 1;
         s_state = P_PLAYING;

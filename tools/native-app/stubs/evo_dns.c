@@ -71,6 +71,7 @@
 #include <strings.h>
 #include <stdio.h>
 #include <time.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <sys/types.h>
@@ -268,7 +269,8 @@ static int addr_usable(uint32_t s_addr)
  * many distinct usable IPv4 addresses it holds - 0 is a valid answer (an
  * IPv6-only name, or one the network's DNS blocks) - or -1 if the buffer is not
  * the layout this expects, in which case the caller uses none of it. */
-static int parse_multi_records(const unsigned char *buf, struct in_addr *out, int max)
+static int parse_multi_records(const unsigned char *buf, struct in_addr *out, int max,
+                               int *out_dns4)
 {
     /* The canary past the documented struct: if the call wrote there, the
      * layout is bigger than documented and nothing else can be trusted. */
@@ -280,6 +282,7 @@ static int parse_multi_records(const unsigned char *buf, struct in_addr *out, in
     memcpy(&dns4, buf + DNS_INFO_DNS4_AT, sizeof(dns4));
     if (records < 1 || records > DNS_ADDR_MAX) return -1;
     if (dns4 < 0 || dns4 > DNS_ADDR_MAX) return -1;
+    if (out_dns4) *out_dns4 = (int)dns4;
 
     int n = 0;
     for (int i = 0; i < records; i++) {
@@ -299,6 +302,111 @@ static int parse_multi_records(const unsigned char *buf, struct in_addr *out, in
         if (!dup && n < max) out[n++] = a;
     }
     return n;
+}
+
+/* Fallback direct DNS query over UDP to public resolvers if the console's
+ * configured DNS fails or blocks IPv4 queries. */
+static int fallback_resolve_udp(const char *host, struct in_addr *out, int max)
+{
+    if (!host || !*host || max <= 0) return 0;
+
+    unsigned char q[512];
+    memset(q, 0, 12);
+    q[0] = 0x5e; q[1] = 0x70; /* query id */
+    q[2] = 0x01; q[3] = 0x00; /* recursion desired */
+    q[4] = 0x00; q[5] = 0x01; /* 1 question */
+
+    int qlen = 12;
+    const char *p = host;
+    while (*p) {
+        const char *dot = strchr(p, '.');
+        int len = dot ? (int)(dot - p) : (int)strlen(p);
+        if (len <= 0 || len > 63 || qlen + len + 1 >= 500) return 0;
+        q[qlen++] = (unsigned char)len;
+        memcpy(q + qlen, p, (size_t)len);
+        qlen += len;
+        if (!dot) break;
+        p = dot + 1;
+    }
+    q[qlen++] = 0;
+    q[qlen++] = 0x00; q[qlen++] = 0x01; /* QTYPE A */
+    q[qlen++] = 0x00; q[qlen++] = 0x01; /* QCLASS IN */
+
+    /* Resolvers in network byte order: 1.1.1.1, 8.8.8.8 */
+    static const uint32_t servers[] = { 0x01010101, 0x08080808 };
+    int nfound = 0;
+
+    for (size_t s = 0; s < sizeof(servers) / sizeof(servers[0]); s++) {
+        int fd = socket(AF_INET, SOCK_DGRAM, 0);
+        if (fd < 0) continue;
+
+        struct timeval tv;
+        tv.tv_sec = 1;
+        tv.tv_usec = 200000; /* 1.2s timeout */
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+        struct sockaddr_in dst;
+        memset(&dst, 0, sizeof(dst));
+        dst.sin_family = AF_INET;
+        dst.sin_port = htons(53);
+        dst.sin_addr.s_addr = servers[s];
+
+        if (sendto(fd, q, (size_t)qlen, 0, (struct sockaddr *)&dst, sizeof(dst)) != qlen) {
+            close(fd);
+            continue;
+        }
+
+        unsigned char resp[1024];
+        ssize_t rlen = recv(fd, resp, sizeof(resp), 0);
+        close(fd);
+
+        if (rlen < 12) continue;
+        if (resp[0] != 0x5e || resp[1] != 0x70) continue;
+        if ((resp[3] & 0x0F) != 0) continue; /* RCODE != 0 (e.g. NXDOMAIN) */
+
+        uint16_t ancount = (uint16_t)((resp[6] << 8) | resp[7]);
+        if (ancount == 0) continue;
+
+        /* Skip question */
+        int idx = 12;
+        while (idx < rlen && resp[idx] != 0) {
+            if ((resp[idx] & 0xC0) == 0xC0) { idx += 2; break; }
+            idx += 1 + resp[idx];
+        }
+        if (idx < rlen && resp[idx] == 0) idx++;
+        idx += 4; /* skip QTYPE and QCLASS */
+
+        /* Parse answers */
+        for (int a = 0; a < (int)ancount && idx < rlen && nfound < max; a++) {
+            if ((resp[idx] & 0xC0) == 0xC0) {
+                idx += 2;
+            } else {
+                while (idx < rlen && resp[idx] != 0) idx += 1 + resp[idx];
+                if (idx < rlen && resp[idx] == 0) idx++;
+            }
+            if (idx + 10 > rlen) break;
+            uint16_t atype = (uint16_t)((resp[idx] << 8) | resp[idx + 1]);
+            uint16_t rdlen = (uint16_t)((resp[idx + 8] << 8) | resp[idx + 9]);
+            idx += 10;
+            if (idx + rdlen > rlen) break;
+            if (atype == 1 && rdlen == 4) {
+                struct in_addr addr;
+                memcpy(&addr, resp + idx, 4);
+                if (addr_usable(addr.s_addr)) {
+                    int dup = 0;
+                    for (int k = 0; k < nfound; k++) {
+                        if (out[k].s_addr == addr.s_addr) { dup = 1; break; }
+                    }
+                    if (!dup) out[nfound++] = addr;
+                }
+            }
+            idx += rdlen;
+        }
+
+        if (nfound > 0) break;
+    }
+
+    return nfound;
 }
 
 /* One lookup on the console's own DNS: every address, in the resolver's order.
@@ -334,21 +442,22 @@ static dns_result_t dns_resolve(const char *host, struct in_addr *out, int max,
                 tried_multi = 1;
                 multi_rc = sceNetResolverStartNtoaMultipleRecordsEx(rid, host, buf, 0, 0, 0);
                 if (multi_rc >= 0) {
-                    const int n = parse_multi_records(buf, out, max);
+                    int dns4 = 0;
+                    const int n = parse_multi_records(buf, out, max, &dns4);
                     if (n > 0) {
                         *count = n;
                         *rc = multi_rc;
                         result = DNS_FOUND;
-                    } else if (n == 0) {
-                        /* The layout is right and there is nothing to connect
-                         * to: blocked by the network's DNS, or IPv6 only. The
-                         * resolver has answered; asking again would not change
-                         * it. */
+                    } else if (n == 0 && dns4 > 0) {
+                        /* The network's DNS answered 0.0.0.0. Blocked by DNS filtering.
+                         * Skip StartNtoa, but allow public UDP DNS fallback below. */
                         *rc = multi_rc;
-                        *why = "no usable IPv4 address (blocked by the network's DNS, or IPv6 only)";
+                        *why = "no usable IPv4 address (blocked by the network's DNS)";
                         result = DNS_NOT_FOUND;
-                        free(buf);
-                        goto done;
+                    } else if (n == 0) {
+                        /* Multi-record had no IPv4 records (dns4=0).
+                         * Fall through to sceNetResolverStartNtoa to query IPv4 directly. */
+                        DNS_LOG("multi-record had no IPv4 for %s (dns4=%d), trying StartNtoa", host, dns4);
                     } else {
                         s_multi_broken = 1;
                         DNS_LOG("multi-record lookup returned an unusable layout for %s "
@@ -360,7 +469,10 @@ static dns_result_t dns_resolve(const char *host, struct in_addr *out, int max,
             }
         }
 
-        if (result != DNS_FOUND) {
+        /* Call StartNtoa unless multi-record already received an explicit 0.0.0.0 */
+        int blocked_by_multi = (multi_rc >= 0 && tried_multi &&
+                                strcmp(*why, "no usable IPv4 address (blocked by the network's DNS)") == 0);
+        if (result != DNS_FOUND && !blocked_by_multi) {
             struct in_addr addr;
             memset(&addr, 0, sizeof(addr));
             /* timeout 0 / retry 0: the console's own defaults, as the SDK's libc. */
@@ -369,12 +481,15 @@ static dns_result_t dns_resolve(const char *host, struct in_addr *out, int max,
                 out[0] = addr;
                 *count = 1;
                 result = DNS_FOUND;
-                if (tried_multi && multi_rc < 0 && !s_multi_broken) {
-                    /* It has an answer the multi-record call could not give. */
-                    s_multi_broken = 1;
-                    DNS_LOG("multi-record lookup failed (rc 0x%x) where the single "
-                            "lookup for %s worked - single address from here on",
-                            (unsigned)multi_rc, host);
+                if (tried_multi && !s_multi_broken) {
+                    if (multi_rc < 0) {
+                        s_multi_broken = 1;
+                        DNS_LOG("multi-record lookup failed (rc 0x%x) where the single "
+                                "lookup for %s worked - single address from here on",
+                                (unsigned)multi_rc, host);
+                    } else {
+                        DNS_LOG("single lookup for %s succeeded where multi-record had no IPv4", host);
+                    }
                 }
             } else {
                 if (*rc >= 0)
@@ -382,7 +497,16 @@ static dns_result_t dns_resolve(const char *host, struct in_addr *out, int max,
                 result = DNS_NOT_FOUND;
             }
         }
-done:
+
+        if (result != DNS_FOUND) {
+            int fn = fallback_resolve_udp(host, out, max);
+            if (fn > 0) {
+                *count = fn;
+                result = DNS_FOUND;
+                DNS_LOG("public DNS fallback resolved %s (%d address%s)",
+                        host, fn, fn == 1 ? "" : "es");
+            }
+        }
         sceNetResolverDestroy(rid);
     }
     sceNetPoolDestroy(memid);

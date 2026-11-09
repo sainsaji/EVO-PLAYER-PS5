@@ -19,6 +19,8 @@
 
 namespace evo {
 
+class CastService;
+
 class Application : public IApplication {
 public:
     static Application& getInstance();
@@ -73,6 +75,7 @@ public:
     IFileSystemBrowser* getFileSystemBrowser() const override { return m_fileSystemBrowser.get(); }
     IPlaybackController* getPlaybackController() const override { return m_playbackController.get(); }
     IFileTransferService* getFileTransferService() const override { return m_fileTransferService.get(); }
+    CastService* getCastService() const { return m_castService.get(); }
     ScreenManager* getScreenManager() const override { return m_screenManager.get(); }
 
     void getRightStick(float* x, float* y) const {
@@ -116,6 +119,7 @@ private:
     std::unique_ptr<FileSystemBrowser> m_fileSystemBrowser;
     std::unique_ptr<PlaybackController> m_playbackController;
     std::unique_ptr<FileTransferService> m_fileTransferService;
+    std::unique_ptr<CastService> m_castService;
     std::unique_ptr<ScreenManager> m_screenManager;
 
     int m_padHandle = -1;

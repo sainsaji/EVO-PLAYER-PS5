@@ -121,6 +121,15 @@ public:
     bool isWebBrowserEnabled() const override { return m_webBrowser; }
     void setWebBrowserEnabled(bool enabled) override;
 
+    bool isCastReceiverEnabled() const override { return m_castReceiverEnabled; }
+    void setCastReceiverEnabled(bool enabled) override;
+    int getCastPort() const override { return m_castPort; }
+    void setCastPort(int port) override;
+    std::string getCastDeviceName() const override { return m_castDeviceName; }
+    void setCastDeviceName(const std::string& name) override;
+    bool isCastNativePlayerEnabled() const override { return m_castNativePlayerEnabled; }
+    void setCastNativePlayerEnabled(bool enabled) override;
+
     HdrPeak getHdrPeak() const override { return m_hdrPeak; }
     void setHdrPeak(HdrPeak peak) override { m_hdrPeak = peak; }
     const char* getHdrPeakName(HdrPeak peak) const override;
@@ -176,6 +185,10 @@ private:
     SkipSegments m_skipSegments = SkipSegments::Ask;
     PreferredLanguage m_audioLanguage = PreferredLanguage::Auto;
     PreferredLanguage m_subtitleLanguage = PreferredLanguage::Auto;
+    bool m_castReceiverEnabled = true;
+    int m_castPort = 8765;
+    std::string m_castDeviceName = "EVO Player";
+    bool m_castNativePlayerEnabled = true;
 };
 
 

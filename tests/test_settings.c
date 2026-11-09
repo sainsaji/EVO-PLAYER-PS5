@@ -165,6 +165,7 @@ extern "C" void test_settings_save_load_roundtrip(void)
     svc1.setSubtitleBackground(2);
     svc1.setSubtitleColor(9);   /* out of range: refused, CYAN stays */
     svc1.setThemeName("CARBON");
+    svc1.setCastNativePlayerEnabled(false);
     evo_log_server_set_port(9812);
 
     /* 3. Persist to disk */
@@ -217,6 +218,7 @@ extern "C" void test_settings_save_load_roundtrip(void)
     TEST_ASSERT(svc2.getSubtitleLift() == 1, "SubtitleLift round-trip mismatch");
     TEST_ASSERT(svc2.getSubtitleBackground() == 2, "SubtitleBackground round-trip mismatch");
     TEST_ASSERT(svc2.getThemeName() == "CARBON", "ThemeName round-trip mismatch");
+    TEST_ASSERT(svc2.isCastNativePlayerEnabled() == false, "CastNativePlayerEnabled round-trip mismatch");
     TEST_ASSERT(evo_log_server_saved_port() == 9812, "Log server saved port round-trip mismatch");
 
     TEST_PASS();

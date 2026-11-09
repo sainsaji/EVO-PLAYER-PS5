@@ -1,4 +1,5 @@
 #include "evo/services/SettingsService.hpp"
+#include "evo_cast_receiver.h"
 #include "evo_browser_engine.h"
 #include "evo_boot_log.h"
 #include "evo_data_path.h"
@@ -234,6 +235,36 @@ void SettingsService::setWebBrowserEnabled(bool enabled) {
     }
 }
 
+void SettingsService::setCastReceiverEnabled(bool enabled) {
+    if (m_castReceiverEnabled == enabled) return;
+    m_castReceiverEnabled = enabled;
+    saveSettings();
+    if (enabled) {
+        evo_cast_receiver_start(m_castDeviceName.c_str(), m_castPort);
+    } else {
+        evo_cast_receiver_stop();
+    }
+}
+
+void SettingsService::setCastPort(int port) {
+    if (port < 1024 || port > 65535) return;
+    m_castPort = port;
+    saveSettings();
+}
+
+void SettingsService::setCastDeviceName(const std::string& name) {
+    if (name.empty()) return;
+    m_castDeviceName = name;
+    evo_cast_receiver_set_friendly_name(name.c_str());
+    saveSettings();
+}
+
+void SettingsService::setCastNativePlayerEnabled(bool enabled) {
+    if (m_castNativePlayerEnabled == enabled) return;
+    m_castNativePlayerEnabled = enabled;
+    saveSettings();
+}
+
 /* #231: the primary caption's look, pushed to the subtitle engine like the
  * secondary's. Size index 0..3 is prospero_subtitle_face 1..4. */
 void SettingsService::setSubtitleSize(int size) {
@@ -278,7 +309,7 @@ bool SettingsService::saveSettings() {
     }
 
     std::fprintf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
         0, // legacy dummy profile
         m_resumePlaybackEnabled ? 1 : 0,
         static_cast<int>(m_defaultViewMode),
@@ -320,7 +351,10 @@ bool SettingsService::saveSettings() {
         m_subtitleLift,                      // line 39 (#231 subtitle position)
         m_subtitleBackground,                // line 40 (#231 subtitle background)
         m_stereoUpmixEnabled ? 1 : 0,        // line 41 (stereo 4.0 upmix)
-        m_phoneSpeakerEnabled ? 1 : 0        // line 42 (controller phone audio)
+        m_phoneSpeakerEnabled ? 1 : 0,       // line 42 (controller phone audio)
+        m_castReceiverEnabled ? 1 : 0,       // line 43 (DIAL phone cast receiver)
+        m_castPort,                          // line 44 (DIAL port)
+        m_castNativePlayerEnabled ? 1 : 0    // line 45 (play cast in EVO player instead of WebKit)
     );
 
     if (std::fclose(file) != 0)
@@ -378,9 +412,12 @@ bool SettingsService::loadSettings() {
     int rawSubtitleBackground = 0;
     int rawStereoUpmix = 0;
     int rawPhoneSpeaker = 0;
+    int rawCastEnabled = 1;
+    int rawCastPort = EVO_CAST_DEFAULT_PORT;
+    int rawCastNativePlayer = 1;
 
     int readCount = std::fscanf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
         &rawProfile,
         &rawResume,
         &rawViewMode,
@@ -422,7 +459,10 @@ bool SettingsService::loadSettings() {
         &rawSubtitleLift,
         &rawSubtitleBackground,
         &rawStereoUpmix,
-        &rawPhoneSpeaker
+        &rawPhoneSpeaker,
+        &rawCastEnabled,
+        &rawCastPort,
+        &rawCastNativePlayer
     );
 
     std::fclose(file);
@@ -530,6 +570,9 @@ bool SettingsService::loadSettings() {
     if (readCount >= 40) setSubtitleBackground(rawSubtitleBackground);
     if (readCount >= 41) m_stereoUpmixEnabled = (rawStereoUpmix != 0);
     if (readCount >= 42) m_phoneSpeakerEnabled = (rawPhoneSpeaker != 0);
+    if (readCount >= 43) m_castReceiverEnabled = (rawCastEnabled != 0);
+    if (readCount >= 44 && rawCastPort >= 1024 && rawCastPort <= 65535) m_castPort = rawCastPort;
+    if (readCount >= 45) m_castNativePlayerEnabled = (rawCastNativePlayer != 0);
 
     /* #233: Deep Blacks, Motion Smoothing and Match Video Rate moved to
      * Experimental, where everything starts off. A file from before that

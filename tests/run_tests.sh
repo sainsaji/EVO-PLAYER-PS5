@@ -94,6 +94,8 @@ SRCS=(
     "${CORE}/src/services/ReleaseName.cpp"
     "${REPO_ROOT}/tests/test_web_url.cpp"
     "${EVO}/src/evo_web_url.c"
+    "${REPO_ROOT}/tests/test_cast_dial.cpp"
+    "${EVO}/src/evo_cast_receiver.c"
 )
 
 # Version from the same file package-app.sh and release.yml use, rather than a

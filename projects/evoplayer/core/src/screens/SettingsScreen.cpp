@@ -75,6 +75,8 @@ enum class SettingKey : int {
     FoldersFirst,
     KeyboardInput,
     PhonePort,
+    PhoneCast,
+    CastNativePlayer,
     AskStream,
     AddonAutoPick,
     /* SYSTEM & DIAGNOSTICS */
@@ -182,6 +184,10 @@ const PreviewSpec kPreviews[] = {
      "The virtual keyboard is drawn by EVO. The native one is the PS5 system keyboard."},
     {SettingKey::PhonePort, EVO_RMLUI_PREVIEW_PORT,
      "EVO checks the port is free before it saves it. If it is busy at start-up, EVO tries the next nine and shows the one it got."},
+    {SettingKey::PhoneCast, EVO_RMLUI_PREVIEW_INFO,
+     "Allows casting YouTube from your phone directly to EVO Player (DIAL receiver on port 8765)."},
+    {SettingKey::CastNativePlayer, EVO_RMLUI_PREVIEW_INFO,
+     "Plays YouTube casts in EVO Player (up to 4K) using hardware decoding, instead of the 720p WebKit browser."},
     {SettingKey::AskStream, EVO_RMLUI_PREVIEW_ASK_STREAM,
      "Lets you choose the format and quality each time you open a live channel."},
     {SettingKey::ReportProblem, EVO_RMLUI_PREVIEW_REPORT,
@@ -221,7 +227,7 @@ const SettingKey kSubtitleKeys[] = {
 };
 const SettingKey kInterfaceKeys[] = {
     SettingKey::Theme, SettingKey::Lightbar, SettingKey::FoldersFirst,
-    SettingKey::KeyboardInput, SettingKey::PhonePort, SettingKey::AskStream, SettingKey::AddonAutoPick,
+    SettingKey::KeyboardInput, SettingKey::PhonePort, SettingKey::PhoneCast, SettingKey::CastNativePlayer, SettingKey::AskStream, SettingKey::AddonAutoPick,
 };
 const SettingKey kSystemKeys[] = {
     SettingKey::ReportProblem, SettingKey::ReportLastRun, SettingKey::DebugOverlay, SettingKey::DeveloperTools,
@@ -632,6 +638,16 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         break;
     }
 
+    case SettingKey::PhoneCast:
+        d = toggleDef(key, "PHONE CASTING (DIAL)", "CAST YOUTUBE FROM YOUR PHONE (PORT 8765)",
+                      "../icons/icon_tv.png", settings->isCastReceiverEnabled());
+        break;
+
+    case SettingKey::CastNativePlayer:
+        d = toggleDef(key, "CAST TO EVO PLAYER", "PLAY CAST IN NATIVE PLAYER (UP TO 4K)",
+                      "../icons/icon_play.png", settings->isCastNativePlayerEnabled());
+        break;
+
     case SettingKey::AskStream:
         d = toggleDef(key, "ASK WHICH LIVE STREAM", "PICK THE FORMAT AND QUALITY WHEN YOU OPEN A CHANNEL",
                       "../icons/icon_tv.png", settings->isAskStreamEnabled());
@@ -913,6 +929,14 @@ void toggleSetting(SettingKey key) {
             }
             sm->syncNavRail();
         }
+        break;
+    case SettingKey::PhoneCast:
+        st->setCastReceiverEnabled(!st->isCastReceiverEnabled());
+        toast("PHONE CASTING", st->isCastReceiverEnabled() ? "Receiver started (port 8765)" : "Receiver stopped");
+        break;
+    case SettingKey::CastNativePlayer:
+        st->setCastNativePlayerEnabled(!st->isCastNativePlayerEnabled());
+        toast("CAST PLAYER", st->isCastNativePlayerEnabled() ? "EVO Player (up to 4K)" : "System WebKit (720p)");
         break;
     case SettingKey::AskStream:        st->setAskStreamEnabled(!st->isAskStreamEnabled()); break;
     case SettingKey::AddonAutoPick:    st->setAddonAutoPickEnabled(!st->isAddonAutoPickEnabled()); break;

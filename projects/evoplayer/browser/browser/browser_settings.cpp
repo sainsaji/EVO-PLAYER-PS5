@@ -19,6 +19,9 @@ std::string BrowserSettings::user_agent_string() const {
         case UserAgentMode::MobileSafari:
             return "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
                    "(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+        case UserAgentMode::ChromecastTV:
+            return "Mozilla/5.0 (Linux; Android 12; Chromecast Build/STTE.221215.004) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36 CrKey/1.56.500000";
         case UserAgentMode::ProsperoPS5:
         default:
             return "Mozilla/5.0 (PlayStation; PlayStation 5/1.0) AppleWebKit/605.1.15 "
@@ -35,6 +38,7 @@ const char* user_agent_mode_name(UserAgentMode mode) {
         case UserAgentMode::DesktopChrome: return "Desktop (Chrome)";
         case UserAgentMode::DesktopSafari: return "Desktop (Safari)";
         case UserAgentMode::MobileSafari: return "Mobile (iPhone)";
+        case UserAgentMode::ChromecastTV: return "Smart TV (Chromecast)";
         case UserAgentMode::ProsperoPS5:
         default: return "PlayStation 5 (system)";
     }

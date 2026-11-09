@@ -530,7 +530,7 @@ static int tls_host_is_local(const char *host)
     return 0;
 }
 
-static SSL_CTX *evo_net_get_ssl_ctx(void)
+SSL_CTX *evo_net_get_ssl_ctx(void)
 {
     pthread_mutex_lock(&g_ssl_init_mutex);
     if (!g_ssl_ctx) {
@@ -1065,12 +1065,24 @@ static int execute_http(const char *method,
             build_err = 1;
         }
 
+        int has_content_type = 0;
+        if (headers && header_count > 0) {
+            for (int i = 0; i < header_count; i++) {
+                if (headers[i] && strncasecmp(headers[i], "Content-Type:", 13) == 0) {
+                    has_content_type = 1;
+                    break;
+                }
+            }
+        }
+
         if (!build_err && current_post_data) {
             size_t post_len = strlen(current_post_data);
-            if (dynbuf_append_fmt(&req_buf,
-                                  "Content-Type: application/json\r\n"
-                                  "Content-Length: %zu\r\n",
-                                  post_len) != 0) {
+            if (!has_content_type) {
+                if (dynbuf_append(&req_buf, "Content-Type: application/json\r\n", 32) != 0) {
+                    build_err = 1;
+                }
+            }
+            if (!build_err && dynbuf_append_fmt(&req_buf, "Content-Length: %zu\r\n", post_len) != 0) {
                 build_err = 1;
             }
         }

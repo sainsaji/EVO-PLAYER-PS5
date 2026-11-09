@@ -148,6 +148,7 @@ MEDIA_SRCS := \
     src/evo_usb_remote.c \
     src/evo_iobench.c \
     src/evo_pt_probe.c \
+    src/evo_cast_receiver.c \
     src/evo_webui.c \
     src/evo_jailbreak.c
 
@@ -228,6 +229,7 @@ CORE_SRCS := \
     core/src/services/NetworkStorageService.cpp \
     core/src/services/FileSystemBrowser.cpp \
     core/src/services/FileTransferService.cpp \
+    core/src/services/CastService.cpp \
     core/src/services/PlaybackController.cpp \
     core/src/audio/iec61937.cpp \
     core/src/audio/bitstream.cpp \
