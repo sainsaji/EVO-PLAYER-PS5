@@ -25,6 +25,7 @@
 #include "evo_audio_out.h"
 #include "evo_pt.h"
 #include "evo_audio_resample.h"
+#include "evo_controller_speaker.h"
 #include "evo_subtitle.h"
 #include "evo_vdec.h"
 #include "evo_adec.h"
@@ -275,6 +276,7 @@ packet_queue_clear(
     if (evo_pt_is_active()) {
         evo_pt_reset();
     }
+    evo_controller_speaker_flush();
 
     double decoder_seek_seconds =
         target_seconds;
@@ -369,6 +371,7 @@ packet_queue_clear(
         if (evo_pt_is_active()) {
             evo_pt_reset();
         }
+        evo_controller_speaker_flush();
 
         if (
             prospero_embedded_subtitle_ctx

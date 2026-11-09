@@ -53,7 +53,9 @@ enum class SettingKey : int {
     AudioDelay,
     NetworkBuffer,
     OutputChannels,
+    StereoUpmix,
     AudioPassthrough,
+    PhoneSpeaker,
     AudioLanguage,
     SurroundTest,
     NavigationSounds,
@@ -151,8 +153,12 @@ const PreviewSpec kPreviews[] = {
      "How far ahead network streams load. A bigger buffer rides out Wi-Fi drops but uses more memory, and very high bitrate files get less than you pick. Applies from the next file."},
     {SettingKey::OutputChannels, EVO_RMLUI_PREVIEW_CHANNELS,
      "Stereo mixes 5.1 and 7.1 down to two speakers or headphones."},
+    {SettingKey::StereoUpmix, EVO_RMLUI_PREVIEW_INFO,
+     "Extracts ambient sound and expands stereo tracks across your surround speakers (quadraphonic 4.0). Requires Output Channels set to Auto."},
     {SettingKey::AudioPassthrough, EVO_RMLUI_PREVIEW_PASSTHROUGH,
      "Sends Dolby and DTS untouched to your receiver over HDMI."},
+    {SettingKey::PhoneSpeaker, EVO_RMLUI_PREVIEW_INFO,
+     "Plays in-movie phone conversations and telephone voices through your DualSense controller speaker, just like in games."},
     {SettingKey::SurroundTest, EVO_RMLUI_PREVIEW_SURROUND,
      "Plays a tone through each speaker so you can check your layout."},
     {SettingKey::NavigationSounds, EVO_RMLUI_PREVIEW_NAV_SOUNDS, "A soft click when you move and press buttons."},
@@ -204,7 +210,8 @@ const SettingKey kVideoKeys[] = {
 };
 const SettingKey kAudioKeys[] = {
     SettingKey::VolumeBoost, SettingKey::AudioDelay,
-    SettingKey::OutputChannels, SettingKey::AudioPassthrough, SettingKey::AudioLanguage,
+    SettingKey::OutputChannels, SettingKey::StereoUpmix, SettingKey::AudioPassthrough,
+    SettingKey::PhoneSpeaker, SettingKey::AudioLanguage,
     SettingKey::SurroundTest, SettingKey::NavigationSounds,
 };
 const SettingKey kSubtitleKeys[] = {
@@ -453,6 +460,16 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
             d.opt_label[i] = settings->getAudioOutputChannelsName(static_cast<AudioOutputChannels>(i));
         break;
 
+    case SettingKey::StereoUpmix:
+        d = toggleDef(key, "UPMIX STEREO TO 4.0",
+                      "EXPANDS 2.0 STEREO TO 4.0 QUADRAPHONIC SURROUND",
+                      "../icons/icon_speaker.png", settings->isStereoUpmixEnabled());
+        if (settings->getAudioOutputChannels() != AudioOutputChannels::Auto) {
+            d.disabled = true;
+            d.detail = "ONLY AVAILABLE WHEN OUTPUT CHANNELS IS SET TO AUTO";
+        }
+        break;
+
     case SettingKey::AudioLanguage:
         d = valueDef(key, "AUDIO LANGUAGE", "THE TRACK A FILM STARTS WITH",
                      "../icons/icon_volume.png", kPreferredLanguageCount,
@@ -472,6 +489,16 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
     case SettingKey::AudioPassthrough:
         d = toggleDef(key, "AUDIO PASSTHROUGH", "BITSTREAM DOLBY & DTS TO RECEIVER OVER HDMI",
                       "../icons/icon_volume.png", settings->isAudioPassthroughEnabled());
+        break;
+
+    case SettingKey::PhoneSpeaker:
+        d = toggleDef(key, "CONTROLLER PHONE AUDIO",
+                      "ROUTES IN-MOVIE PHONE CALLS TO THE DUALSENSE SPEAKER",
+                      "../icons/icon_volume.png", settings->isPhoneSpeakerEnabled());
+        if (settings->isAudioPassthroughEnabled()) {
+            d.disabled = true;
+            d.detail = "ONLY AVAILABLE WHEN AUDIO PASSTHROUGH IS DISABLED";
+        }
         break;
 
     case SettingKey::SurroundTest:
@@ -873,6 +900,8 @@ void toggleSetting(SettingKey key) {
     switch (key) {
     case SettingKey::ResumePlayback:   st->setResumePlaybackEnabled(!st->isResumePlaybackEnabled()); break;
     case SettingKey::AudioPassthrough: st->setAudioPassthroughEnabled(!st->isAudioPassthroughEnabled()); break;
+    case SettingKey::StereoUpmix:      st->setStereoUpmixEnabled(!st->isStereoUpmixEnabled()); break;
+    case SettingKey::PhoneSpeaker:     st->setPhoneSpeakerEnabled(!st->isPhoneSpeakerEnabled()); break;
     case SettingKey::MatchVideoRate:   st->setMatchVideoRateEnabled(!st->isMatchVideoRateEnabled()); break;
     case SettingKey::WebBrowser:
         st->setWebBrowserEnabled(!st->isWebBrowserEnabled());

@@ -112,6 +112,10 @@ public:
 
     bool isAudioPassthroughEnabled() const override { return m_audioPassthroughEnabled; }
     void setAudioPassthroughEnabled(bool enabled) override { m_audioPassthroughEnabled = enabled; }
+    bool isStereoUpmixEnabled() const override { return m_stereoUpmixEnabled; }
+    void setStereoUpmixEnabled(bool enabled) override { m_stereoUpmixEnabled = enabled; }
+    bool isPhoneSpeakerEnabled() const override { return m_phoneSpeakerEnabled; }
+    void setPhoneSpeakerEnabled(bool enabled) override { m_phoneSpeakerEnabled = enabled; }
     bool isMatchVideoRateEnabled() const override { return m_matchVideoRate; }
     void setMatchVideoRateEnabled(bool enabled) override { m_matchVideoRate = enabled; }
     bool isWebBrowserEnabled() const override { return m_webBrowser; }
@@ -162,6 +166,8 @@ private:
     int m_audioDelayMs = 0;
     NetworkBuffer m_networkBuffer = NetworkBuffer::Sec30;
     bool m_audioPassthroughEnabled = false;
+    bool m_stereoUpmixEnabled = false;
+    bool m_phoneSpeakerEnabled = false;
     bool m_matchVideoRate = false;
     bool m_webBrowser = false;
     bool m_debugOverlayEnabled = false;

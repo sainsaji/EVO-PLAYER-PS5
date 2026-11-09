@@ -113,6 +113,7 @@ MEDIA_SRCS := \
     media/src/evo_audio_resample.c \
     media/src/evo_audio_gain.c \
     media/src/evo_audio_out.c \
+    media/src/evo_controller_speaker.c \
     media/src/evo_subtitle.c \
     media/src/evo_charset.c \
     media/src/evo_langname.c \

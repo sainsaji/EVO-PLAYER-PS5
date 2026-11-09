@@ -278,7 +278,7 @@ bool SettingsService::saveSettings() {
     }
 
     std::fprintf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
         0, // legacy dummy profile
         m_resumePlaybackEnabled ? 1 : 0,
         static_cast<int>(m_defaultViewMode),
@@ -318,7 +318,9 @@ bool SettingsService::saveSettings() {
         m_subtitleSize,                      // line 37 (#231 subtitle size: 0 small .. 3 extra large)
         m_subtitleColor,                     // line 38 (#231 subtitle colour)
         m_subtitleLift,                      // line 39 (#231 subtitle position)
-        m_subtitleBackground                 // line 40 (#231 subtitle background)
+        m_subtitleBackground,                // line 40 (#231 subtitle background)
+        m_stereoUpmixEnabled ? 1 : 0,        // line 41 (stereo 4.0 upmix)
+        m_phoneSpeakerEnabled ? 1 : 0        // line 42 (controller phone audio)
     );
 
     if (std::fclose(file) != 0)
@@ -374,9 +376,11 @@ bool SettingsService::loadSettings() {
     int rawSubtitleColor = 0;
     int rawSubtitleLift = 0;
     int rawSubtitleBackground = 0;
+    int rawStereoUpmix = 0;
+    int rawPhoneSpeaker = 0;
 
     int readCount = std::fscanf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
         &rawProfile,
         &rawResume,
         &rawViewMode,
@@ -416,7 +420,9 @@ bool SettingsService::loadSettings() {
         &rawSubtitleSize,
         &rawSubtitleColor,
         &rawSubtitleLift,
-        &rawSubtitleBackground
+        &rawSubtitleBackground,
+        &rawStereoUpmix,
+        &rawPhoneSpeaker
     );
 
     std::fclose(file);
@@ -522,6 +528,8 @@ bool SettingsService::loadSettings() {
     if (readCount >= 38) setSubtitleColor(rawSubtitleColor);
     if (readCount >= 39) setSubtitleLift(rawSubtitleLift);
     if (readCount >= 40) setSubtitleBackground(rawSubtitleBackground);
+    if (readCount >= 41) m_stereoUpmixEnabled = (rawStereoUpmix != 0);
+    if (readCount >= 42) m_phoneSpeakerEnabled = (rawPhoneSpeaker != 0);
 
     /* #233: Deep Blacks, Motion Smoothing and Match Video Rate moved to
      * Experimental, where everything starts off. A file from before that

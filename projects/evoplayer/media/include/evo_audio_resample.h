@@ -48,6 +48,10 @@ SwrContext *prospero_audio_resampler_ctx(void);
 /* Sample rate the context was last configured for (0 until configured). */
 int prospero_audio_resampler_input_rate(void);
 
+/* 4.0 quadraphonic upmix for stereo sources on 8-channel output. */
+void prospero_audio_resampler_set_upmix(int enabled);
+int  prospero_audio_resampler_get_upmix(void);
+
 #ifdef __cplusplus
 }
 #endif

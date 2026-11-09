@@ -14,6 +14,7 @@
 #include "evo_pt.h"
 #include "evo_audio_resample.h"
 #include "evo_audio_gain.h"
+#include "evo_controller_speaker.h"
 #include "evo_packet_queue.h"
 #include "evo_vdec.h"
 #include "evo_sweep.h"
@@ -632,6 +633,7 @@ void PlaybackController::stopPlayback() {
         audio_thread_running = 0;
         pthread_join(audio_thread, nullptr);
     }
+    evo_controller_speaker_stop();
 
     packet_queue_clear(&video_packet_queue);
     packet_queue_clear(&audio_packet_queue);
@@ -1432,11 +1434,13 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                      * source is downmixed to 2.0 by libswresample. */
                     bool forceStereo = false;
                     bool passthroughEnabled = false;
+                    bool stereoUpmix = false;
                     VolumeBoost volumeBoost = VolumeBoost::Off;
                     int audioDelayMs = 0;
                     if (ISettingsService *settings = Application::getInstance().getSettingsService()) {
                         forceStereo = settings->getAudioOutputChannels() == AudioOutputChannels::Stereo;
                         passthroughEnabled = settings->isAudioPassthroughEnabled();
+                        stereoUpmix = settings->isStereoUpmixEnabled();
                         volumeBoost = settings->getVolumeBoost();
                         audioDelayMs = settings->getAudioDelayMs();
                     }
@@ -1447,6 +1451,7 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                         handle = evo_pt_open(aStream->codecpar->codec_id);
                         if (handle >= 1) {
                             evo_audio_channels = chCount;
+                            prospero_audio_resampler_set_upmix(0);
                             evo_boot_log("audio: bitstream passthrough active (%s, %dch, handle=%d)",
                                          evo_pt_active_codec_name(), chCount, handle);
                         } else {
@@ -1455,21 +1460,24 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                     }
 
                     if (handle < 1) {
-                        if (chCount > 2 && !forceStereo) {
+                        bool wantSurround = (chCount > 2 || (chCount <= 2 && stereoUpmix)) && !forceStereo;
+                        if (wantSurround) {
                             handle = sceAudioOutOpen(0xFF, 0, 0,
                                                      AUDIO_BLOCK_SAMPLES, 48000,
                                                      2 /* S16_8CH */);
                             if (handle >= 1) {
                                 evo_audio_channels = 8;
+                                prospero_audio_resampler_set_upmix(stereoUpmix && (chCount <= 2));
                             } else {
                                 toast("AUDIO",
                                       "surround port refused, falling back to stereo");
                             }
                         }
 
-                        /* Surround refused (or a genuinely stereo source): stereo. */
+                        /* Surround refused (or a genuinely stereo source without upmix): stereo. */
                         if (handle < 1) {
                             evo_audio_channels = 2;
+                            prospero_audio_resampler_set_upmix(0);
                             handle = sceAudioOutOpen(0xFF, 0, 0,
                                                      AUDIO_BLOCK_SAMPLES, 48000,
                                                      1 /* S16_STEREO */);
@@ -1477,9 +1485,10 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                     }
 
                     audio_handle = handle;
-                    evo_boot_log("audio: source %dch -> port %dch (output=%s, pt=%d, boost=%d%%, delay=%dms) handle=%d",
+                    evo_boot_log("audio: source %dch -> port %dch (output=%s, pt=%d, upmix=%d, boost=%d%%, delay=%dms) handle=%d",
                                  chCount, evo_audio_channels,
                                  forceStereo ? "stereo" : "auto", evo_pt_is_active(),
+                                 prospero_audio_resampler_get_upmix(),
                                  evo_audio_gain_get_boost(), evo_av_get_audio_delay_ms(), handle);
 
                     if (audio_handle < 1) {
@@ -1777,6 +1786,11 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     }
     if (audio_thread_running) {
         evo_thread_create(&audio_thread, audio_output_thread, nullptr);
+        bool phoneSpeaker = false;
+        if (ISettingsService *settings = Application::getInstance().getSettingsService()) {
+            phoneSpeaker = settings->isPhoneSpeakerEnabled() && !settings->isAudioPassthroughEnabled();
+        }
+        evo_controller_speaker_start(phoneSpeaker);
     }
 
     m_playbackFsm.postEvent(PlaybackEvent::Play);

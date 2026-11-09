@@ -31,6 +31,7 @@
 #include "evo_boot_log.h"
 #include "evo_speaker_cal.h"
 #include "evo_audio_gain.h"
+#include "evo_controller_speaker.h"
 
 #ifndef SCREEN_PLAYER
 #define SCREEN_PLAYER 2
@@ -302,7 +303,22 @@ void *audio_output_thread(void *arg) {
                     sceAudioOutOutput(audio_handle, pt_silence_buf);
                 }
             } else if (audio_queue_count > 0) {
-                sceAudioOutOutput(audio_handle, audio_queue[audio_queue_read]);
+                int16_t *cur_buf = audio_queue[audio_queue_read];
+                evo_controller_speaker_feed(cur_buf, AUDIO_BLOCK_SAMPLES, evo_audio_channels, audio_clock_seconds);
+                if (evo_controller_speaker_is_phone_active()) {
+                    if (evo_audio_channels >= 6) {
+                        /* Duck center dialogue channel on main speakers so phone voice comes from controller */
+                        for (int i = 0; i < AUDIO_BLOCK_SAMPLES; ++i) {
+                            cur_buf[i * evo_audio_channels + 2] = (int16_t)(cur_buf[i * evo_audio_channels + 2] * 0.15f);
+                        }
+                    } else if (evo_audio_channels == 2) {
+                        /* Stereo source: duck main speakers so controller speaker dialogue dominates */
+                        for (int i = 0; i < AUDIO_BLOCK_SAMPLES * 2; ++i) {
+                            cur_buf[i] = (int16_t)(cur_buf[i] * 0.20f);
+                        }
+                    }
+                }
+                sceAudioOutOutput(audio_handle, cur_buf);
                 audio_samples_played += AUDIO_BLOCK_SAMPLES;
                 audio_clock_seconds = (double)audio_samples_played / 48000.0;
                 audio_queue_read = (audio_queue_read + 1) % AUDIO_QUEUE_BLOCKS;

@@ -256,6 +256,10 @@ int  sceVideoOutGetResolutionStatus(int32_t handle,
 
 #define SCE_AUDIO_OUT_PORT_TYPE_MAIN              0
 #define SCE_AUDIO_OUT_PORT_TYPE_BGM               1
+#define SCE_AUDIO_OUT_PORT_TYPE_VOICE             2
+#define SCE_AUDIO_OUT_PORT_TYPE_PERSONAL          3
+#define SCE_AUDIO_OUT_PORT_TYPE_PADSPK            4
+#define SCE_AUDIO_OUT_PORT_TYPE_AUX               127
 
 /* Parameter word passed to sceAudioOutOpen: format | (rate << 8). The classic
  * S16 stereo layout is format 0. */

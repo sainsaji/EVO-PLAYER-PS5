@@ -41,7 +41,17 @@ static enum AVSampleFormat prospero_audio_input_format =
 
 static int prospero_audio_input_rate = 0;
 static int prospero_audio_output_channels = 0;
+static int prospero_audio_upmix_enabled = 0;
+static int prospero_audio_was_upmixing = 0;
 static const int prospero_audio_output_rate = PROSPERO_AUDIO_OUTPUT_RATE;
+
+void prospero_audio_resampler_set_upmix(int enabled) {
+    prospero_audio_upmix_enabled = enabled ? 1 : 0;
+}
+
+int prospero_audio_resampler_get_upmix(void) {
+    return prospero_audio_upmix_enabled;
+}
 
 
 void prospero_audio_resampler_destroy(void) {
@@ -62,6 +72,7 @@ void prospero_audio_resampler_destroy(void) {
 
     prospero_audio_input_rate = 0;
     prospero_audio_output_channels = 0;
+    prospero_audio_was_upmixing = 0;
 }
 
 
@@ -133,6 +144,11 @@ int prospero_audio_resampler_configure(
         );
     }
 
+    int is_upmixing =
+        prospero_audio_upmix_enabled &&
+        (out_channels == 8) &&
+        (input_layout.nb_channels == 2);
+
     int unchanged =
         prospero_audio_swr &&
         prospero_audio_input_layout_valid &&
@@ -143,6 +159,8 @@ int prospero_audio_resampler_configure(
         /* #117: the port can be 2.0 or 7.1 for the same source. */
         prospero_audio_output_channels ==
             out_channels &&
+        prospero_audio_was_upmixing ==
+            is_upmixing &&
         av_channel_layout_compare(
             &prospero_audio_input_layout,
             &input_layout
@@ -219,6 +237,32 @@ int prospero_audio_resampler_configure(
         0
     );
 
+    if (is_upmixing) {
+        /* 4.0 Quadraphonic Upmix from Stereo (2ch -> 8ch port):
+         * Output channels:
+         * 0 FL  : 1.0 * L
+         * 1 FR  : 1.0 * R
+         * 2 FC  : 0 (phantom center)
+         * 3 LFE : 0
+         * 4 BL  : 0.5 * L - 0.5 * R (Hafler surround ambience)
+         * 5 BR  : -0.5 * L + 0.5 * R
+         * 6 SL  : 0.5 * L - 0.5 * R (mirrored for 7.1 systems)
+         * 7 SR  : -0.5 * L + 0.5 * R
+         */
+        double matrix[16];
+        memset(matrix, 0, sizeof(matrix));
+        matrix[0 * 2 + 0] = 1.0;  matrix[0 * 2 + 1] = 0.0;
+        matrix[1 * 2 + 0] = 0.0;  matrix[1 * 2 + 1] = 1.0;
+        matrix[2 * 2 + 0] = 0.0;  matrix[2 * 2 + 1] = 0.0;
+        matrix[3 * 2 + 0] = 0.0;  matrix[3 * 2 + 1] = 0.0;
+        matrix[4 * 2 + 0] = 0.5;  matrix[4 * 2 + 1] = -0.5;
+        matrix[5 * 2 + 0] = -0.5; matrix[5 * 2 + 1] = 0.5;
+        matrix[6 * 2 + 0] = 0.5;  matrix[6 * 2 + 1] = -0.5;
+        matrix[7 * 2 + 0] = -0.5; matrix[7 * 2 + 1] = 0.5;
+
+        swr_set_matrix(prospero_audio_swr, matrix, 2);
+    }
+
     if (swr_init(prospero_audio_swr) < 0) {
         av_channel_layout_uninit(
             &input_layout
@@ -227,6 +271,8 @@ int prospero_audio_resampler_configure(
         prospero_audio_resampler_destroy();
         return 0;
     }
+
+    prospero_audio_was_upmixing = is_upmixing;
 
     if (
         av_channel_layout_copy(
