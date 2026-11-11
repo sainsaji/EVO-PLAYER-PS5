@@ -119,7 +119,15 @@ def sm_both():
 
 
 def slot(text):
-    s, r = text.rfind(STARTED), text.rfind(RELEASED)
+    # The image being unmounted after the last start frees the slot just as a
+    # release does: a process cannot outlive its own mounted image. A console
+    # shutdown / rest cycle does exactly that ("[SHUTDOWN] cleanup" unmounts
+    # every image) and logs no release, which left the slot RESIDENT for good
+    # and blocked every deploy and launch (2026-11-11). At ShadowMount startup
+    # the unmount comes BEFORE the title's next start, so it never hides a
+    # live start.
+    s = text.rfind(STARTED)
+    r = max(text.rfind(RELEASED), text.rfind(IMAGE_CHECKED))
     if s < 0:
         return "FREE" if r >= 0 else "UNKNOWN"
     return "FREE" if r > s else "RESIDENT"
