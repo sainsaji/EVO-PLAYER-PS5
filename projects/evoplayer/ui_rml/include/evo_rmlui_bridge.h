@@ -209,7 +209,12 @@ enum {
     EVO_RMLUI_PREVIEW_SUB_SIZE,     /* #231: sample line at the chosen size */
     EVO_RMLUI_PREVIEW_SUB_TEXT_COLOUR, /* #231: sample line in the chosen colour */
     EVO_RMLUI_PREVIEW_SUB_LIFT,     /* #231: sample line at the chosen height */
-    EVO_RMLUI_PREVIEW_SUB_BACKGROUND /* #231: box, shadow, outline or none */
+    EVO_RMLUI_PREVIEW_SUB_BACKGROUND, /* #231: box, shadow, outline or none */
+    EVO_RMLUI_PREVIEW_UPMIX,        /* stereo front pair vs 4.0: rear speakers lit */
+    EVO_RMLUI_PREVIEW_PHONE_AUDIO,  /* film's phone line -> DualSense speaker */
+    EVO_RMLUI_PREVIEW_PHONE_CAST,   /* phone's cast list finds EVO on the TV */
+    EVO_RMLUI_PREVIEW_CAST_PLAYER,  /* cast plays in EVO (full, 1080p60) vs browser (720p) */
+    EVO_RMLUI_PREVIEW_YT_LINK       /* pasted link -> EVO plays the whole video */
 };
 
 #define EVO_RMLUI_PREVIEW_CHOICES 12  /* EVO_THEME_MAX, the longest list */

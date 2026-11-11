@@ -157,11 +157,11 @@ const PreviewSpec kPreviews[] = {
      "How far ahead network streams load. A bigger buffer rides out Wi-Fi drops but uses more memory, and very high bitrate files get less than you pick. Applies from the next file."},
     {SettingKey::OutputChannels, EVO_RMLUI_PREVIEW_CHANNELS,
      "Stereo mixes 5.1 and 7.1 down to two speakers or headphones."},
-    {SettingKey::StereoUpmix, EVO_RMLUI_PREVIEW_INFO,
+    {SettingKey::StereoUpmix, EVO_RMLUI_PREVIEW_UPMIX,
      "Extracts ambient sound and expands stereo tracks across your surround speakers (quadraphonic 4.0). Requires Output Channels set to Auto."},
     {SettingKey::AudioPassthrough, EVO_RMLUI_PREVIEW_PASSTHROUGH,
      "Sends Dolby and DTS untouched to your receiver over HDMI."},
-    {SettingKey::PhoneSpeaker, EVO_RMLUI_PREVIEW_INFO,
+    {SettingKey::PhoneSpeaker, EVO_RMLUI_PREVIEW_PHONE_AUDIO,
      "Plays in-movie phone conversations and telephone voices through your DualSense controller speaker, just like in games."},
     {SettingKey::SurroundTest, EVO_RMLUI_PREVIEW_SURROUND,
      "Plays a tone through each speaker so you can check your layout."},
@@ -186,11 +186,11 @@ const PreviewSpec kPreviews[] = {
      "The virtual keyboard is drawn by EVO. The native one is the PS5 system keyboard."},
     {SettingKey::PhonePort, EVO_RMLUI_PREVIEW_PORT,
      "EVO checks the port is free before it saves it. If it is busy at start-up, EVO tries the next nine and shows the one it got."},
-    {SettingKey::PhoneCast, EVO_RMLUI_PREVIEW_INFO,
+    {SettingKey::PhoneCast, EVO_RMLUI_PREVIEW_PHONE_CAST,
      "Allows casting YouTube from your phone directly to EVO Player (DIAL receiver on port 8765)."},
-    {SettingKey::CastNativePlayer, EVO_RMLUI_PREVIEW_INFO,
+    {SettingKey::CastNativePlayer, EVO_RMLUI_PREVIEW_CAST_PLAYER,
      "Plays YouTube casts in EVO Player, full length up to 1080p60, instead of the 720p WebKit browser."},
-    {SettingKey::YouTubeLink, EVO_RMLUI_PREVIEW_INFO,
+    {SettingKey::YouTubeLink, EVO_RMLUI_PREVIEW_YT_LINK,
      "Paste or type a YouTube link (or use the phone page) and EVO plays the whole video, up to 1080p60."},
     {SettingKey::AskStream, EVO_RMLUI_PREVIEW_ASK_STREAM,
      "Lets you choose the format and quality each time you open a live channel."},
@@ -328,12 +328,12 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
 
     case SettingKey::ResumePlayback:
         d = toggleDef(key, "RESUME PLAYBACK", "REMEMBER PLAYBACK POSITION",
-                      "../icons/icon_resume.png", settings->isResumePlaybackEnabled());
+                      "../icons/icon_rotate_ccw.png", settings->isResumePlaybackEnabled());
         break;
 
     case SettingKey::SkipSegments:
         d = valueDef(key, "SKIP INTROS & CREDITS", "OFF NEVER OFFERS A SKIP; ASK SHOWS A BUTTON; AUTO SKIPS ONCE",
-                     "../icons/icon_resume.png", 3,
+                     "../icons/icon_skip_forward.png", 3,
                      static_cast<int>(settings->getSkipSegments()));
         for (int i = 0; i < 3; ++i)
             d.opt_label[i] = settings->getSkipSegmentsName(static_cast<SkipSegments>(i));
@@ -356,7 +356,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
 
     case SettingKey::DeepBlacks:
         d = valueDef(key, "DEEP BLACKS", "PULLS ELEVATED SHADOWS TO TRUE OLED BLACK",
-                     "../icons/icon_sparkles.png", 3, static_cast<int>(settings->getDeepBlacks()));
+                     "../icons/icon_moon.png", 3, static_cast<int>(settings->getDeepBlacks()));
         for (int i = 0; i < 3; ++i)
             d.opt_label[i] = settings->getDeepBlacksName(static_cast<DeepBlacks>(i));
         break;
@@ -376,7 +376,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
     case SettingKey::MotionSmoothing:
         d = valueDef(key, "MOTION SMOOTHING",
                      "24 -> 60 FPS ON THE GPU - SOFT EDGES AND HALOES AROUND FAST MOTION",
-                     "../icons/icon_activity.png", 3, static_cast<int>(settings->getMotionSmoothing()));
+                     "../icons/icon_wind.png", 3, static_cast<int>(settings->getMotionSmoothing()));
         for (int i = 0; i < 3; ++i)
             d.opt_label[i] = settings->getMotionSmoothingName(static_cast<MotionSmoothing>(i));
         /*
@@ -403,7 +403,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
     case SettingKey::MatchVideoRate:
         d = toggleDef(key, "MATCH VIDEO FRAME RATE",
                       "24P / 50 HZ OUTPUT DURING PLAYBACK - FALLS BACK TO 120 HZ OR 60 HZ",
-                      "../icons/icon_gauge.png", settings->isMatchVideoRateEnabled());
+                      "../icons/icon_refresh_cw.png", settings->isMatchVideoRateEnabled());
         break;
 
     case SettingKey::WebBrowser:
@@ -420,7 +420,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
 
     case SettingKey::HdrPeak:
         d = valueDef(key, "HDR PEAK", "FIT HDR & DOLBY VISION TO YOUR TV'S PEAK - OFF LEAVES IT TO THE TV",
-                     "../icons/icon_sun.png", 6, static_cast<int>(settings->getHdrPeak()));
+                     "../icons/icon_sun_medium.png", 6, static_cast<int>(settings->getHdrPeak()));
         for (int i = 0; i < 6; ++i)
             d.opt_label[i] = settings->getHdrPeakName(static_cast<HdrPeak>(i));
         break;
@@ -428,7 +428,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
     /* #199: sized when a network file opens, so it applies from the next file. */
     case SettingKey::NetworkBuffer:
         d = valueDef(key, "NETWORK BUFFER", "HOW FAR AHEAD STREAMS LOAD. HIGH BITRATE FILES GET LESS",
-                     "../icons/icon_gauge.png", 4,
+                     "../icons/icon_hard_drive_download.png", 4,
                      static_cast<int>(settings->getNetworkBuffer()));
         for (int i = 0; i < 4; ++i)
             d.opt_label[i] = settings->getNetworkBufferName(static_cast<NetworkBuffer>(i));
@@ -455,7 +455,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         if (opt < 0) opt = 0;
         if (opt > 20) opt = 20;
         d = valueDef(key, "AUDIO DELAY", "SHIFTS SOUND AGAINST PICTURE TO FIX LIP-SYNC",
-                     "../icons/icon_volume.png", 21, opt);
+                     "../icons/icon_timer.png", 21, opt);
         for (int i = 0; i < 21; ++i)
             d.opt_label[i] = kLabels[i];
         break;
@@ -464,7 +464,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
     /* #117: read when a file opens, so it applies from the next file. */
     case SettingKey::OutputChannels:
         d = valueDef(key, "OUTPUT CHANNELS", "STEREO DOWNMIXES 5.1 & 7.1 TO 2.0",
-                     "../icons/icon_volume.png", 2,
+                     "../icons/icon_speaker.png", 2,
                      static_cast<int>(settings->getAudioOutputChannels()));
         for (int i = 0; i < 2; ++i)
             d.opt_label[i] = settings->getAudioOutputChannelsName(static_cast<AudioOutputChannels>(i));
@@ -473,7 +473,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
     case SettingKey::StereoUpmix:
         d = toggleDef(key, "UPMIX STEREO TO 4.0",
                       "EXPANDS 2.0 STEREO TO 4.0 QUADRAPHONIC SURROUND",
-                      "../icons/icon_speaker.png", settings->isStereoUpmixEnabled());
+                      "../icons/icon_expand.png", settings->isStereoUpmixEnabled());
         if (settings->getAudioOutputChannels() != AudioOutputChannels::Auto) {
             d.disabled = true;
             d.detail = "ONLY AVAILABLE WHEN OUTPUT CHANNELS IS SET TO AUTO";
@@ -482,7 +482,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
 
     case SettingKey::AudioLanguage:
         d = valueDef(key, "AUDIO LANGUAGE", "THE TRACK A FILM STARTS WITH",
-                     "../icons/icon_volume.png", kPreferredLanguageCount,
+                     "../icons/icon_languages.png", kPreferredLanguageCount,
                      static_cast<int>(settings->getAudioLanguage()));
         for (int i = 0; i < kPreferredLanguageCount; ++i)
             d.opt_label[i] = settings->getPreferredLanguageName(static_cast<PreferredLanguage>(i));
@@ -490,7 +490,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
 
     case SettingKey::SubtitleLanguage:
         d = valueDef(key, "SUBTITLE LANGUAGE", "EMBEDDED FIRST, THEN ONLINE FROM YOUR ADDONS",
-                     "../icons/icon_subtitles.png", kPreferredLanguageCount,
+                     "../icons/icon_languages.png", kPreferredLanguageCount,
                      static_cast<int>(settings->getSubtitleLanguage()));
         for (int i = 0; i < kPreferredLanguageCount; ++i)
             d.opt_label[i] = settings->getPreferredLanguageName(static_cast<PreferredLanguage>(i));
@@ -498,13 +498,13 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
 
     case SettingKey::AudioPassthrough:
         d = toggleDef(key, "AUDIO PASSTHROUGH", "BITSTREAM DOLBY & DTS TO RECEIVER OVER HDMI",
-                      "../icons/icon_volume.png", settings->isAudioPassthroughEnabled());
+                      "../icons/icon_cable.png", settings->isAudioPassthroughEnabled());
         break;
 
     case SettingKey::PhoneSpeaker:
         d = toggleDef(key, "CONTROLLER PHONE AUDIO",
                       "ROUTES IN-MOVIE PHONE CALLS TO THE DUALSENSE SPEAKER",
-                      "../icons/icon_volume.png", settings->isPhoneSpeakerEnabled());
+                      "../icons/icon_phone_call.png", settings->isPhoneSpeakerEnabled());
         if (settings->isAudioPassthroughEnabled()) {
             d.disabled = true;
             d.detail = "ONLY AVAILABLE WHEN AUDIO PASSTHROUGH IS DISABLED";
@@ -513,17 +513,17 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
 
     case SettingKey::SurroundTest:
         d = actionDef(key, "SURROUND SOUND TEST", "5.1 & 7.1 SPEAKER CHANNEL VERIFICATION",
-                      "../icons/icon_speaker.png", "OPEN");
+                      "../icons/icon_radio.png", "OPEN");
         break;
 
     case SettingKey::NavigationSounds:
         d = toggleDef(key, "NAVIGATION SOUNDS", "AUDIO FEEDBACK ON D-PAD & BUTTONS",
-                      "../icons/icon_speaker.png", settings->isSoundFeedbackEnabled());
+                      "../icons/icon_mouse_pointer_click.png", settings->isSoundFeedbackEnabled());
         break;
 
     case SettingKey::AutoSubtitles:
         d = toggleDef(key, "AUTO SUBTITLES", "AUTOMATICALLY LOAD SUBTITLES ON PLAYBACK",
-                      "../icons/icon_subtitles.png", settings->isAutoSubtitlesEnabled());
+                      "../icons/icon_captions.png", settings->isAutoSubtitlesEnabled());
         break;
 
     case SettingKey::SubtitleFont: {
@@ -543,7 +543,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         int v = settings->getSubtitleSize();
         if (v < 0 || v >= 4) v = 1;
         d = valueDef(key, "SUBTITLE SIZE", "HOW BIG SUBTITLES ARE",
-                     "../icons/icon_type.png", 4, v);
+                     "../icons/icon_a_large_small.png", 4, v);
         for (int i = 0; i < 4; ++i) d.opt_label[i] = kSizes[i];
         break;
     }
@@ -553,7 +553,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         int v = settings->getSubtitleColor();
         if (v < 0 || v >= 4) v = 0;
         d = valueDef(key, "SUBTITLE COLOUR", "THE MAIN LINE OF DIALOGUE",
-                     "../icons/icon_palette.png", 4, v);
+                     "../icons/icon_paintbrush.png", 4, v);
         for (int i = 0; i < 4; ++i) d.opt_label[i] = kColours[i];
         break;
     }
@@ -563,7 +563,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         int v = settings->getSubtitleLift();
         if (v < 0 || v >= 3) v = 0;
         d = valueDef(key, "SUBTITLE POSITION", "RAISE SUBTITLES FROM THE BOTTOM",
-                     "../icons/icon_subtitles.png", 3, v);
+                     "../icons/icon_move_vertical.png", 3, v);
         for (int i = 0; i < 3; ++i) d.opt_label[i] = kLifts[i];
         break;
     }
@@ -573,7 +573,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         int v = settings->getSubtitleBackground();
         if (v < 0 || v >= 4) v = 0;
         d = valueDef(key, "SUBTITLE BACKGROUND", "KEEPS TEXT READABLE ON BRIGHT SCENES",
-                     "../icons/icon_subtitles.png", 4, v);
+                     "../icons/icon_square.png", 4, v);
         for (int i = 0; i < 4; ++i) d.opt_label[i] = kBackgrounds[i];
         break;
     }
@@ -585,7 +585,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         int secPos = settings->getSecondarySubtitlePosition();
         if (secPos < 0 || secPos >= 2) secPos = 0;
         d = valueDef(key, "SECONDARY SUBTITLE POSITION", "WHERE THE SECOND LINE OF DIALOGUE GOES",
-                     "../icons/icon_subtitles.png", 2, secPos);
+                     "../icons/icon_rows_2.png", 2, secPos);
         for (int i = 0; i < 2; ++i) d.opt_label[i] = kSecondaryPos[i];
         break;
     }
@@ -595,7 +595,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         int secColor = settings->getSecondarySubtitleColor();
         if (secColor < 0 || secColor >= 3) secColor = 0;
         d = valueDef(key, "SECONDARY SUBTITLE COLOUR", "KEEPS THE TWO LINES APART",
-                     "../icons/icon_palette.png", 3, secColor);
+                     "../icons/icon_paint_bucket.png", 3, secColor);
         for (int i = 0; i < 3; ++i) d.opt_label[i] = kSecondaryColor[i];
         break;
     }
@@ -614,12 +614,12 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
 
     case SettingKey::Lightbar:
         d = toggleDef(key, "CONTROLLER LIGHTBAR", "DUALSENSE LIGHT FOLLOWS THE THEME ACCENT",
-                      "../icons/icon_gamepad.png", settings->isLightbarFeedbackEnabled());
+                      "../icons/icon_lightbulb.png", settings->isLightbarFeedbackEnabled());
         break;
 
     case SettingKey::FoldersFirst:
         d = toggleDef(key, "FOLDERS FIRST", "USB FILE BROWSER SORTING",
-                      "../icons/icon_folder.png", settings->isSortFoldersFirst());
+                      "../icons/icon_folder_tree.png", settings->isSortFoldersFirst());
         break;
 
     case SettingKey::KeyboardInput: {
@@ -638,33 +638,33 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         d = actionDef(key, "PHONE & LOG PORT",
                       actual > 0 ? "PHONE KEYBOARD LINK AND LIVE LOG - CROSS TO CHANGE"
                                  : "NO FREE PORT - CROSS TO SET A NEW ONE",
-                      "../icons/icon_keyboard.png", s_port_badge);
+                      "../icons/icon_smartphone.png", s_port_badge);
         break;
     }
 
     case SettingKey::PhoneCast:
         d = toggleDef(key, "PHONE CASTING (DIAL)", "CAST YOUTUBE FROM YOUR PHONE (PORT 8765)",
-                      "../icons/icon_tv.png", settings->isCastReceiverEnabled());
+                      "../icons/icon_cast.png", settings->isCastReceiverEnabled());
         break;
 
     case SettingKey::CastNativePlayer:
         d = toggleDef(key, "CAST TO EVO PLAYER", "PLAY CAST IN NATIVE PLAYER (UP TO 1080P)",
-                      "../icons/icon_play.png", settings->isCastNativePlayerEnabled());
+                      "../icons/icon_monitor_play.png", settings->isCastNativePlayerEnabled());
         break;
 
     case SettingKey::YouTubeLink:
         d = actionDef(key, "PLAY A YOUTUBE LINK", "PASTE OR TYPE A LINK - PLAYS FULL LENGTH (UP TO 1080P60)",
-                      "../icons/icon_tv.png", "");
+                      "../icons/icon_link.png", "");
         break;
 
     case SettingKey::AskStream:
         d = toggleDef(key, "ASK WHICH LIVE STREAM", "PICK THE FORMAT AND QUALITY WHEN YOU OPEN A CHANNEL",
-                      "../icons/icon_tv.png", settings->isAskStreamEnabled());
+                      "../icons/icon_list_video.png", settings->isAskStreamEnabled());
         break;
 
     case SettingKey::AddonAutoPick:
         d = toggleDef(key, "PLAY BEST ADDON STREAM", "REMUX, DOLBY VISION / HDR, CACHED FIRST - LIST IN OPTIONS",
-                      "../icons/icon_tv.png", settings->isAddonAutoPickEnabled());
+                      "../icons/icon_wand_sparkles.png", settings->isAddonAutoPickEnabled());
         break;
 
     case SettingKey::ReportProblem:
@@ -680,7 +680,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
                       : prev == EVO_PREV_RUN_ENDED ? "THE LAST RUN ENDED WITHOUT CLOSING"
                       : prev == EVO_PREV_RUN_CLOSED ? "THE LAST RUN CLOSED NORMALLY"
                                                      : "NO EARLIER RUN SAVED",
-                      "../icons/icon_report.png", prev == EVO_PREV_RUN_NONE ? "NONE" : "SAVE");
+                      "../icons/icon_clock.png", prev == EVO_PREV_RUN_NONE ? "NONE" : "SAVE");
         break;
     }
 
@@ -696,7 +696,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
 
     /* #103: read-only - the badge is what evo_hw_probe() found at boot. */
     case SettingKey::ConsoleModel:
-        d = actionDef(key, "CONSOLE", "DETECTED HARDWARE MODEL", "../icons/icon_tv.png",
+        d = actionDef(key, "CONSOLE", "DETECTED HARDWARE MODEL", "../icons/icon_monitor.png",
                       evo_hw_is_ps5_pro() ? "PS5 PRO"
                           : evo_hw_model_known() ? "PS5" : "NOT DETECTED");
         break;
@@ -733,7 +733,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
                           "%s - PS5 PRO: GET THE PRO BUILD FOR +1.2 GIB", s_mem_badge);
         else
             std::snprintf(s_mem_sub, sizeof s_mem_sub, "%s", s_mem_badge);
-        d = actionDef(key, "MEMORY", s_mem_sub, "../icons/icon_activity.png",
+        d = actionDef(key, "MEMORY", s_mem_sub, "../icons/icon_memory_stick.png",
                       s_mem_badge);
         break;
     }
@@ -775,7 +775,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         }
         for (char* c = s_upd_sub; *c; ++c)
             if (*c >= 'a' && *c <= 'z') *c = static_cast<char>(*c - 'a' + 'A');
-        d = actionDef(key, "SOFTWARE UPDATE", s_upd_sub, "../icons/icon_activity.png", "UPDATE");
+        d = actionDef(key, "SOFTWARE UPDATE", s_upd_sub, "../icons/icon_download.png", "UPDATE");
         break;
     }
 

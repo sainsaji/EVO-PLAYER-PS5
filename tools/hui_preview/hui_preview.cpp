@@ -787,6 +787,18 @@ int main(int argc, char **argv)
         {"settings_pv_sub_font_condensed", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "sub_font_condensed"); }},
         {"settings_pv_info_resume", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "info_resume"); }},
         {"settings_pv_info_quit", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "info_quit"); }},
+        /* 2026-11: whole sections with the list collapsed, and the cast / audio previews. */
+        {"settings_audio_full", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "audio_full"); }},
+        {"settings_interface_full", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "iface_keyboard"); }},
+        {"settings_pv_upmix_off", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "upmix_off"); }},
+        {"settings_pv_upmix_on", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "upmix_on"); }},
+        {"settings_pv_phone_audio_off", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "phone_audio_off"); }},
+        {"settings_pv_phone_audio_on", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "phone_audio_on"); }},
+        {"settings_pv_phone_cast_off", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "iface_phonecast_off"); }},
+        {"settings_pv_phone_cast_on", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "iface_phonecast_on"); }},
+        {"settings_pv_cast_player_off", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "iface_cast_off"); }},
+        {"settings_pv_cast_player_on", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "iface_cast_on"); }},
+        {"settings_pv_yt_link", 3, [&] { clear_focus(); fill_settings_pv_fixture(sp, "iface_ytlink"); }},
         {"browser", 2, [&] { clear_focus(); bp.rows[3].is_focused = 1; bp.cursor_index = 3; }},
         {"browser_sources", 2, [&] { clear_focus(); bp.sidebar_focused = 1; bp.sidebar_index = 3; }},
         {"browser_menu", 2, [&] { clear_focus(); bp.rows[3].is_focused = 1; bp.cursor_index = 3;

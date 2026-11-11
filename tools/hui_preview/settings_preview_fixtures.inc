@@ -309,6 +309,51 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
             {EVO_RMLUI_ROW_VALUE, "DEFAULT ASPECT RATIO", "HOW VIDEO FILLS THE SCREEN", "../icons/icon_aspect.png", "FIT", 0, 0, "", {"FIT", "FILL", "STRETCH"}, 0, -1, false}
         });
     }
+    /* ---- 2026-11 design round: full real sections (layout trial) and the new previews ---- */
+    else if (kind.rfind("audio_full", 0) == 0 || kind.rfind("upmix_", 0) == 0 || kind.rfind("phone_audio_", 0) == 0)
+    {
+        const bool up_focus = kind == "audio_full" || kind.rfind("upmix_", 0) == 0;
+        const bool on = kind.find("_off") == std::string::npos;
+        const int up_pv = up_focus ? EVO_RMLUI_PREVIEW_UPMIX : 0;
+        const int ph_pv = up_focus ? 0 : EVO_RMLUI_PREVIEW_PHONE_AUDIO;
+        build_preview_section(p, 1, "Audio", "OUTPUT CHANNELS, SPEAKERS & SOUNDS", {
+            {EVO_RMLUI_ROW_VALUE, "VOLUME BOOST", "RAISE QUIET FILES. LOUD PASSAGES CLIP, NEVER WRAP", "../icons/icon_volume.png", "OFF", 0, 0, "", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "AUDIO DELAY", "SHIFTS SOUND AGAINST PICTURE TO FIX LIP-SYNC", "../icons/icon_volume.png", "0 ms", 0, 0, "", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "OUTPUT CHANNELS", "STEREO DOWNMIXES 5.1 & 7.1 TO 2.0", "../icons/icon_volume.png", "AUTO", 0, 0, "", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_TOGGLE, "UPMIX STEREO TO 4.0", "EXPANDS 2.0 STEREO TO 4.0 QUADRAPHONIC SURROUND", "../icons/icon_speaker.png", "", up_focus ? on : 1, up_pv,
+             "Extracts ambient sound and expands stereo tracks across your surround speakers (quadraphonic 4.0). Requires Output Channels set to Auto.", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_TOGGLE, "AUDIO PASSTHROUGH", "BITSTREAM DOLBY & DTS TO RECEIVER OVER HDMI", "../icons/icon_volume.png", "", 0, 0, "", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_TOGGLE, "CONTROLLER PHONE AUDIO", "ROUTES IN-MOVIE PHONE CALLS TO THE DUALSENSE SPEAKER", "../icons/icon_volume.png", "", up_focus ? 1 : on, ph_pv,
+             "Plays in-movie phone conversations and telephone voices through your DualSense controller speaker, just like in games.", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "AUDIO LANGUAGE", "THE TRACK A FILM STARTS WITH", "../icons/icon_volume.png", "AUTO", 0, 0, "", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_ACTION, "SURROUND SOUND TEST", "5.1 & 7.1 SPEAKER CHANNEL VERIFICATION", "../icons/icon_speaker.png", "", 0, 0, "", {}, 0, -1, false},
+        });
+    }
+    else if (kind.rfind("iface_", 0) == 0)
+    {
+        /* iface_keyboard: the row the screenshots showed cut; iface_cast_on/off, iface_phonecast_on/off, iface_ytlink */
+        const bool on = kind.find("_off") == std::string::npos;
+        int kb = 0, pc = 0, cp = 0, yt = 0;
+        if (kind == "iface_keyboard") kb = EVO_RMLUI_PREVIEW_KEYBOARD;
+        else if (kind.rfind("iface_phonecast", 0) == 0) pc = EVO_RMLUI_PREVIEW_PHONE_CAST;
+        else if (kind.rfind("iface_cast", 0) == 0) cp = EVO_RMLUI_PREVIEW_CAST_PLAYER;
+        else yt = EVO_RMLUI_PREVIEW_YT_LINK;
+        build_preview_section(p, 3, "Interface & Storage", "THEMES, CONTROLS & BROWSING", {
+            {EVO_RMLUI_ROW_VALUE, "THEME", "COLOR PALETTE & ACCENTS", "../icons/icon_palette.png", "MIDNIGHT", 0, 0, "", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_TOGGLE, "CONTROLLER LIGHTBAR", "DUALSENSE LIGHT FOLLOWS THE THEME ACCENT", "../icons/icon_gamepad.png", "", 0, 0, "", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_TOGGLE, "FOLDERS FIRST", "USB FILE BROWSER SORTING", "../icons/icon_folder.png", "", 1, 0, "", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "KEYBOARD INPUT", "TEXT ENTRY METHOD", "../icons/icon_keyboard.png", "VIRTUAL KEYBOARD", 0, kb,
+             "The virtual keyboard is drawn by EVO. The native one is the PS5 system keyboard.", {"VIRTUAL KEYBOARD", "NATIVE PS5 IME"}, 0, -1, false},
+            {EVO_RMLUI_ROW_ACTION, "PHONE & LOG PORT", "PHONE KEYBOARD LINK AND LIVE LOG - CROSS TO CHANGE", "../icons/icon_keyboard.png", "9780", 0, 0, "", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_TOGGLE, "PHONE CASTING (DIAL)", "CAST YOUTUBE FROM YOUR PHONE (PORT 8765)", "../icons/icon_tv.png", "", pc ? on : 1, pc,
+             "Allows casting YouTube from your phone directly to EVO Player (DIAL receiver on port 8765).", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_TOGGLE, "CAST TO EVO PLAYER", "PLAY CAST IN NATIVE PLAYER (UP TO 1080P)", "../icons/icon_tv.png", "", cp ? on : 1, cp,
+             "Plays YouTube casts in EVO Player, full length up to 1080p60, instead of the 720p WebKit browser.", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_ACTION, "PLAY A YOUTUBE LINK", "PASTE OR TYPE A LINK - PLAYS FULL LENGTH (UP TO 1080P60)", "../icons/icon_tv.png", "", 0, yt,
+             "Paste or type a YouTube link (or use the phone page) and EVO plays the whole video, up to 1080p60.", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_TOGGLE, "ASK WHICH LIVE STREAM", "PICK THE FORMAT AND QUALITY WHEN YOU OPEN A CHANNEL", "../icons/icon_tv.png", "", 1, 0, "", {}, 0, -1, false},
+        });
+    }
     else if (kind == "info_quit")
     {
         build_preview_section(p, 4, "System & Diagnostics", "DIAGNOSTICS & SYSTEM MANAGEMENT", {

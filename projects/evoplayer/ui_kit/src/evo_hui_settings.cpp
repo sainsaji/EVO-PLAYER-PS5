@@ -49,6 +49,18 @@ const SectionDef kSections[6] = {
 
 } // namespace
 
+namespace
+{
+float row_h(int kind) { return kind == EVO_RMLUI_ROW_OPTION ? 56.0f : 72.0f; }
+} // namespace
+
+/* While the rows have focus the section list shrinks to its icons (88 px) and
+ * the pane slides left into the freed room, so a row keeps ~880 px next to the
+ * preview card instead of ~520 and its title and detail are not cut. Left on
+ * the D-pad focuses the list again and it opens back up. */
+float SettingsScreen::side_w() const { return 440.0f + (88.0f - 440.0f) * collapse_.value; }
+float SettingsScreen::pane_left() const { return kLeft + 480.0f + (112.0f - 480.0f) * collapse_.value; }
+
 void SettingsScreen::set(const evo_rmlui_settings_params_t &p)
 {
     auto str = [](const char *s) { return std::string(s ? s : ""); };
@@ -143,7 +155,7 @@ float SettingsScreen::row_top(int index) const
     float y_pos = start_y;
     for (int i = 0; i < index; ++i)
     {
-        y_pos += (rows_[i].kind == EVO_RMLUI_ROW_OPTION ? 56.0f : 72.0f) + 8.0f;
+        y_pos += row_h(rows_[i].kind) + 8.0f;
     }
     return y_pos;
 }
@@ -160,8 +172,16 @@ void SettingsScreen::update(float dt)
         toggles_[i].update(dt, 18.0f);
     }
 
+    collapse_.target = params_.sidebar_focused ? 0.0f : 1.0f;
+    if (!collapse_snapped_)
+    {
+        collapse_.snap(collapse_.target);
+        collapse_snapped_ = true;
+    }
+    collapse_.update(dt, 16.0f);
+
     int sec_active = std::clamp(params_.section_active, 0, 5);
-    Rect sidebar_target{kLeft, 210.0f + sec_active * (64.0f + 8.0f), 440.0f, 64.0f};
+    Rect sidebar_target{kLeft, 210.0f + sec_active * (64.0f + 8.0f), side_w(), 64.0f};
     if (!sidebar_cursor_snapped_)
     {
         sidebar_cursor_.snap(sidebar_target);
@@ -185,13 +205,13 @@ void SettingsScreen::update(float dt)
     if (!rows_.empty())
     {
         const float content_bottom = row_top(static_cast<int>(rows_.size()) - 1) +
-                                     ((rows_.back().kind == EVO_RMLUI_ROW_OPTION) ? 56.0f : 72.0f);
+                                     row_h(rows_.back().kind);
         max_scroll = std::max(0.0f, content_bottom - kRowsBottom);
     }
 
     if (focus_idx >= 0)
     {
-        float h = (rows_[focus_idx].kind == EVO_RMLUI_ROW_OPTION) ? 56.0f : 72.0f;
+        float h = row_h(rows_[focus_idx].kind);
         /* Scroll the least that keeps the focused row inside the card. */
         const float top = row_top(focus_idx);
         float want = scroll_.target;
@@ -209,7 +229,7 @@ void SettingsScreen::update(float dt)
         scroll_.target = std::clamp(want, 0.0f, max_scroll);
         if (!row_cursor_snapped_)
             scroll_.snap(scroll_.target);
-        row_target = {kLeft + 480.0f + 24.0f, top - scroll_.target, 1824.0f - (kLeft + 480.0f) - 48.0f - (preview_.kind ? kPreviewW + 24.0f : 0.0f), h};
+        row_target = {pane_left() + 24.0f, top - scroll_.target, 1824.0f - pane_left() - 48.0f - (preview_.kind ? kPreviewW + 24.0f : 0.0f), h};
     }
     else
     {
@@ -309,9 +329,14 @@ void SettingsScreen::draw(DrawList &list, const Context &ctx) const
 
     draw_backdrop(list, ctx, 0, 0.0f);
 
-    list.push_opacity(tween::stagger(age_, 0, 0.05f, 0.5f));
-    draw_page_title(list, ctx, "Settings", "Preferences", kLeft, 0.0f, 440.0f);
-    list.pop_opacity();
+    /* Collapsed: the pane moves over the title's place; the section heading in
+     * the pane already names where you are. */
+    if (collapse_.value < 0.99f)
+    {
+        list.push_opacity(tween::stagger(age_, 0, 0.05f, 0.5f) * (1.0f - collapse_.value));
+        draw_page_title(list, ctx, "Settings", "Preferences", kLeft, 0.0f, 440.0f);
+        list.pop_opacity();
+    }
 
     Rect sc = sidebar_cursor_.value();
     if (params_.sidebar_focused)
@@ -323,7 +348,7 @@ void SettingsScreen::draw(DrawList &list, const Context &ctx) const
     for (int i = 0; i < 6; ++i)
     {
         float y = 210.0f + static_cast<float>(i) * 72.0f;
-        Rect r{kLeft, y, 440.0f, 64.0f};
+        Rect r{kLeft, y, side_w(), 64.0f};
 
         bool active = (i == params_.section_active);
         bool focused = params_.sidebar_focused && active;
@@ -338,14 +363,21 @@ void SettingsScreen::draw(DrawList &list, const Context &ctx) const
         uint32_t icon = ctx.textures.icon(kSections[i].icon);
         if (icon)
         {
-            list.image(icon, {r.x + 24, r.y + 16, 32, 32}, ::hui::gfx::kFullUv, ink);
+            const float ix = r.x + 24.0f + ((r.w - 32.0f) * 0.5f - 24.0f) * collapse_.value;
+            list.image(icon, {ix, r.y + 16, 32, 32}, ::hui::gfx::kFullUv, ink);
         }
-        ui::text(list, focused ? fonts.semibold : fonts.regular,
-                 fit(focused ? fonts.semibold : fonts.regular, kSections[i].label, 26, r.w - 72.0f - 24.0f),
-                 r.x + 72, r.cy() + 9, 26, ink);
+        const float label_a = std::max(0.0f, 1.0f - collapse_.value * 2.0f);
+        if (label_a > 0.0f)
+        {
+            list.push_opacity(label_a);
+            ui::text(list, focused ? fonts.semibold : fonts.regular,
+                     fit(focused ? fonts.semibold : fonts.regular, kSections[i].label, 26, r.w - 72.0f - 24.0f),
+                     r.x + 72, r.cy() + 9, 26, ink);
+            list.pop_opacity();
+        }
     }
 
-    Rect pane{kLeft + 480.0f, 130.0f, 1824.0f - (kLeft + 480.0f), 820.0f};
+    Rect pane{pane_left(), 130.0f, 1824.0f - pane_left(), 820.0f};
     list.shadow(pane, page::kRadiusCard, 40, Color::rgb(0x000000, 0.4f));
     list.rounded_rect(pane, page::kRadiusCard, p.surface);
     list.bordered_rect(pane, page::kRadiusCard, Color::rgb(0x000000, 0.0f), 1.0f, p.border);
@@ -378,7 +410,7 @@ void SettingsScreen::draw(DrawList &list, const Context &ctx) const
         float row_in = tween::stagger(section_age_, static_cast<int>(i), 0.05f, 0.4f);
         list.push_opacity(row_in * (rows_[i].is_disabled ? 0.4f : 1.0f));
 
-        float h = (rows_[i].kind == EVO_RMLUI_ROW_OPTION) ? 56.0f : 72.0f;
+        float h = row_h(rows_[i].kind);
         Rect r{pane.x + 24.0f, row_y(static_cast<int>(i)), pane.w - 48.0f - (preview_.kind ? kPreviewW + 24.0f : 0.0f), h};
 
         if (rows_[i].is_focused && !params_.sidebar_focused)
@@ -420,7 +452,7 @@ bool SettingsScreen::focus(FocusInfo *out) const
                 out->text = kSections[params_.section_active].label;
                 out->index = params_.section_active + 1;
                 out->total = 6;
-                out->rect = {kLeft, 210.0f + static_cast<float>(params_.section_active) * 72.0f, 440.0f, 64.0f};
+                out->rect = {kLeft, 210.0f + static_cast<float>(params_.section_active) * 72.0f, side_w(), 64.0f};
                 for (int i = 0; i < 6; ++i)
                 {
                     out->focusable.push_back({"section-" + std::to_string(i), kSections[i].label});

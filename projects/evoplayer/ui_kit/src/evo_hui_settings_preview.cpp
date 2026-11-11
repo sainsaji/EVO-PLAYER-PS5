@@ -1254,7 +1254,9 @@ float draw_living_room_audio(DrawList &list, const Context &ctx, const Area &a, 
 
     for (const auto &spk : speakers)
     {
-        const bool lit = (layout >= spk.min_layout);
+        /* layout 3 = 4.0 upmix: front pair plus the surround/rear set; no
+         * centre or subwoofer, those get nothing from a stereo source. */
+        const bool lit = layout == 3 ? (spk.label[0] != 'C' && !spk.is_sub) : (layout >= spk.min_layout);
         const float bw = spk.is_sub ? 34.0f : 28.0f;
         const float bh = spk.is_sub ? 34.0f : 28.0f;
         const Rect box_r{spk.x - bw * 0.5f, spk.y - bh * 0.5f, bw, bh};
@@ -2024,6 +2026,234 @@ void draw_debug_overlay(DrawList &list, const Context &ctx, const Rect &box, con
 
 } // namespace
 
+/* The benefit text, but never into the DETAILS block at the card's foot
+ * (its divider sits 134 px above the bottom): as many lines as fit. */
+void benefit_fit(DrawList &list, const Context &ctx, const Area &a, float y, const std::string &text)
+{
+    const float limit = a.box.y + a.box.h - 150.0f;
+    const int lines = static_cast<int>((limit - y) / 28.0f) + 1;
+    if (lines > 0)
+        ui::paragraph(list, ctx.fonts.regular, text, a.x, y, 20, a.w, 28, ctx.palette.text_faint, std::min(lines, 5));
+}
+
+/* A one-line caption centred under a picture. */
+void caption(DrawList &list, const Context &ctx, const Area &a, float y, const std::string &text, bool accent)
+{
+    ui::text(list, ctx.fonts.semibold, ctx.fonts.semibold.font->fit(text, 18, a.w), a.x + a.w * 0.5f, y, 18,
+             accent ? ctx.palette.accent : ctx.palette.text_muted, Align::center);
+}
+
+/* A small labelled box for flow pictures; lit = the active path. */
+Rect flow_box(DrawList &list, const Context &ctx, const Rect &r, const std::string &label, bool lit, int size = 16)
+{
+    const Color col = lit ? ctx.palette.accent : ctx.palette.text_muted;
+    list.rounded_rect(r, 10, col.with_alpha(lit ? 0.22f : 0.06f));
+    list.bordered_rect(r, 10, Color::rgb(0, 0), lit ? 2.0f : 1.0f, lit ? col : kWhite.with_alpha(0.16f));
+    ui::text(list, ctx.fonts.semibold, ctx.fonts.semibold.font->fit(label, static_cast<float>(size), r.w - 12.0f), r.cx(),
+             r.cy() + size * 0.36f, static_cast<float>(size), lit ? kWhite : ctx.palette.text_faint, Align::center);
+    return r;
+}
+
+/* A horizontal arrow from x0 to x1; dashes travel along it when lit. */
+void flow_arrow(DrawList &list, const Context &ctx, float x0, float x1, float y, bool lit)
+{
+    const Color col = lit ? ctx.palette.accent : kWhite.with_alpha(0.18f);
+    list.line(x0, y, x1 - 6.0f, y, 2.0f, col);
+    list.triangle({x1 - 8.0f, y - 6.0f, 8.0f, 12.0f}, col, 0.0f, 1.5708f);
+    if (lit)
+    {
+        const float t = std::fmod(ctx.time * 0.8f, 1.0f);
+        list.circle(x0 + (x1 - x0 - 10.0f) * t, y, 4.0f, kWhite);
+    }
+}
+
+/* ---- UPMIX STEREO TO 4.0: the room with the front pair, then the rear lit. ---- */
+void draw_upmix(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const bool on = pv.index == 1;
+    const float room_bottom = draw_living_room_audio(list, ctx, a, on ? 3 : 0);
+    caption(list, ctx, a, room_bottom + 30.0f,
+            on ? "4.0: the ambience fills the rear, voices stay in front" : "Stereo: only the front pair plays", on);
+    const float y = chips(list, ctx, a, room_bottom + 54.0f, chip_labels(pv), pv.index);
+    benefit_fit(list, ctx, a, y + 24.0f, pv.benefit);
+}
+
+/* A DualSense seen from above: body, grips, touchpad, the speaker grille in the middle. */
+void dualsense(DrawList &list, const Context &ctx, float cx, float cy, bool lit)
+{
+    const Color body = Color::rgb(0xe9edf5), dark = Color::rgb(0x1b2130);
+    /* Sound fans out of the top, behind the body (arc angle 0 = straight up). */
+    if (lit)
+        for (int w = 0; w < 3; ++w)
+        {
+            const float pulse = std::fmod(ctx.time * 1.2f + w / 3.0f, 1.0f);
+            list.arc(cx, cy + 19.0f, 60.0f + pulse * 48.0f, 3.0f, -0.75f, 1.5f, ctx.palette.accent.with_alpha(1.0f - pulse));
+        }
+    list.rounded_rect({cx - 92.0f, cy - 34.0f, 184.0f, 64.0f}, 30.0f, body);
+    list.rounded_rect({cx - 96.0f, cy - 10.0f, 56.0f, 70.0f}, 28.0f, body);
+    list.rounded_rect({cx + 40.0f, cy - 10.0f, 56.0f, 70.0f}, 28.0f, body);
+    list.rounded_rect({cx - 44.0f, cy - 32.0f, 88.0f, 38.0f}, 10.0f, Color::rgb(0xd6dbe6));
+    list.circle(cx - 60.0f, cy + 4.0f, 9.0f, dark);
+    list.circle(cx + 60.0f, cy + 4.0f, 9.0f, dark);
+    list.circle(cx - 30.0f, cy + 26.0f, 11.0f, dark);
+    list.circle(cx + 30.0f, cy + 26.0f, 11.0f, dark);
+    for (int gy = 0; gy < 2; ++gy)
+        for (int gx = 0; gx < 5; ++gx)
+            list.circle(cx - 12.0f + gx * 6.0f, cy + 16.0f + gy * 6.0f, 1.8f, lit ? ctx.palette.accent : Color::rgb(0x9aa3b5));
+}
+
+/* ---- CONTROLLER PHONE AUDIO: a film's phone line plays on the controller. ---- */
+void draw_phone_audio(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const bool on = pv.index == 1;
+    const ui::Fonts &fonts = ctx.fonts;
+    const float fw = a.w, fh = fw * 9.0f / 16.0f * 0.52f;
+    Rect frame{a.x, a.top, fw, fh};
+    mock_scene(list, frame, 0.6f, false);
+    frame_border(list, ctx, frame, false);
+    /* The SDH subtitle that marks the call. */
+    const std::string line = "[ON PHONE] Where are you right now?";
+    const float lw = fonts.semibold.measure(line, 20) + 28.0f;
+    Rect sub{frame.cx() - lw * 0.5f, frame.y + frame.h - 50.0f, lw, 36.0f};
+    list.rounded_rect(sub, 8, Color::rgb(0x000000, 0.72f));
+    ui::text(list, fonts.semibold, line, sub.cx(), sub.cy() + 7.0f, 20, kWhite, Align::center);
+    tag(list, ctx, frame, "SUBTITLES ON", false);
+
+    const float cy = frame.y + frame.h + 100.0f;
+    dualsense(list, ctx, a.x + a.w * 0.5f, cy, on);
+    caption(list, ctx, a, cy + 84.0f, on ? "The caller's voice plays on the controller" : "Off: the call plays on the TV with the rest", on);
+    const float y = chips(list, ctx, a, cy + 100.0f, chip_labels(pv), pv.index);
+    benefit_fit(list, ctx, a, y + 24.0f, pv.benefit);
+}
+
+/* A phone outline with a little video tile and the cast list over it. */
+void phone_with_cast_list(DrawList &list, const Context &ctx, const Rect &ph, bool found)
+{
+    const ui::Fonts &fonts = ctx.fonts;
+    list.rounded_rect(ph, 22, Color::rgb(0x11151f));
+    list.bordered_rect(ph, 22, Color::rgb(0, 0), 2.0f, kWhite.with_alpha(0.35f));
+    Rect video{ph.x + 10.0f, ph.y + 26.0f, ph.w - 20.0f, (ph.w - 20.0f) * 9.0f / 16.0f};
+    mock_scene(list, video, 0.3f, false);
+    Rect sheet{ph.x + 8.0f, video.y + video.h + 16.0f, ph.w - 16.0f, ph.y + ph.h - 10.0f - (video.y + video.h + 16.0f)};
+    list.rounded_rect(sheet, 12, Color::rgb(0x232a3a));
+    ui::text(list, fonts.semibold, "Cast to", sheet.x + 12.0f, sheet.y + 26.0f, 14, ctx.palette.text_muted);
+    Rect item{sheet.x + 8.0f, sheet.y + 38.0f, sheet.w - 16.0f, 34.0f};
+    if (found)
+    {
+        list.rounded_rect(item, 8, ctx.palette.accent.with_alpha(0.25f));
+        list.bordered_rect(item, 8, Color::rgb(0, 0), 1.5f, ctx.palette.accent);
+        ui::text(list, fonts.semibold, "EVO Player", item.x + 12.0f, item.cy() + 6.0f, 16, kWhite);
+    }
+    else
+        ui::text(list, fonts.regular, "No devices", item.x + 12.0f, item.cy() + 6.0f, 15, ctx.palette.text_faint);
+}
+
+/* A TV with EVO's mark on the screen (or dark when nothing is coming). */
+void tv_with_evo(DrawList &list, const Context &ctx, const Rect &tv, bool lit, const std::string &label)
+{
+    list.rounded_rect(tv, 10, Color::rgb(0x0d1018));
+    list.bordered_rect(tv, 10, Color::rgb(0, 0), 2.0f, lit ? ctx.palette.accent : kWhite.with_alpha(0.25f));
+    list.rounded_rect({tv.cx() - 30.0f, tv.y + tv.h, 60.0f, 8.0f}, 3, Color::rgb(0x2a3140));
+    if (lit)
+    {
+        list.circle(tv.cx(), tv.cy() - 10.0f, 22.0f, ctx.palette.accent.with_alpha(0.25f));
+        list.triangle({tv.cx() - 7.0f, tv.cy() - 22.0f, 20.0f, 24.0f}, ctx.palette.accent, 0.0f, 1.5708f);
+    }
+    ui::text(list, ctx.fonts.semibold, label, tv.cx(), tv.y + tv.h - 16.0f, 15, lit ? kWhite : ctx.palette.text_faint, Align::center);
+}
+
+/* ---- PHONE CASTING (DIAL): the YouTube app's cast list finds EVO. ---- */
+void draw_phone_cast(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const bool on = pv.index == 1;
+    Rect ph{a.x + 10.0f, a.top, 150.0f, 268.0f};
+    phone_with_cast_list(list, ctx, ph, on);
+    Rect tv{a.x + a.w - 250.0f, a.top + 70.0f, 250.0f, 150.0f};
+    tv_with_evo(list, ctx, tv, on, on ? "EVO PLAYER" : "NOT LISTED");
+    /* the cast hop: dotted arc from the phone's list to the TV */
+    const float x0 = ph.x + ph.w + 14.0f, x1 = tv.x - 14.0f, y = tv.cy();
+    for (float x = x0; x < x1; x += 14.0f)
+    {
+        const float t = (x - x0) / (x1 - x0);
+        const float yy = y - std::sin(t * 3.14159265f) * 40.0f;
+        const bool dot_lit = on && std::fmod(ctx.time * 0.9f, 1.0f) >= t - 0.12f && std::fmod(ctx.time * 0.9f, 1.0f) <= t + 0.12f;
+        list.circle(x, yy, dot_lit ? 4.5f : 3.0f, on ? (dot_lit ? kWhite : ctx.palette.accent) : kWhite.with_alpha(0.15f));
+    }
+    caption(list, ctx, a, ph.y + ph.h + 34.0f, on ? "EVO shows up in the YouTube app's cast list" : "Off: phones on your network cannot see EVO", on);
+    const float yc = chips(list, ctx, a, ph.y + ph.h + 58.0f, chip_labels(pv), pv.index);
+    benefit_fit(list, ctx, a, yc + 24.0f, pv.benefit);
+}
+
+/* ---- CAST TO EVO PLAYER: EVO's own player vs the system browser. ---- */
+void draw_cast_player(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const bool on = pv.index == 1;
+    const ui::Fonts &fonts = ctx.fonts;
+    const Palette &p = ctx.palette;
+    struct Lane { bool lit; const char *dest; const char *what; float fill; const char *len; };
+    const Lane lanes[2] = {{on, "EVO PLAYER", "1080p60  ·  whole video", 1.0f, "10:34"},
+                           {!on, "WEB BROWSER", "720p  ·  YouTube TV page", 1.0f, "10:34"}};
+    float y = a.top;
+    for (const Lane &l : lanes)
+    {
+        Rect row{a.x, y, a.w, 104.0f};
+        list.rounded_rect(row, 12, kWhite.with_alpha(0.04f));
+        frame_border(list, ctx, row, l.lit);
+        Rect phone{row.x + 16.0f, row.cy() - 30.0f, 36.0f, 60.0f};
+        list.rounded_rect(phone, 8, Color::rgb(0x11151f));
+        list.bordered_rect(phone, 8, Color::rgb(0, 0), 1.5f, l.lit ? p.accent : kWhite.with_alpha(0.25f));
+        flow_arrow(list, ctx, phone.x + phone.w + 10.0f, phone.x + phone.w + 64.0f, row.cy(), l.lit);
+        Rect dest{phone.x + phone.w + 74.0f, row.y + 18.0f, row.x + row.w - 16.0f - (phone.x + phone.w + 74.0f), 68.0f};
+        list.rounded_rect(dest, 10, l.lit ? p.accent.with_alpha(0.16f) : kWhite.with_alpha(0.03f));
+        ui::text(list, fonts.semibold, l.dest, dest.x + 14.0f, dest.y + 26.0f, 18, l.lit ? kWhite : p.text_faint);
+        ui::text(list, fonts.regular, l.what, dest.x + 14.0f, dest.y + 50.0f, 15, l.lit ? p.text_muted : p.text_faint);
+        y += 104.0f + 14.0f;
+    }
+    caption(list, ctx, a, y + 16.0f, on ? "On: casts play in EVO, controls as usual" : "Off: casts open in the PS5 browser", true);
+    const float yc = chips(list, ctx, a, y + 40.0f, chip_labels(pv), pv.index);
+    benefit_fit(list, ctx, a, yc + 24.0f, pv.benefit);
+}
+
+/* ---- PLAY A YOUTUBE LINK: a pasted link becomes the whole video in EVO. ---- */
+void draw_yt_link(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const ui::Fonts &fonts = ctx.fonts;
+    const Palette &p = ctx.palette;
+    /* the link field, with a blinking caret */
+    Rect field{a.x, a.top, a.w, 52.0f};
+    list.rounded_rect(field, 10, kWhite.with_alpha(0.06f));
+    list.bordered_rect(field, 10, Color::rgb(0, 0), 1.5f, p.accent);
+    const std::string url = "https://youtu.be/aqz-KE-bpKQ";
+    ui::text(list, fonts.mono, url, field.x + 16.0f, field.cy() + 7.0f, 19, kWhite);
+    if (std::fmod(ctx.time, 1.0f) < 0.55f)
+    {
+        const float cx = field.x + 16.0f + fonts.mono.measure(url, 19) + 3.0f;
+        list.rounded_rect({cx, field.cy() - 12.0f, 2.0f, 24.0f}, 1, kWhite);
+    }
+    /* down to the player */
+    const float ax = a.x + a.w * 0.5f, ay0 = field.y + field.h + 8.0f, ay1 = ay0 + 34.0f;
+    list.line(ax, ay0, ax, ay1 - 6.0f, 2.0f, p.accent);
+    list.triangle({ax - 6.0f, ay1 - 8.0f, 12.0f, 8.0f}, p.accent, 0.0f, 3.14159265f);
+    /* the player frame: playing the whole video */
+    const float fw = a.w, fh = fw * 9.0f / 16.0f * 0.78f;
+    Rect frame{a.x, ay1 + 6.0f, fw, fh};
+    mock_scene(list, frame, 0.4f, false);
+    frame_border(list, ctx, frame, true);
+    tag(list, ctx, frame, "1080p60", true);
+    tag_right(list, ctx, frame, "WHOLE VIDEO", false);
+    const float t = 0.15f + 0.8f * std::fmod(ctx.time * 0.06f, 1.0f);
+    Rect bar{frame.x + 16.0f, frame.y + frame.h - 34.0f, frame.w - 32.0f, 6.0f};
+    list.rounded_rect(bar, 3, kWhite.with_alpha(0.3f));
+    list.rounded_rect({bar.x, bar.y, bar.w * t, bar.h}, 3, p.accent);
+    ui::text(list, fonts.mono, "10:34", bar.x + bar.w, bar.y - 8.0f, 15, kWhite, Align::right);
+    caption(list, ctx, a, frame.y + frame.h + 32.0f, "Or paste it on your phone: <ps5>:9780/input", false);
+}
+
 void draw_settings_preview(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
 {
     switch (pv.kind)
@@ -2111,6 +2341,21 @@ void draw_settings_preview(DrawList &list, const Context &ctx, const Rect &box, 
         break;
     case EVO_RMLUI_PREVIEW_REPORT:
         draw_report(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_UPMIX:
+        draw_upmix(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_PHONE_AUDIO:
+        draw_phone_audio(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_PHONE_CAST:
+        draw_phone_cast(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_CAST_PLAYER:
+        draw_cast_player(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_YT_LINK:
+        draw_yt_link(list, ctx, box, pv);
         break;
     default: /* INFO and every kind that has no drawing yet */
         draw_info(list, ctx, box, pv);

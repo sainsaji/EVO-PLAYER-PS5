@@ -72,6 +72,12 @@ class SettingsScreen
 
     hui::tween::Spring toggles_[EVO_RMLUI_SETTINGS_ROWS];
     hui::tween::Spring scroll_;
+    /* 0 = the section list at full width (sidebar focused), 1 = icons only
+     * (the rows have focus), so row text is not cut short by the preview. */
+    hui::tween::Spring collapse_;
+    bool collapse_snapped_ = false;
+    float side_w() const;
+    float pane_left() const;
 };
 
 } // namespace evo::kit
