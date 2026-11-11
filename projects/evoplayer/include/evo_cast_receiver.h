@@ -86,6 +86,12 @@ int  evo_cast_page_watch_active(void);
  * Returns 0 on success, -1 on failure. */
 int evo_cast_resolve_youtube(const char *video_id, char *out_url, size_t url_cap, char *out_title, size_t title_cap);
 
+/* Play a YouTube link full length (evo_yt_link.c), from any thread: hands
+ * "v=<id>&full=1" to CastService's launch callback. 0 if it was handed over,
+ * -1 if the text holds no video id. Used by POST /cast/url and the phone
+ * page's YouTube box (evo_log_server.c). */
+int evo_cast_play_youtube_link(const char *link);
+
 #ifdef __cplusplus
 }
 #endif

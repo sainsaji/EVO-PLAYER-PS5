@@ -8,6 +8,7 @@
 #include "evo_boot_log.h"
 #include "evo_data_path.h"
 #include "evo_net.h"
+#include "evo_yt_link.h"
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -749,6 +750,19 @@ static void handle_dial_client(int cfd, const char *local_ip, int port)
             local_ip, port, xlen, xml_body);
 
         (void)write(cfd, resp, (size_t)rlen2);
+        close(cfd);
+        return;
+    }
+
+    /* Route: POST /cast/url - body is a YouTube link (or bare id) to play in
+     * full: `curl -d "https://youtu.be/<id>" http://<ps5>:<port>/cast/url`.
+     * Goes through the launch callback as "v=<id>&full=1", so CastService
+     * resolves it with evo_yt_resolve_full first. */
+    if (strcasecmp(method, "POST") == 0 && strcmp(route_path, "/cast/url") == 0) {
+        const char *resp = evo_cast_play_youtube_link(body) == 0
+            ? "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            : "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        (void)write(cfd, resp, strlen(resp));
         close(cfd);
         return;
     }
@@ -2442,6 +2456,25 @@ static int parse_innertube_streams(cJSON *root, const char *video_id,
     }
 
     return -1;
+}
+
+int evo_cast_play_youtube_link(const char *link)
+{
+    char vid[16];
+    if (!link || evo_yt_link_video_id(link, vid, sizeof(vid)) != 0) {
+        evo_log("cast: link posted, no YouTube id in it");
+        return -1;
+    }
+    char launch[64];
+    snprintf(launch, sizeof(launch), "v=%s&full=1", vid);
+    pthread_mutex_lock(&s_cast_lock);
+    evo_cast_launch_cb cb = s_on_launch;
+    void *ud = s_userdata;
+    pthread_mutex_unlock(&s_cast_lock);
+    evo_log("cast: link posted -> %s%s", vid, cb ? "" : " (no cast service yet)");
+    if (!cb) return -1;
+    cb(launch, ud);
+    return 0;
 }
 
 int evo_cast_resolve_youtube(const char *video_id, char *out_url, size_t url_cap, char *out_title, size_t title_cap)

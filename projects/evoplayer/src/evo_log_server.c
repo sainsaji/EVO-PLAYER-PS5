@@ -60,6 +60,7 @@
 
 #include "evo_boot_log.h"
 #include "evo_build_id.h"
+#include "evo_cast_receiver.h"
 #include "evo_data_path.h"
 #include "evo_hw.h"
 #include "evo_keyboard.h"
@@ -99,10 +100,23 @@ static const char k_input_page[] =
 "border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg)}"
 "textarea.sec{-webkit-text-security:disc;text-security:disc;min-height:56px}"
 "button{width:100%;margin-top:12px;padding:14px;font:inherit;font-weight:600;border:0;border-radius:8px;background:var(--ac);color:#fff}"
-"button:disabled{opacity:.4}#msg{margin-top:12px;min-height:1.4em}"
+"button:disabled{opacity:.4}#msg,#ym{margin-top:12px;min-height:1.4em}"
+"h2{font-size:18px;margin:28px 0 4px;padding-top:20px;border-top:1px solid var(--line)}.dim{color:var(--dim);margin:0 0 12px}"
+"input{width:100%;box-sizing:border-box;font:16px/1.4 ui-monospace,monospace;padding:12px 10px;"
+"border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg)}"
 "</style><main><h1>EVO Player</h1><p id=sub>Checking...</p>"
 "<textarea id=t autocapitalize=off autocorrect=off autocomplete=off spellcheck=false placeholder='Type or paste here'></textarea>"
-"<p id=cnt></p><button id=b disabled>Send to PS5</button><p id=msg></p></main><script>"
+"<p id=cnt></p><button id=b disabled>Send to PS5</button><p id=msg></p>"
+"<h2>Play a YouTube link</h2><p class=dim>Plays the whole video in EVO, up to 1080p60.</p>"
+"<input id=y type=url inputmode=url autocapitalize=off autocorrect=off autocomplete=off spellcheck=false maxlength=500 "
+"placeholder='https://youtu.be/...'><button id=yb>Play on PS5</button><p id=ym></p></main><script>"
+"var Y=document.getElementById('y'),YB=document.getElementById('yb'),YM=document.getElementById('ym');"
+"YB.onclick=function(){var v=Y.value.trim();if(!v){YM.textContent='Paste a YouTube link first.';return}"
+"YB.disabled=true;YM.textContent='Sending...';"
+"fetch('/youtube',{method:'POST',headers:{'X-EVO-Input':'1','Content-Type':'text/plain;charset=utf-8'},body:v})"
+".then(function(r){YB.disabled=false;YM.textContent=r.ok?'Sent. It starts on the PS5 in a few seconds.':"
+"r.status==400?'No YouTube video in that link.':'Could not send.'})"
+".catch(function(){YB.disabled=false;YM.textContent='Could not reach the PS5.'})};"
 "var T=document.getElementById('t'),B=document.getElementById('b'),S=document.getElementById('sub'),M=document.getElementById('msg'),C=document.getElementById('cnt'),"
 "seq=-1,sec=false,dirty=false,busy=false;"
 "function cnt(){C.textContent=T.maxLength>0?T.value.length+' / '+T.maxLength:''}"
@@ -451,6 +465,31 @@ static void serve_input_post(int fd, const char *head, const char *body, size_t 
     send_str(fd, "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nok\n");
 }
 
+/*
+ * POST /youtube - a YouTube link from the phone page's second card, played
+ * full length in EVO's player (evo_cast_play_youtube_link -> CastService ->
+ * evo_yt_resolve_full). Same X-EVO-Input guard and 512-byte cap as /input.
+ */
+static void serve_youtube_post(int fd, const char *head, const char *body, size_t blen, int too_big)
+{
+    if (!header_value(head, "x-evo-input:")) {
+        send_str(fd, "HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+        return;
+    }
+    if (too_big || blen >= 512) {
+        send_str(fd, "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+        return;
+    }
+    char text[512];
+    memcpy(text, body ? body : "", blen);
+    text[blen] = '\0';
+    if (evo_cast_play_youtube_link(text) != 0) {
+        send_str(fd, "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        return;
+    }
+    send_str(fd, "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nok\n");
+}
+
 /* ---- #229: the problem report ------------------------------------------ */
 
 typedef struct { evo_report_sink_fn sink; void *ud; long total; int stop; } rp_t;
@@ -794,13 +833,16 @@ static void *conn_thread(void *arg)
         pthread_mutex_unlock(&s_mx);
 
         const int post_input = !strcmp(method, "POST") && !strcmp(norm, "/input");
-        if (strcmp(method, "GET") != 0 && !post_input)
+        const int post_youtube = !strcmp(method, "POST") && !strcmp(norm, "/youtube");
+        if (strcmp(method, "GET") != 0 && !post_input && !post_youtube)
             send_str(fd, "HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n");
         else if (busy)
             send_str(fd, "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\ntoo many log clients\n");
         else {
             if (post_input) {
                 serve_input_post(fd, req, body, blen, too_big);
+            } else if (post_youtube) {
+                serve_youtube_post(fd, req, body, blen, too_big);
             } else if (!strcmp(norm, "/input")) {
                 char head[160];
                 snprintf(head, sizeof head,

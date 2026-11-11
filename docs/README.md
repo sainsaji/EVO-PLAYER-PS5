@@ -75,6 +75,7 @@ ones expensive to relearn on real hardware) are in the root [CLAUDE.md](../CLAUD
 | [architecture.md](providers/architecture.md) | The provider seam: vtable, UI bundles, playback sources, the stream picker, the shelves home |
 | [media-servers.md](providers/media-servers.md) | Each provider: setup, protocol notes, quirks, what is not built |
 | [web-ui.md](providers/web-ui.md) | The system browser as an optional "web version" |
+| [youtube.md](providers/youtube.md) | YouTube in EVO's player: phone casts (60 s), full-length links (QuickJS + yt-dlp's solver), what breaks and how to fix it |
 
 ## [planning/](planning/): what to do next
 

@@ -1,5 +1,6 @@
 #include "evo/screens/SettingsScreen.hpp"
 #include "evo/Application.hpp"
+#include "evo/services/CastService.hpp"
 #include "evo_rmlui_bridge.h"
 #include "evo_feedback.h"
 #include "evo_toast.h"
@@ -77,6 +78,7 @@ enum class SettingKey : int {
     PhonePort,
     PhoneCast,
     CastNativePlayer,
+    YouTubeLink,
     AskStream,
     AddonAutoPick,
     /* SYSTEM & DIAGNOSTICS */
@@ -188,6 +190,8 @@ const PreviewSpec kPreviews[] = {
      "Allows casting YouTube from your phone directly to EVO Player (DIAL receiver on port 8765)."},
     {SettingKey::CastNativePlayer, EVO_RMLUI_PREVIEW_INFO,
      "Plays YouTube casts in EVO Player (up to 4K), instead of the 720p WebKit browser."},
+    {SettingKey::YouTubeLink, EVO_RMLUI_PREVIEW_INFO,
+     "Paste or type a YouTube link (or use the phone page) and EVO plays the whole video, up to 1080p60."},
     {SettingKey::AskStream, EVO_RMLUI_PREVIEW_ASK_STREAM,
      "Lets you choose the format and quality each time you open a live channel."},
     {SettingKey::ReportProblem, EVO_RMLUI_PREVIEW_REPORT,
@@ -227,7 +231,7 @@ const SettingKey kSubtitleKeys[] = {
 };
 const SettingKey kInterfaceKeys[] = {
     SettingKey::Theme, SettingKey::Lightbar, SettingKey::FoldersFirst,
-    SettingKey::KeyboardInput, SettingKey::PhonePort, SettingKey::PhoneCast, SettingKey::CastNativePlayer, SettingKey::AskStream, SettingKey::AddonAutoPick,
+    SettingKey::KeyboardInput, SettingKey::PhonePort, SettingKey::PhoneCast, SettingKey::CastNativePlayer, SettingKey::YouTubeLink, SettingKey::AskStream, SettingKey::AddonAutoPick,
 };
 const SettingKey kSystemKeys[] = {
     SettingKey::ReportProblem, SettingKey::ReportLastRun, SettingKey::DebugOverlay, SettingKey::DeveloperTools,
@@ -646,6 +650,11 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
     case SettingKey::CastNativePlayer:
         d = toggleDef(key, "CAST TO EVO PLAYER", "PLAY CAST IN NATIVE PLAYER (UP TO 1080P)",
                       "../icons/icon_play.png", settings->isCastNativePlayerEnabled());
+        break;
+
+    case SettingKey::YouTubeLink:
+        d = actionDef(key, "PLAY A YOUTUBE LINK", "PASTE OR TYPE A LINK - PLAYS FULL LENGTH (UP TO 1080P60)",
+                      "../icons/icon_play.png", "");
         break;
 
     case SettingKey::AskStream:
@@ -1127,6 +1136,13 @@ void onPortEntered(const char* text, void*) {
     }
 }
 
+void onYouTubeLinkEntered(const char* text, void*) {
+    if (!text || !text[0]) return;
+    evo::CastService* cs = evo::Application::getInstance().getCastService();
+    if (!cs || !cs->playYouTubeLink(text))
+        toast("YOUTUBE", "No YouTube video in that link");
+}
+
 void resetPort() {
     s_portRefused = 0;
     evo_log_server_set_port(EVO_LOG_SERVER_PORT);
@@ -1163,6 +1179,11 @@ bool runAction(const SettingDef& def) {
         evo_keyboard_open_number("PHONE & LOG PORT (1024-65535)", init, 5, onPortEntered, nullptr);
         return true;
     }
+    case SettingKey::YouTubeLink:
+        evo_feedback(EVO_FB_OPEN);
+        evo_keyboard_open_phone("YouTube link (youtube.com/watch?v=..., youtu.be/..., shorts/...)", "", 512,
+                                onYouTubeLinkEntered, nullptr);
+        return true;
     case SettingKey::SoftwareUpdate: {
         evo_updater_status_t us;
         evo_updater_get(&us);

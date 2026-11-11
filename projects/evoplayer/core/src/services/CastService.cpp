@@ -4,6 +4,7 @@
 #include "evo/Common.hpp"
 #include "evo/screens/ScreenManager.hpp"
 #include "evo_cast_receiver.h"
+#include "evo_yt_link.h"
 #include "evo_browser_engine.h"
 #include "evo_webui.h"
 #include "evo_boot_log.h"
@@ -55,8 +56,19 @@ void* CastService::resolveThreadMain(void* arg) {
     auto* self = static_cast<CastService*>(arg);
     char streamUrl[4096] = {0};
     char ytTitle[256] = {0};
-    int rc = evo_cast_resolve_youtube(self->m_resolveVideoId.c_str(),
+    int rc = -1;
+    if (self->m_resolveFull) {
+        rc = evo_yt_resolve_full(self->m_resolveVideoId.c_str(),
+                                 streamUrl, sizeof(streamUrl), ytTitle, sizeof(ytTitle));
+        if (rc != 0)
+            evo_log("cast: full-length resolve failed for %s; trying the 60 s route",
+                    self->m_resolveVideoId.c_str());
+    }
+    if (rc != 0) {
+        streamUrl[0] = '\0';
+        rc = evo_cast_resolve_youtube(self->m_resolveVideoId.c_str(),
                                       streamUrl, sizeof(streamUrl), ytTitle, sizeof(ytTitle));
+    }
     self->m_resolveUrl = streamUrl;
     self->m_resolveTitle = ytTitle;
     self->m_resolveRc = (rc == 0 && streamUrl[0]) ? 0 : -1;
@@ -64,7 +76,8 @@ void* CastService::resolveThreadMain(void* arg) {
     return nullptr;
 }
 
-void CastService::startResolve(const char* videoId, const char* timeOffset) {
+void CastService::startResolve(const char* videoId, const char* timeOffset, bool full) {
+    m_resolveFull = full;
     m_resolveVideoId = videoId;
     m_resolveTimeOffset = timeOffset ? timeOffset : "";
     m_resolveUrl.clear();
@@ -78,6 +91,14 @@ void CastService::startResolve(const char* videoId, const char* timeOffset) {
         evo_log("cast: could not start the resolve thread");
         toast("Cast", "Failed to resolve YouTube stream");
     }
+}
+
+bool CastService::playYouTubeLink(const char* link) {
+    char vid[16];
+    if (!link || evo_yt_link_video_id(link, vid, sizeof(vid)) != 0) return false;
+    evo_log("cast: link entered -> %s", vid);
+    onLaunchRequested(std::string("v=") + vid + "&full=1");
+    return true;
 }
 
 void CastService::joinResolve() {
@@ -227,12 +248,19 @@ void CastService::update(double deltaMs) {
         char videoId[64] = {0};
         char directUrl[512] = {0};
         char timeOffset[32] = {0};
+        char full[8] = {0};
 
         evo_cast_parse_param(launchData.c_str(), "v", videoId, sizeof(videoId));
         evo_cast_parse_param(launchData.c_str(), "url", directUrl, sizeof(directUrl));
         evo_cast_parse_param(launchData.c_str(), "t", timeOffset, sizeof(timeOffset));
+        evo_cast_parse_param(launchData.c_str(), "full", full, sizeof(full));
 
-        if (directUrl[0]) {
+        if (full[0] == '1' && videoId[0]) {
+            /* A link posted to /cast/url (or pasted): EVO's own player, full
+             * length, whatever the native-player setting says. */
+            toast("YouTube", "Resolving the link...");
+            startResolve(videoId, timeOffset, true);
+        } else if (directUrl[0]) {
             toast("Cast", "Playing cast stream...");
             evo_log("cast: Direct media play: %s", directUrl);
             if (start_video_playback_cast(directUrl, "", 0.0)) {

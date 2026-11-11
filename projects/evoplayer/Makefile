@@ -170,7 +170,14 @@ ADDON_SRCS := \
     addons/src/provider_nuvio.c \
     addons/src/provider_stremio.c \
     addons/src/evo_online_subs.c \
-    addons/src/evo_stremio_account.c
+    addons/src/evo_stremio_account.c \
+    addons/src/evo_yt_link.c \
+    addons/src/evo_ytjs_blob.c \
+    addons/src/quickjs-amalgam.c
+
+# QuickJS-NG v0.17.0 amalgamation (MIT), unchanged: third-party code, so no
+# -Wall noise. Runs yt-dlp's YouTube challenge solver (evo_yt_link.c).
+addons/src/quickjs-amalgam.o: CFLAGS += -w
 
 # The bare-metal AGC device context and its 100% GPU RmlUi render interface
 # are the only device render path - the AGC runtime owns sceAgc and

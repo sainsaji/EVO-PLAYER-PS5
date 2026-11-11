@@ -29,11 +29,15 @@ public:
     void onLaunchRequested(const std::string& launchData);
     void onStopRequested();
 
+    /* Play a YouTube link (any form evo_yt_link_video_id accepts) in EVO's
+     * player, full length. Main thread. False if the text holds no video id. */
+    bool playYouTubeLink(const char* link);
+
 private:
     static void onLaunchThunk(const char* launchData, void* userdata);
     static void onStopThunk(void* userdata);
     static void* resolveThreadMain(void* arg);
-    void startResolve(const char* videoId, const char* timeOffset);
+    void startResolve(const char* videoId, const char* timeOffset, bool full = false);
     void finishResolve();
     void joinResolve();
 
@@ -72,6 +76,7 @@ private:
     std::string m_resolveUrl;
     std::string m_resolveTitle;
     int m_resolveRc = -1;
+    bool m_resolveFull = false;        // a pasted/posted link: full-length route first
     bool m_resolveCancelled = false;   // phone sent stop while resolving
 };
 
