@@ -889,6 +889,23 @@ static void prospero_embedded_subtitle_extract_text(
 static char s_sample_cue_pool[2][PROSPERO_SAMPLE_POOL_SIZE][PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE];
 static int s_sample_cue_count[2] = {0, 0};
 static pthread_mutex_t s_sample_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
+/* Which film and track each pool was filled from. The pools were never
+ * cleared, so the picker's preview showed lines from the previous film. */
+static char s_sample_pool_key[2][540];
+
+/* Caller holds s_sample_pool_mutex. Empties the pool when the media or the
+ * subtitle track it belongs to has changed. */
+static void sample_pool_sync_locked(int slot_idx)
+{
+    int idx = slot_idx ? prospero_secondary_subtitle_stream_index
+                       : prospero_embedded_subtitle_stream_index;
+    char key[sizeof(s_sample_pool_key[0])];
+    snprintf(key, sizeof(key), "%d|%s", idx, current_media_path);
+    if (strcmp(key, s_sample_pool_key[slot_idx]) != 0) {
+        snprintf(s_sample_pool_key[slot_idx], sizeof(s_sample_pool_key[0]), "%s", key);
+        s_sample_cue_count[slot_idx] = 0;
+    }
+}
 
 static void prospero_embedded_subtitle_add_cue(
     ProsperoSubSlot *slot,
@@ -906,6 +923,7 @@ static void prospero_embedded_subtitle_add_cue(
 
     int slot_idx = (slot == SUB_SECONDARY) ? 1 : 0;
     pthread_mutex_lock(&s_sample_pool_mutex);
+    sample_pool_sync_locked(slot_idx);
     if (s_sample_cue_count[slot_idx] < PROSPERO_SAMPLE_POOL_SIZE) {
         snprintf(s_sample_cue_pool[slot_idx][s_sample_cue_count[slot_idx]],
                  sizeof(s_sample_cue_pool[slot_idx][0]), "%s", text);
@@ -2972,8 +2990,15 @@ static void clean_sample_str(char *str) {
 static int prospero_subtitle_extract_samples_from_file(const char *path, int stream_index, int slot_idx)
 {
     if (!path || !path[0] || stream_index < 0 || slot_idx < 0 || slot_idx > 1) return 0;
+    /* This runs on the UI thread (the subtitle picker). A second open of a
+     * network stream - with none of the network options or timeouts - froze
+     * the UI for seconds, or 75 s on a dead host (PS5 connect() ignores
+     * timeouts). Local files only; a stream's preview fills from the cues
+     * playback has already decoded. */
+    if (path[0] != '/') return 0;
 
     pthread_mutex_lock(&s_sample_pool_mutex);
+    sample_pool_sync_locked(slot_idx);
     if (s_sample_cue_count[slot_idx] > 0) {
         int c = s_sample_cue_count[slot_idx];
         pthread_mutex_unlock(&s_sample_pool_mutex);
@@ -3106,6 +3131,7 @@ int prospero_subtitle_get_cue_count(int is_secondary) {
                 cnt = PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES;
             if (cnt > 0) return cnt;
             pthread_mutex_lock(&s_sample_pool_mutex);
+            sample_pool_sync_locked(1);
             int scnt = s_sample_cue_count[1];
             pthread_mutex_unlock(&s_sample_pool_mutex);
             if (scnt > 0) return scnt;
@@ -3125,6 +3151,7 @@ int prospero_subtitle_get_cue_count(int is_secondary) {
             cnt = PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES;
         if (cnt > 0) return cnt;
         pthread_mutex_lock(&s_sample_pool_mutex);
+        sample_pool_sync_locked(0);
         int scnt = s_sample_cue_count[0];
         pthread_mutex_unlock(&s_sample_pool_mutex);
         if (scnt > 0) return scnt;
