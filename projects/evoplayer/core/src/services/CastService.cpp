@@ -214,6 +214,7 @@ void CastService::update(double deltaMs) {
         m_webActive = false;
         stop_video_playback();
     }
+    updateBrowserCast(deltaMs, doStop);
 
     if (m_webActive && !evo_webui_session_active()) {
         m_webActive = false;
@@ -261,23 +262,91 @@ void CastService::update(double deltaMs) {
             evo_cast_receiver_get_local_ip(localIp, sizeof(localIp));
             int port = evo_cast_receiver_port();
 
+            /* pairingCode: EVO's own, so it can find the page's Lounge screen
+             * and learn when the video ends (evo_cast_page_watch_start). */
+            char pairingCode[64] = {0};
+            evo_cast_new_pairing_code(pairingCode, sizeof(pairingCode));
             std::string query = launchData.empty() ? "" : (launchData + "&");
             std::string additionalUrl = "http://" + std::string(localIp[0] ? localIp : "127.0.0.1") +
                                        ":" + std::to_string(port) + "/apps/YouTube/dial_data";
-            std::string tvUrl = "https://www.youtube.com/tv?" + query + "additionalDataUrl=" + additionalUrl;
+            std::string tvUrl = "https://www.youtube.com/tv?" + query + "pairingCode=" + pairingCode +
+                                "&theme=cl&additionalDataUrl=" + additionalUrl;
 
-            if (videoId[0]) {
-                std::string msg = "Casting YouTube: " + std::string(videoId);
-                toast("Cast", msg.c_str());
-                evo_log("cast: Launching YouTube video %s: %s", videoId, tvUrl.c_str());
-            } else {
-                toast("Cast", "Casting YouTube from phone...");
-                evo_log("cast: Launching YouTube TV: %s", tvUrl.c_str());
+            if (evo_webui_session_active() || m_browserOpenPending) {
+                /* The page does not follow EVO's Lounge session, so a second
+                 * video from the phone cannot reach it; leave it be. */
+                evo_log("cast: browser cast already open, ignoring %s", videoId[0] ? videoId : "(no video)");
+                return;
             }
-
-            int rc = evo_webui_open_direct(tvUrl.c_str());
-            evo_log("cast: evo_webui_open_direct returned %d", rc);
+            evo_log("cast: Launching YouTube TV in %.1f s: %s", kBrowserHintMs / 1000.0, tvUrl.c_str());
+            toast("YouTube in the browser",
+                  "Closes when you stop or disconnect, or the video ends");
+            m_browserUrl = tvUrl;
+            m_browserVideoId = videoId;
+            m_browserPairingCode = pairingCode;
+            m_browserStartTime = timeOffset;
+            m_browserOpenInMs = kBrowserHintMs;
+            m_browserOpenPending = true;
         }
+    }
+}
+
+void CastService::updateBrowserCast(double deltaMs, bool stopped) {
+    const int ev = evo_cast_take_events();
+
+    if (stopped) {
+        /* doStop already closed the dialog. */
+        if (m_browserOpenPending) evo_log("cast: browser cast cancelled before it opened");
+        m_browserOpenPending = false;
+        if (m_browserCast) evo_cast_page_watch_stop();
+        m_browserCast = false;
+        return;
+    }
+
+    if (m_browserOpenPending) {
+        if (ev & EVO_CAST_EV_PHONE_LEFT) {
+            evo_log("cast: phone left before the browser opened");
+            m_browserOpenPending = false;
+            evo_cast_receiver_set_app_running(0);
+            return;
+        }
+        m_browserOpenInMs -= deltaMs;
+        if (m_browserOpenInMs > 0.0) return;
+        m_browserOpenPending = false;
+        int rc = evo_webui_open_direct(m_browserUrl.c_str());
+        evo_log("cast: evo_webui_open_direct returned %d", rc);
+        if (rc == 0) {
+            m_browserCast = true;
+            m_browserCloseWanted = 0;
+            evo_cast_page_watch_start(m_browserVideoId.c_str(), m_browserPairingCode.c_str(),
+                                      m_browserStartTime.c_str());
+        }
+        return;
+    }
+
+    if (!m_browserCast) return;
+
+    if (!evo_webui_session_active()) {
+        /* Closed some other way (Triangle via evo-remote, the browser's own
+         * close button). */
+        evo_log("cast: browser cast closed");
+        evo_cast_page_watch_stop();
+        m_browserCast = false;
+        return;
+    }
+
+    m_browserCloseWanted |= ev & (EVO_CAST_EV_PHONE_LEFT | EVO_CAST_EV_PAGE_ENDED);
+    /* evo_webui_close() only acts once the dialog is up (P_RUN); an event
+     * while it is still opening waits for that. */
+    if (m_browserCloseWanted && evo_webui_active()) {
+        const bool ended = (m_browserCloseWanted & EVO_CAST_EV_PAGE_ENDED) != 0;
+        m_browserCloseWanted = 0;
+        evo_log("cast: closing the browser cast (%s)", ended ? "video ended" : "phone disconnected");
+        toast("Cast", ended ? "Video ended" : "Phone disconnected");
+        evo_cast_receiver_set_app_running(0);
+        evo_webui_close();
+        evo_cast_page_watch_stop();
+        m_browserCast = false;
     }
 }
 

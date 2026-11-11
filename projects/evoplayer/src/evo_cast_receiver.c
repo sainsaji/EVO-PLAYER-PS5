@@ -1082,7 +1082,16 @@ static int lounge_send_command(const char *cmd, const char *extra_params)
 }
 #endif
 
-static int lounge_listen_channel(const char *poll_url, const char *token)
+/* Handles one chunk of a Lounge channel stream (NUL-terminated, writable). */
+typedef void (*lounge_chunk_fn)(char *chunk);
+
+static void screen_on_chunk(char *chunk);
+
+/* Streams one Lounge channel GET until it ends, YouTube goes quiet for 45 s,
+ * or *alive (or s_running) drops. Returns the HTTP status (200 once the
+ * stream ran), or -1 when the connection failed. */
+static int lounge_listen_channel(const char *poll_url, const char *token,
+                                 lounge_chunk_fn on_chunk, volatile int *alive)
 {
 #ifndef NO_OPENSSL
     char host[128] = "www.youtube.com";
@@ -1201,7 +1210,7 @@ static int lounge_listen_channel(const char *poll_url, const char *token)
      * more than a moment. YouTube sends a noop about every 30 s; 45 s of
      * silence means the channel is dead. */
     int idle_ms = 0;
-    while (s_running && s_lounge_running) {
+    while (s_running && *alive) {
         if (SSL_pending(ssl) <= 0) {
             struct pollfd pfd = { sock, POLLIN, 0 };
             int pr = poll(&pfd, 1, 500);
@@ -1229,7 +1238,103 @@ static int lounge_listen_channel(const char *poll_url, const char *token)
         chunk[r] = '\0';
         /* Not logged: logging every chunk's body flooded evo.log (and the USB
          * writes that costs) for as long as EVO was open. */
+        on_chunk(chunk);
+    }
 
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
+    close(sock);
+    return 200;
+#else
+    (void)poll_url;
+    (void)token;
+    (void)on_chunk;
+    (void)alive;
+    return -1;
+#endif
+}
+
+/* Highest message id ("[[N," or ",[N,") in a Lounge chunk, or `cur`. */
+static int lounge_max_aid(const char *chunk, int cur)
+{
+    for (const char *p = chunk; *p; p++) {
+        if ((*p == '[' && p[1] == '[') || (*p == ',' && p[1] == '[')) {
+            char *end = NULL;
+            long v = strtol(p + 2, &end, 10);
+            if (end && *end == ',' && v > cur) cur = (int)v;
+        }
+    }
+    return cur;
+}
+
+/* Events for the main thread (evo_cast_take_events). */
+static volatile int s_cast_events = 0;
+
+static void cast_post_event(int ev)
+{
+    pthread_mutex_lock(&s_cast_lock);
+    s_cast_events |= ev;
+    pthread_mutex_unlock(&s_cast_lock);
+}
+
+int evo_cast_take_events(void)
+{
+    pthread_mutex_lock(&s_cast_lock);
+    int ev = s_cast_events;
+    s_cast_events = 0;
+    pthread_mutex_unlock(&s_cast_lock);
+    return ev;
+}
+
+/* Remotes (phones) on EVO's screen, by Lounge id, from remoteConnected /
+ * remoteDisconnected. Lounge thread only. */
+#define MAX_REMOTES 8
+static char s_remotes[MAX_REMOTES][64];
+static int  s_remote_count = 0;
+
+/* The "id" of the Lounge message object starting at msg (escaped ids inside
+ * its "device" string do not match the unescaped pattern). */
+static int lounge_msg_id(const char *msg, char *out, size_t cap)
+{
+    const char *end = strstr(msg, "}]");
+    const char *p = strstr(msg, "\"id\":\"");
+    if (!p || (end && p > end)) return 0;
+    p += 6;
+    size_t n = 0;
+    while (p[n] && p[n] != '"' && n < cap - 1) { out[n] = p[n]; n++; }
+    out[n] = '\0';
+    return n > 0;
+}
+
+static void track_remotes(const char *chunk)
+{
+    char id[64];
+    for (const char *p = strstr(chunk, "[\"remoteConnected\",{"); p; p = strstr(p + 1, "[\"remoteConnected\",{")) {
+        if (!lounge_msg_id(p, id, sizeof(id))) continue;
+        int known = 0;
+        for (int i = 0; i < s_remote_count; i++) if (!strcmp(s_remotes[i], id)) known = 1;
+        if (!known && s_remote_count < MAX_REMOTES)
+            snprintf(s_remotes[s_remote_count++], sizeof(s_remotes[0]), "%s", id);
+        evo_log("cast: Lounge remoteConnected %s (%d remote(s))", id, s_remote_count);
+    }
+    for (const char *p = strstr(chunk, "[\"remoteDisconnected\",{"); p; p = strstr(p + 1, "[\"remoteDisconnected\",{")) {
+        if (!lounge_msg_id(p, id, sizeof(id))) id[0] = '\0';
+        for (int i = 0; i < s_remote_count; i++) {
+            if (!strcmp(s_remotes[i], id)) {
+                memmove(s_remotes[i], s_remotes[i + 1], (size_t)(s_remote_count - i - 1) * sizeof(s_remotes[0]));
+                s_remote_count--;
+                break;
+            }
+        }
+        evo_log("cast: Lounge remoteDisconnected %s (%d remote(s) left)", id, s_remote_count);
+        if (s_remote_count == 0) cast_post_event(EVO_CAST_EV_PHONE_LEFT);
+    }
+}
+
+/* One chunk of EVO's own screen channel (the session the phone talks to). */
+static void screen_on_chunk(char *chunk)
+{
+#ifndef NO_OPENSSL
         /* Update gsessionid from stream if YouTube assigned a new one */
         const char *ss = strstr(chunk, "[\"S\",\"");
         if (ss) {
@@ -1257,22 +1362,15 @@ static int lounge_listen_channel(const char *poll_url, const char *token)
             }
         }
         /* Track latest message AID */
-        const char *aid_p = chunk;
-        while (*aid_p) {
-            if ((*aid_p == '[' && aid_p[1] == '[') || (*aid_p == ',' && aid_p[1] == '[')) {
-                const char *num_start = aid_p + 2;
-                char *num_end = NULL;
-                long aid_val = strtol(num_start, &num_end, 10);
-                if (num_end && *num_end == ',' && aid_val > 0) {
-                    pthread_mutex_lock(&s_cast_lock);
-                    if (aid_val > s_lounge_aid) {
-                        s_lounge_aid = (int)aid_val;
-                    }
-                    pthread_mutex_unlock(&s_cast_lock);
-                }
-            }
-            aid_p++;
-        }
+        pthread_mutex_lock(&s_cast_lock);
+        s_lounge_aid = lounge_max_aid(chunk, s_lounge_aid);
+        pthread_mutex_unlock(&s_cast_lock);
+
+        /* The phone left the session ("Disconnect" in the YouTube app). A
+         * browser cast has no other way back to EVO: CastService closes it.
+         * Only when the last remote goes: an old session of the same or
+         * another phone timing out must not close a cast that is running. */
+        track_remotes(chunk);
 
         /* Reply to getNowPlaying */
         if (strstr(chunk, "\"getNowPlaying\"")) {
@@ -1325,16 +1423,8 @@ static int lounge_listen_channel(const char *poll_url, const char *token)
             }
             lounge_send_command("nowPlaying", "&req0_state=-1");
         }
-    }
-
-    SSL_shutdown(ssl);
-    SSL_free(ssl);
-    close(sock);
-    return 200;
 #else
-    (void)poll_url;
-    (void)token;
-    return -1;
+    (void)chunk;
 #endif
 }
 
@@ -1504,7 +1594,7 @@ static void *lounge_thread(void *arg)
             "https://www.youtube.com/api/lounge/bc/bind?device=LOUNGE_SCREEN&id=%s&name=%s&loungeIdToken=%s&VER=8&RID=rpc&SID=%s&CI=0&AID=%d&gsessionid=%s&TYPE=xmlhttp&zx=%ld",
             s_device_id, "EVO%20Player", cur_tok, session_sid, cur_aid, session_gsid, now_ms);
 
-        int ret = lounge_listen_channel(poll_url, cur_tok);
+        int ret = lounge_listen_channel(poll_url, cur_tok, screen_on_chunk, &s_lounge_running);
         if (!s_running || !s_lounge_running) break;
         if (ret == 200) fails = 0;
 
@@ -1526,6 +1616,233 @@ static void *lounge_thread(void *arg)
 
     evo_log("cast: Lounge background listener stopped");
     return NULL;
+}
+
+/* ---- Browser cast page watcher ----
+ *
+ * A browser cast opens youtube.com/tv in Sony's browser dialog, which tells
+ * EVO nothing about the page. EVO puts its own pairingCode in the page URL
+ * (as a phone's DIAL launch does); the page registers that code for its Lounge
+ * screen, and EVO looks the screen up with /pairing/get_screen. No request
+ * from the browser to EVO is needed: Sony's browser never posted to
+ * additionalDataUrl, even on 127.0.0.1. EVO then joins the screen as a silent
+ * REMOTE_CONTROL and reads its nowPlaying messages: once the cast video has
+ * played, a nowPlaying without a videoId (the video ended) or with another one
+ * (autoplay moved on) means the video is over. */
+static volatile int s_page_on = 0;       /* armed by evo_cast_page_watch_start */
+static pthread_t    s_page_th;
+static int          s_page_th_valid = 0;
+static char         s_page_video[32];
+static char         s_page_code[64];     /* the pairingCode in the page URL */
+static char         s_page_time[32];     /* start offset in seconds ("" = 0) */
+static int          s_page_seen = 0;     /* the cast video showed up in nowPlaying */
+static int          s_page_aid = 0;
+
+static void page_on_chunk(char *chunk)
+{
+    s_page_aid = lounge_max_aid(chunk, s_page_aid);
+    for (char *p = strstr(chunk, "[\"nowPlaying\",{"); p; p = strstr(p + 1, "[\"nowPlaying\",{")) {
+        char *obj = p + 14;
+        char *end = strstr(obj, "}]");
+        char save = 0;
+        if (end) { save = end[1]; end[1] = '\0'; }
+        char vid[32] = {0};
+        const char *v = strstr(obj, "\"videoId\":\"");
+        if (v) {
+            v += 11;
+            size_t n = 0;
+            while (v[n] && v[n] != '"' && n < sizeof(vid) - 1) { vid[n] = v[n]; n++; }
+        }
+        if (end) end[1] = save;
+
+        pthread_mutex_lock(&s_cast_lock);
+        int ended = 0;
+        if (vid[0] && strcmp(vid, s_page_video) == 0) {
+            if (!s_page_seen) evo_log("cast: page is playing %s", vid);
+            s_page_seen = 1;
+        } else if (s_page_seen) {
+            evo_log("cast: page video %s over (nowPlaying videoId='%s')", s_page_video, vid);
+            s_page_seen = 0;
+            ended = 1;
+        }
+        pthread_mutex_unlock(&s_cast_lock);
+        if (ended) cast_post_event(EVO_CAST_EV_PAGE_ENDED);
+    }
+    /* state 0 = ended (onStateChange carries no videoId; seen ties it to
+     * the cast video). */
+    for (char *p = strstr(chunk, "[\"onStateChange\",{"); p; p = strstr(p + 1, "[\"onStateChange\",{")) {
+        char *end = strstr(p, "}]");
+        char *st = strstr(p, "\"state\":\"0\"");
+        if (!st || (end && st > end)) continue;
+        pthread_mutex_lock(&s_cast_lock);
+        int ended = s_page_seen;
+        s_page_seen = 0;
+        pthread_mutex_unlock(&s_cast_lock);
+        if (ended) {
+            evo_log("cast: page video %s ended (state 0)", s_page_video);
+            cast_post_event(EVO_CAST_EV_PAGE_ENDED);
+        }
+    }
+}
+
+#ifndef NO_OPENSSL
+/* Joins `screen` as a REMOTE_CONTROL and streams its channel until the watch
+ * is disarmed. Returns once the session is gone or cannot be set up. */
+static void page_watch_session(const char *tok)
+{
+    char *body = NULL; size_t len = 0; int status = 0; int rc;
+    char base[1024];
+    snprintf(base, sizeof(base),
+        "https://www.youtube.com/api/lounge/bc/bind?device=REMOTE_CONTROL&mdx-version=3&ui=1&v=2"
+        "&name=EVO%%20Player&app=youtube-desktop&loungeIdToken=%s&id=%s-w&VER=8&CVER=1",
+        tok, s_device_id);
+    char hdr_token[600];
+    snprintf(hdr_token, sizeof(hdr_token), "X-YouTube-LoungeId-Token: %s", tok);
+    const char *bhdr[] = { "Content-Type: application/x-www-form-urlencoded", hdr_token };
+
+    char url[1400];
+    snprintf(url, sizeof(url), "%s&RID=1&zx=%ld", base, (long)time(NULL) * 1000);
+    body = NULL; len = 0; status = 0;
+    rc = evo_net_http_post_sync(url, "count=0", bhdr, 2, &body, &len, &status);
+    char sid[128] = {0}, gsid[128] = {0};
+    if (rc == EVO_NET_OK && status == 200 && body) {
+        const char *c = strstr(body, "[\"c\",\"");
+        const char *s = strstr(body, "[\"S\",\"");
+        if (c) sscanf(c + 6, "%127[^\"]", sid);
+        if (s) sscanf(s + 6, "%127[^\"]", gsid);
+        s_page_aid = 0;
+        page_on_chunk(body);   /* the bind reply already carries nowPlaying */
+    }
+    free(body);
+    if (!sid[0] || !gsid[0]) {
+        evo_log("cast: page watch: bind failed (rc=%d status=%d)", rc, status);
+        return;
+    }
+    evo_log("cast: page watch: joined the page's Lounge screen (SID %s)", sid);
+
+    /* A page opened with a pairingCode waits for a remote to say what to
+     * play (it ignores v= in the URL on the PS5): send the cast video, as
+     * the phone would after a DIAL launch. */
+    {
+        char req[512];
+        snprintf(req, sizeof(req),
+                 "count=1&ofs=0&req0__sc=setPlaylist&req0_videoId=%s&req0_currentTime=%s"
+                 "&req0_currentIndex=0&req0_videoIds=%s&req0_listId=",
+                 s_page_video, s_page_time[0] ? s_page_time : "0", s_page_video);
+        snprintf(url, sizeof(url), "%s&RID=2&SID=%s&gsessionid=%s&zx=%ld",
+                 base, sid, gsid, (long)time(NULL) * 1000);
+        body = NULL; len = 0; status = 0;
+        rc = evo_net_http_post_sync(url, req, bhdr, 2, &body, &len, &status);
+        evo_log("cast: page watch: setPlaylist %s t=%s -> rc=%d status=%d",
+                s_page_video, s_page_time[0] ? s_page_time : "0", rc, status);
+        free(body);
+    }
+
+    int fails = 0;
+    while (s_running && s_page_on && fails < 3) {
+        snprintf(url, sizeof(url), "%s&RID=rpc&SID=%s&gsessionid=%s&CI=0&AID=%d&TYPE=xmlhttp&zx=%ld",
+                 base, sid, gsid, s_page_aid, (long)time(NULL) * 1000);
+        int ret = lounge_listen_channel(url, tok, page_on_chunk, &s_page_on);
+        if (ret == 200) { fails = 0; continue; }
+        if (ret == 400 || ret == 404) break;   /* session gone: the page closed */
+        fails++;
+    }
+}
+#endif
+
+static void *page_watch_thread(void *arg)
+{
+    (void)arg;
+#ifndef NO_OPENSSL
+    evo_log("cast: page watch: waiting for the page to register pairing code %s", s_page_code);
+    char post[128];
+    snprintf(post, sizeof(post), "pairing_code=%s", s_page_code);
+    const char *hdr[] = { "Content-Type: application/x-www-form-urlencoded" };
+    char tok[512] = {0};
+    char screen[128] = {0};
+    /* get_screen answers 404 until the page has loaded and registered the
+     * code (about 4 s on the PC); Sony's browser loads slower. */
+    for (int tries = 0; s_running && s_page_on && tries < 60 && !tok[0]; tries++) {
+        for (int ms = 0; ms < 1500 && s_running && s_page_on; ms += 250) usleep(250 * 1000);
+        char *body = NULL; size_t len = 0; int status = 0;
+        int rc = evo_net_http_post_sync("https://www.youtube.com/api/lounge/pairing/get_screen",
+                                        post, hdr, 1, &body, &len, &status);
+        if (rc == EVO_NET_OK && status == 200 && body) {
+            cJSON *root = cJSON_Parse(body);
+            cJSON *sc = root ? cJSON_GetObjectItemCaseSensitive(root, "screen") : NULL;
+            cJSON *lt = sc ? cJSON_GetObjectItemCaseSensitive(sc, "loungeToken") : NULL;
+            cJSON *si = sc ? cJSON_GetObjectItemCaseSensitive(sc, "screenId") : NULL;
+            if (lt && lt->valuestring) snprintf(tok, sizeof(tok), "%s", lt->valuestring);
+            if (si && si->valuestring) snprintf(screen, sizeof(screen), "%s", si->valuestring);
+            cJSON_Delete(root);
+        }
+        free(body);
+    }
+    if (!tok[0]) {
+        if (s_page_on) evo_log("cast: page watch: the page never registered its code; no end detection");
+    } else {
+        evo_log("cast: page watch: page screen %s", screen);
+        page_watch_session(tok);
+    }
+#endif
+    evo_log("cast: page watch: stopped");
+    return NULL;
+}
+
+void evo_cast_new_pairing_code(char *out, size_t cap)
+{
+    generate_uuid_v4(out, cap);
+}
+
+static void page_watch_join(void)
+{
+    if (s_page_th_valid) {
+        pthread_join(s_page_th, NULL);
+        s_page_th_valid = 0;
+    }
+}
+
+void evo_cast_page_watch_start(const char *video_id, const char *pairing_code, const char *start_time)
+{
+    s_page_on = 0;
+    page_watch_join();
+    pthread_mutex_lock(&s_cast_lock);
+    /* Digits and one dot only: it goes into a form body. */
+    s_page_time[0] = '\0';
+    if (start_time && strspn(start_time, "0123456789.") == strlen(start_time) && strlen(start_time) < sizeof(s_page_time))
+        snprintf(s_page_time, sizeof(s_page_time), "%s", start_time);
+    snprintf(s_page_video, sizeof(s_page_video), "%s", video_id ? video_id : "");
+    snprintf(s_page_code, sizeof(s_page_code), "%s", pairing_code ? pairing_code : "");
+    s_page_seen = 0;
+    s_cast_events &= ~EVO_CAST_EV_PAGE_ENDED;
+    pthread_mutex_unlock(&s_cast_lock);
+    if (!s_running || !s_page_video[0] || !s_page_code[0]) return;
+
+    s_page_on = 1;
+    pthread_attr_t at;
+    pthread_attr_init(&at);
+    pthread_attr_setstacksize(&at, 512 * 1024);
+    if (pthread_create(&s_page_th, &at, page_watch_thread, NULL) == 0) {
+        s_page_th_valid = 1;
+    } else {
+        s_page_on = 0;
+        evo_log("cast: page watch: thread failed to start");
+    }
+    pthread_attr_destroy(&at);
+}
+
+void evo_cast_page_watch_stop(void)
+{
+    /* Not joined here: the thread can be inside a TLS request for a few
+     * seconds, and this runs on the main thread. It sees the flag within
+     * half a second of the request ending; the next start or the receiver
+     * stop joins it. */
+    s_page_on = 0;
+}
+
+int evo_cast_page_watch_active(void)
+{
+    return s_page_on;
 }
 
 /* ---- Lifecycle Management ---- */
@@ -1603,6 +1920,8 @@ void evo_cast_receiver_stop(void)
         pthread_join(s_lounge_th, NULL);
         s_lounge_th = 0;
     }
+    s_page_on = 0;
+    page_watch_join();
 
     pthread_mutex_lock(&s_cast_lock);
     s_last_cast_vid[0] = '\0';

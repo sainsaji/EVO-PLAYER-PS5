@@ -47,6 +47,21 @@ private:
     bool m_pendingStop = false;
     bool m_webActive = false;
 
+    /* Browser cast (cast-to-evo-player off): youtube.com/tv in Sony's browser
+     * dialog. The pad cannot get back to EVO from there, so EVO closes it when
+     * the phone stops or disconnects or the video ends, and shows a hint
+     * first (the dialog opens after kBrowserHintMs). */
+    void updateBrowserCast(double deltaMs, bool stopped);
+    static constexpr double kBrowserHintMs = 3500.0;
+    bool m_browserOpenPending = false;
+    double m_browserOpenInMs = 0.0;
+    std::string m_browserUrl;
+    std::string m_browserVideoId;
+    std::string m_browserPairingCode;
+    std::string m_browserStartTime;
+    bool m_browserCast = false;      // EVO opened the dialog for a cast
+    int m_browserCloseWanted = 0;    // EVO_CAST_EV_* seen, waiting for the dialog to be up
+
     /* YouTube stream resolution runs on its own thread: it is several HTTPS
      * round trips and used to block the frame loop for seconds. */
     pthread_t m_resolveThread{};

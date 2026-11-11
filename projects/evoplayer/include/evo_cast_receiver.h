@@ -66,6 +66,22 @@ int evo_cast_receiver_set_direct_stream(const char *url, const char *title);
 /* Get current cast stream title */
 const char* evo_cast_receiver_stream_title(void);
 
+/* Events the receiver posts for the main thread; evo_cast_take_events()
+ * returns and clears them. */
+#define EVO_CAST_EV_PHONE_LEFT  0x1   /* Lounge remoteDisconnected on EVO's screen */
+#define EVO_CAST_EV_PAGE_ENDED  0x2   /* the browser cast page finished the video */
+int evo_cast_take_events(void);
+
+/* Browser cast: watch the youtube.com/tv page in Sony's browser for the end
+ * of `video_id`. Put a fresh code from evo_cast_new_pairing_code() in the page
+ * URL as pairingCode=; the page registers it for its Lounge screen, EVO finds
+ * the screen by it, joins as a silent remote and posts EVO_CAST_EV_PAGE_ENDED.
+ * Stop is cheap and does not wait for the thread. */
+void evo_cast_new_pairing_code(char *out, size_t cap);
+void evo_cast_page_watch_start(const char *video_id, const char *pairing_code, const char *start_time);
+void evo_cast_page_watch_stop(void);
+int  evo_cast_page_watch_active(void);
+
 /* Resolve a YouTube video ID via Innertube into a playable stream URL or local DASH MPD.
  * Returns 0 on success, -1 on failure. */
 int evo_cast_resolve_youtube(const char *video_id, char *out_url, size_t url_cap, char *out_title, size_t title_cap);
