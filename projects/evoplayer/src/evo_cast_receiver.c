@@ -2054,11 +2054,15 @@ static int parse_range_obj(cJSON *obj, uint64_t *out_start, uint64_t *out_end)
 }
 
 static int fetch_and_parse_sidx(const char *url, uint64_t idx_start, uint64_t idx_end,
-                                struct yt_segment_range **out_ranges, int *out_count)
+                                struct yt_segment_range **out_ranges, int *out_count,
+                                uint32_t *out_timescale, uint64_t *out_avg_dur)
 {
-    if (!url || idx_end <= idx_start || !out_ranges || !out_count) return -1;
+    if (!url || idx_end <= idx_start || !out_ranges || !out_count ||
+        !out_timescale || !out_avg_dur) return -1;
     *out_ranges = NULL;
     *out_count = 0;
+    *out_timescale = 0;
+    *out_avg_dur = 0;
 
     char range_hdr[128];
     snprintf(range_hdr, sizeof(range_hdr), "Range: bytes=%" PRIu64 "-%" PRIu64, idx_start, idx_end);
@@ -2083,6 +2087,9 @@ static int fetch_and_parse_sidx(const char *url, uint64_t idx_start, uint64_t id
     }
 
     uint8_t version = p[8];
+    /* size, 'sidx', version+flags, reference_ID, then timescale at 16 */
+    uint32_t timescale = ((uint32_t)p[16] << 24) | ((uint32_t)p[17] << 16) |
+                         ((uint32_t)p[18] << 8)  | (uint32_t)p[19];
     size_t pos = 20;
     uint64_t first_offset = 0;
 
@@ -2116,11 +2123,15 @@ static int fetch_and_parse_sidx(const char *url, uint64_t idx_start, uint64_t id
     }
 
     uint64_t cur_offset = idx_end + 1 + first_offset;
+    uint64_t total_dur = 0;
     for (int i = 0; i < (int)ref_count; i++) {
         uint32_t ref_size = ((uint32_t)(p[pos] & 0x7F) << 24) |
                             ((uint32_t)p[pos+1] << 16) |
                             ((uint32_t)p[pos+2] << 8)  |
                             (uint32_t)p[pos+3];
+        uint32_t sub_dur = ((uint32_t)p[pos+4] << 24) | ((uint32_t)p[pos+5] << 16) |
+                           ((uint32_t)p[pos+6] << 8)  | (uint32_t)p[pos+7];
+        total_dur += sub_dur;
         pos += 12;
         ranges[i].start = cur_offset;
         ranges[i].end = cur_offset + (uint64_t)ref_size - 1;
@@ -2130,6 +2141,12 @@ static int fetch_and_parse_sidx(const char *url, uint64_t idx_start, uint64_t id
     free(body);
     *out_ranges = ranges;
     *out_count = (int)ref_count;
+    /* FFmpeg's dash_seek needs a SegmentList duration (it ignores a
+     * SegmentTimeline inside a SegmentList); without one a seek decodes
+     * from the start of the file. The average segment length is close
+     * enough: the demuxer refines the position from the fragment itself. */
+    *out_timescale = timescale;
+    *out_avg_dur = ref_count ? total_dur / ref_count : 0;
     return 0;
 }
 
@@ -2273,8 +2290,18 @@ static int parse_innertube_streams(cJSON *root, const char *video_id,
         struct yt_segment_range *a_segs = NULL;
         int a_seg_count = 0;
 
-        int v_rc = fetch_and_parse_sidx(v_url, v_idx_s, v_idx_e, &v_segs, &v_seg_count);
-        int a_rc = fetch_and_parse_sidx(a_url, a_idx_s, a_idx_e, &a_segs, &a_seg_count);
+        uint32_t v_ts = 0, a_ts = 0;
+        uint64_t v_dur = 0, a_dur = 0;
+        int v_rc = fetch_and_parse_sidx(v_url, v_idx_s, v_idx_e, &v_segs, &v_seg_count, &v_ts, &v_dur);
+        int a_rc = fetch_and_parse_sidx(a_url, a_idx_s, a_idx_e, &a_segs, &a_seg_count, &a_ts, &a_dur);
+        char v_seglist[96] = "<SegmentList>";
+        char a_seglist[96] = "<SegmentList>";
+        if (v_ts && v_dur)
+            snprintf(v_seglist, sizeof(v_seglist),
+                     "<SegmentList timescale=\"%" PRIu32 "\" duration=\"%" PRIu64 "\">", v_ts, v_dur);
+        if (a_ts && a_dur)
+            snprintf(a_seglist, sizeof(a_seglist),
+                     "<SegmentList timescale=\"%" PRIu32 "\" duration=\"%" PRIu64 "\">", a_ts, a_dur);
 
         if (v_rc == 0 && a_rc == 0 && v_seg_count > 0 && a_seg_count > 0) {
             char v_codec[64] = "avc1.640028";
@@ -2315,11 +2342,11 @@ static int parse_innertube_streams(cJSON *root, const char *video_id,
                     "    <AdaptationSet contentType=\"video\" mimeType=\"video/mp4\" codecs=\"%s\">\n"
                     "      <Representation id=\"v\" bandwidth=\"%d\" width=\"%d\" height=\"%d\">\n"
                     "        <BaseURL>%s</BaseURL>\n"
-                    "        <SegmentList>\n"
+                    "        %s\n"
                     "          <Initialization range=\"%" PRIu64 "-%" PRIu64 "\"/>\n",
                     duration_sec, duration_sec,
                     v_codec, v_br, v_w, v_h,
-                    v_esc, v_init_s, v_init_e);
+                    v_esc, v_seglist, v_init_s, v_init_e);
 
                 for (int i = 0; i < v_seg_count; i++) {
                     mpd_append(&b, "          <SegmentURL mediaRange=\"%" PRIu64 "-%" PRIu64 "\"/>\n",
@@ -2333,10 +2360,10 @@ static int parse_innertube_streams(cJSON *root, const char *video_id,
                     "    <AdaptationSet contentType=\"audio\" mimeType=\"audio/mp4\" codecs=\"%s\">\n"
                     "      <Representation id=\"a\" bandwidth=\"%d\" audioSamplingRate=\"%d\">\n"
                     "        <BaseURL>%s</BaseURL>\n"
-                    "        <SegmentList>\n"
+                    "        %s\n"
                     "          <Initialization range=\"%" PRIu64 "-%" PRIu64 "\"/>\n",
                     a_codec, a_br, a_rate,
-                    a_esc, a_init_s, a_init_e);
+                    a_esc, a_seglist, a_init_s, a_init_e);
 
                 for (int i = 0; i < a_seg_count; i++) {
                     mpd_append(&b, "          <SegmentURL mediaRange=\"%" PRIu64 "-%" PRIu64 "\"/>\n",
