@@ -223,6 +223,7 @@ class HomeScreen
     int recent_cursor_ = -1;
     std::vector<Tile> recent_;
     std::vector<Tile> library_;
+    std::vector<std::string> tips_;   /* "Did you know" line, rotating */
 
     float age_ = 0.0f;
     hui::tween::Timer hero_fade_;

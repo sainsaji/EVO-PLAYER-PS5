@@ -5,6 +5,7 @@
 #include "evo/Application.hpp"
 #include "evo/services/NetworkStorageService.hpp"
 #include "evo_rmlui_bridge.h"
+#include "evo_cast_receiver.h"
 #include "evo_recent.h"
 #include "evo_favorites.h"
 #include "evo_error.h"
@@ -455,8 +456,41 @@ void LaunchScreen::render(uint32_t* framebuffer, int width, int height) {
         params.library[i].is_focused = (!railFocused && m_selectedRow == 2 && m_selectedCol == i);
     }
 
+    fillHomeTips(params);
+
     evo_rmlui_update_launch(&params);
     evo_rmlui_render_launch(framebuffer, width, height);
+}
+
+/* "Did you know" at the foot of Home: what EVO can do that is easy to miss.
+ * The phone-page tips name this console's real address, and drop out when
+ * the phone & log server has no address or port. */
+void LaunchScreen::fillHomeTips(evo_rmlui_launch_params_t& params) {
+    static std::string s_tips[EVO_RMLUI_HOME_TIPS];
+    char ip[32] = {0};
+    evo_cast_receiver_get_local_ip(ip, sizeof(ip));
+    const int port = evo_log_server_port();
+    const bool web = ip[0] && std::strcmp(ip, "0.0.0.0") != 0 && port > 0;
+    const std::string addr = web ? std::string(ip) + ":" + std::to_string(port) : std::string();
+
+    int n = 0;
+    auto add = [&](const std::string& t) { if (n < EVO_RMLUI_HOME_TIPS) s_tips[n++] = t; };
+    if (web) add("Your phone can be the remote: open " + addr + "/remote");
+    if (web) add("Paste a YouTube link and EVO plays the whole video: " + addr + "/input");
+    add("Cast from the YouTube app: pick EVO Player in the cast list");
+    add("Stereo can fill four speakers: Settings > Audio > Upmix stereo to 4.0");
+    add("Phone calls in films can play on the controller speaker: Settings > Audio");
+    add("Watch from a PC or NAS: Browse > Add Server (SMB or FTP)");
+    add("Jellyfin, Emby, Plex, Stremio and IPTV are under Providers");
+    add("Subtitles from any folder: press Down in the player, then Load from file");
+    add("Skip intros and credits: press Triangle when the Skip button shows");
+    add("Upscaling sharpens SD and HD video on a 4K TV: Settings > Video & Display");
+    if (web) add("Live playback health on your phone or PC: " + addr + "/log");
+    add("EVO crashed? Settings > System & Diagnostics > Report the last run");
+
+    params.tip_count = n;
+    for (int i = 0; i < n; ++i)
+        params.tips[i] = s_tips[i].c_str();
 }
 
 } // namespace evo

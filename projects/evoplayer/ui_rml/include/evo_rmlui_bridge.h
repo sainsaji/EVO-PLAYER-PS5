@@ -320,6 +320,7 @@ typedef struct {
  * `art` falls back to the tile icon, which is what the library shelf uses.
  */
 #define EVO_RMLUI_TILES 6
+#define EVO_RMLUI_HOME_TIPS 12
 
 typedef struct {
     const char* title;
@@ -358,6 +359,10 @@ typedef struct {
     /* "LIBRARY" — the destination shelf */
     int         library_visible;
     evo_rmlui_launch_tile_t library[EVO_RMLUI_TILES];
+    /* "Did you know" line at the foot of Home: one tip at a time, rotating.
+     * The strings stay owned by the caller until the next update. */
+    const char* tips[EVO_RMLUI_HOME_TIPS];
+    int         tip_count;
 } evo_rmlui_launch_params_t;
 
 /*
