@@ -806,6 +806,26 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
         m_pinnedVideoFor.clear();
     }
 
+    /*
+     * On resume, restore the audio track that was active during the previous
+     * session for this media. An explicit track switch (m_requestedAudioStream >= 0)
+     * takes precedence over the remembered track.
+     */
+    if (m_requestedAudioStream < 0 && resumeOffset > 0.0) {
+        std::string resumeKey = filePath;
+        if (source.isProvider()) {
+            resumeKey = "evo://" + source.provider + "/" + source.item_id;
+        }
+        int rememberedAudio = recent_lookup_audio(resumeKey.c_str());
+        if (rememberedAudio < 0) {
+            rememberedAudio = loadResumeAudioStream(resumeKey);
+        }
+        if (rememberedAudio >= 0) {
+            m_requestedAudioStream = rememberedAudio;
+            EVO_LOGI("playback", "restoring audio stream %d on resume", rememberedAudio);
+        }
+    }
+
     m_playbackFsm.postEvent(PlaybackEvent::Open);
     m_source = source;
     m_source.url = filePath;
@@ -1162,9 +1182,9 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     }
 
     /*
-     * A track switch asks for a specific stream. Honour it only if it really is
-     * a decodable audio stream in this file, so a stale index from a previous
-     * file can never leave the session with no audio at all.
+     * A track switch or resume restore asks for a specific stream. Honour it
+     * only if it really is a decodable audio stream in this file, so a stale
+     * index from a previous file can never leave the session with no audio at all.
      */
     if (m_requestedAudioStream >= 0 &&
         m_requestedAudioStream < static_cast<int>(play_fmt->nb_streams)) {
@@ -1173,6 +1193,11 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
             want->codecpar->codec_type == AVMEDIA_TYPE_AUDIO &&
             avcodec_find_decoder(want->codecpar->codec_id)) {
             audio_stream_index = m_requestedAudioStream;
+            EVO_LOGI("playback", "using requested audio stream %d (resume / track switch)",
+                     audio_stream_index);
+        } else {
+            EVO_LOGW("playback", "requested audio stream %d is not usable - using default %d",
+                     m_requestedAudioStream, audio_stream_index);
         }
     }
     m_requestedAudioStream = -1;
@@ -1718,7 +1743,7 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                 metaService->cleanMediaTitle(filePath.c_str(), mediaTitle, mediaCat);
         }
         recent_add_or_update(recentKey.c_str(), mediaTitle.c_str(),
-                             m_resumeBaseOffset, m_durationSeconds);
+                             m_resumeBaseOffset, m_durationSeconds, audio_stream_index);
         recent_save();
     }
 
@@ -2113,7 +2138,7 @@ void PlaybackController::saveResumePosition() {
     const char* resumeFile = evo_data_path("ps5_media_resume.txt");
     FILE* fp = std::fopen(resumeFile, "w");
     if (fp) {
-        std::fprintf(fp, "%s\n%.2f\n", persistKey.c_str(), pos);
+        std::fprintf(fp, "%s\n%.2f\n%d\n", persistKey.c_str(), pos, audio_stream_index);
         std::fclose(fp);
     }
 
@@ -2135,7 +2160,7 @@ void PlaybackController::saveResumePosition() {
         metaService->cleanMediaTitle(m_currentFilePath, title, category);
     }
     recent_add_or_update(persistKey.c_str(), title.c_str(),
-                         pos, m_durationSeconds);
+                         pos, m_durationSeconds, audio_stream_index);
     recent_save();
 }
 
@@ -2167,6 +2192,39 @@ double PlaybackController::loadResumePosition(const std::string& filePath) const
 
     std::fclose(fp);
     return 0.0;
+}
+
+int PlaybackController::loadResumeAudioStream(const std::string& filePath) const {
+    if (filePath.empty()) return -1;
+
+    char cleanFile[512];
+    evo_url_sanitize(filePath.c_str(), cleanFile, sizeof(cleanFile));
+
+    const char* resumeFile = evo_data_path("ps5_media_resume.txt");
+    FILE* fp = std::fopen(resumeFile, "r");
+    if (!fp) return -1;
+
+    char pathBuf[512] = {0};
+    double pos = 0.0;
+    int audioStream = -1;
+    if (std::fgets(pathBuf, sizeof(pathBuf), fp)) {
+        size_t len = std::strlen(pathBuf);
+        while (len > 0 && (pathBuf[len - 1] == '\n' || pathBuf[len - 1] == '\r')) {
+            pathBuf[len - 1] = '\0';
+            len--;
+        }
+        char cleanBuf[512];
+        evo_url_sanitize(pathBuf, cleanBuf, sizeof(cleanBuf));
+        if (std::fscanf(fp, "%lf", &pos) == 1 && std::strcmp(cleanBuf, cleanFile) == 0) {
+            if (std::fscanf(fp, "%d", &audioStream) == 1) {
+                std::fclose(fp);
+                return audioStream;
+            }
+        }
+    }
+
+    std::fclose(fp);
+    return -1;
 }
 
 bool PlaybackController::playNextVideo() {
@@ -2290,6 +2348,7 @@ bool PlaybackController::switchAudioTrack(int streamIndex) {
     prospero_subtitle_requested_stream = -2;
 
     if (wasPaused) setPaused(true);
+    saveResumePosition();
     return true;
 }
 
@@ -2389,6 +2448,7 @@ bool PlaybackController::switchVideoVariant(int streamIndex) {
     prospero_subtitle_requested_stream = -2;
 
     if (wasPaused) setPaused(true);
+    saveResumePosition();
     return true;
 }
 

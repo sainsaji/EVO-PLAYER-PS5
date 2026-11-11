@@ -417,6 +417,13 @@ double load_resume_position(const char *path) {
     return 0.0;
 }
 
+int load_resume_audio_stream(const char *path) {
+    if (auto pb = evo::Application::getInstance().getPlaybackController()) {
+        return pb->loadResumeAudioStream(path ? path : "");
+    }
+    return -1;
+}
+
 void prospero_settings_save(void) {
     if (auto s = evo::Application::getInstance().getSettingsService()) {
         s->saveSettings();

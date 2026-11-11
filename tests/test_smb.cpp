@@ -534,7 +534,19 @@ extern "C" void test_smb_recent_and_favorites(void) {
     TEST_ASSERT(recent_file_count == 1, "recent_load must load migrated entry");
     TEST_ASSERT(std::string(recent_files[0].path) == "smb://10.0.0.5:445/Media/OldMovie.mp4",
                 "loaded entry must be sanitized on load");
+    TEST_ASSERT(recent_files[0].audio_stream == -1, "old 5-column entry must default audio_stream to -1");
+    TEST_ASSERT(recent_lookup_audio("smb://10.0.0.5:445/Media/OldMovie.mp4") == -1, "recent_lookup_audio for old entry must return -1");
+
+    // 2b. Audio track persistence on resume
+    recent_add_or_update("smb://10.0.0.5:445/Media/MultiTrack.mkv", "Multi Track Movie", 300.0, 7200.0, 3);
+    TEST_ASSERT(recent_lookup_audio("smb://10.0.0.5:445/Media/MultiTrack.mkv") == 3, "recent_lookup_audio must return saved audio stream");
+    // Update position without passing audio stream -> must preserve existing audio stream 3
+    recent_add_or_update("smb://10.0.0.5:445/Media/MultiTrack.mkv", "Multi Track Movie", 350.0, 7200.0);
+    TEST_ASSERT(recent_lookup_audio("smb://10.0.0.5:445/Media/MultiTrack.mkv") == 3, "recent_lookup_audio must preserve audio stream on update");
     recent_save();
+
+    recent_load();
+    TEST_ASSERT(recent_lookup_audio("smb://10.0.0.5:445/Media/MultiTrack.mkv") == 3, "audio stream must persist across save and load");
 
     rfp = fopen(RECENT_FILE_DB, "r");
     memset(rbuf, 0, sizeof(rbuf));

@@ -41,12 +41,15 @@ int             recent_selected   = 0;
 void recent_clear(void)
 {
     memset(recent_files, 0, sizeof(recent_files));
+    for (int i = 0; i < MAX_RECENT_FILES; i++)
+        recent_files[i].audio_stream = -1;
     recent_file_count = 0;
     recent_selected   = 0;
 }
 
 void recent_add_or_update(const char *path, const char *title,
-                           double last_pos, double duration)
+                           double last_pos, double duration,
+                           int audio_stream)
 {
     if (!path || !path[0]) return;
 
@@ -71,6 +74,13 @@ void recent_add_or_update(const char *path, const char *title,
     entry.last_pos    = last_pos;
     entry.duration    = duration;
     entry.last_played = now_ms();
+    if (audio_stream >= 0) {
+        entry.audio_stream = audio_stream;
+    } else if (existing >= 0) {
+        entry.audio_stream = recent_files[existing].audio_stream;
+    } else {
+        entry.audio_stream = -1;
+    }
 
     if (existing >= 0) {
         for (int i = existing; i > 0; i--)
@@ -99,7 +109,7 @@ void recent_update_current_position(void)
     char title[128], meta[96];
     clean_media_title(current_media_path, title, sizeof(title), meta, sizeof(meta));
 
-    recent_add_or_update(current_media_path, title, pos, media_duration_sec);
+    recent_add_or_update(current_media_path, title, pos, media_duration_sec, -1);
     recent_save();
 }
 
@@ -109,12 +119,13 @@ void recent_save(void)
     if (!fp) return;
 
     for (int i = 0; i < recent_file_count; i++) {
-        fprintf(fp, "%s\t%s\t%.3f\t%.3f\t%lld\n",
+        fprintf(fp, "%s\t%s\t%.3f\t%.3f\t%lld\t%d\n",
                 recent_files[i].path,
                 recent_files[i].title,
                 recent_files[i].last_pos,
                 recent_files[i].duration,
-                recent_files[i].last_played);
+                recent_files[i].last_played,
+                recent_files[i].audio_stream);
     }
 
     fclose(fp);
@@ -137,14 +148,16 @@ void recent_load(void)
         char *last_pos    = strtok(NULL,  "\t");
         char *duration    = strtok(NULL,  "\t");
         char *last_played = strtok(NULL,  "\t\r\n");
+        char *audio_stream= strtok(NULL,  "\t\r\n");
 
         if (!path || !title) continue;
 
         evo_url_sanitize(path, e->path, sizeof(e->path));
         evo_url_sanitize(title, e->title, sizeof(e->title));
-        e->last_pos    = last_pos    ? atof(last_pos)    : 0.0;
-        e->duration    = duration    ? atof(duration)    : 0.0;
-        e->last_played = last_played ? atoll(last_played) : 0;
+        e->last_pos     = last_pos     ? atof(last_pos)     : 0.0;
+        e->duration     = duration     ? atof(duration)     : 0.0;
+        e->last_played  = last_played  ? atoll(last_played)  : 0;
+        e->audio_stream = audio_stream ? atoi(audio_stream) : -1;
 
         recent_file_count++;
     }
@@ -256,4 +269,16 @@ double recent_lookup(const char *path)
             return recent_files[i].last_pos;
     }
     return 0.0;
+}
+
+int recent_lookup_audio(const char *path)
+{
+    if (!path || !path[0]) return -1;
+    char clean_path[512];
+    evo_url_sanitize(path, clean_path, sizeof(clean_path));
+    for (int i = 0; i < recent_file_count; i++) {
+        if (strcmp(recent_files[i].path, clean_path) == 0)
+            return recent_files[i].audio_stream;
+    }
+    return -1;
 }

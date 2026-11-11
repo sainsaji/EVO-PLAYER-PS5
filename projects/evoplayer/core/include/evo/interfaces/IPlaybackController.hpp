@@ -132,6 +132,7 @@ public:
 
     virtual void saveResumePosition() = 0;
     virtual double loadResumePosition(const std::string& filePath) const = 0;
+    virtual int loadResumeAudioStream(const std::string& filePath) const = 0;
 
     virtual bool playNextVideo() = 0;
     virtual bool replay() = 0;

@@ -71,6 +71,7 @@ public:
 
     void saveResumePosition() override;
     double loadResumePosition(const std::string& filePath) const override;
+    int loadResumeAudioStream(const std::string& filePath) const override;
 
     bool playNextVideo() override;
     bool replay() override;

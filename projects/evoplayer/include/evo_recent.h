@@ -33,6 +33,7 @@ typedef struct {
     double    last_pos;
     double    duration;
     long long last_played;
+    int       audio_stream;   /* -1 for unset/default, or active audio stream index */
 } RecentFileEntry;
 
 extern RecentFileEntry recent_files[MAX_RECENT_FILES];
@@ -40,12 +41,20 @@ extern int             recent_file_count;
 extern int             recent_selected;
 
 void   recent_clear(void);
+#ifdef __cplusplus
 void   recent_add_or_update(const char *path, const char *title,
-                             double last_pos, double duration);
+                             double last_pos, double duration,
+                             int audio_stream = -1);
+#else
+void   recent_add_or_update(const char *path, const char *title,
+                             double last_pos, double duration,
+                             int audio_stream);
+#endif
 void   recent_update_current_position(void);
 void   recent_save(void);
 void   recent_load(void);
 double recent_lookup(const char *path);   /* returns last_pos or 0.0 */
+int    recent_lookup_audio(const char *path); /* returns audio_stream or -1 */
 
 /* #233: drop the entry for `path`, and every entry under it when `path` is a
  * folder that was deleted. Saves when anything went. Returns how many went. */
