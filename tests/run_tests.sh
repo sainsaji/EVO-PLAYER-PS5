@@ -96,6 +96,12 @@ SRCS=(
     "${EVO}/src/evo_web_url.c"
     "${REPO_ROOT}/tests/test_cast_dial.cpp"
     "${EVO}/src/evo_cast_receiver.c"
+    # The cast receiver plays links through the full-length resolver, which
+    # runs yt-dlp's solver in QuickJS (the engine itself is not tested here).
+    "${REPO_ROOT}/tests/test_yt_link.cpp"
+    "${ADDONS}/src/evo_yt_link.c"
+    "${ADDONS}/src/evo_ytjs_blob.c"
+    "${ADDONS}/src/quickjs-amalgam.c"
 )
 
 # Version from the same file package-app.sh and release.yml use, rather than a
