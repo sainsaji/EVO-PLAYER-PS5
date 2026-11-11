@@ -9,7 +9,7 @@
  * passes -DEVO_PLAYER_VERSION from projects/evoplayer/VERSION; this is the
  * fallback for builds that do not. */
 #ifndef EVO_PLAYER_VERSION
-#define EVO_PLAYER_VERSION "v0.13.6"
+#define EVO_PLAYER_VERSION "v0.13.7"
 #endif
 
 #include <stdio.h>

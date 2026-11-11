@@ -239,7 +239,7 @@ int main(int argc, char **argv)
 
     evo_rmlui_launch_params_t launch{};
     launch.app_name = "EVO PLAYER";
-    launch.version = "VERSION 0.13.6";
+    launch.version = "VERSION 0.13.7";
     launch.clock = "21:47";
     launch.theme_name = "MIDNIGHT";
     launch.hero_eyebrow = "CONTINUE WATCHING";

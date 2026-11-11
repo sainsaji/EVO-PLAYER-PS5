@@ -26,6 +26,24 @@ typedef struct evo_changelog_release {
 } evo_changelog_release;
 
 /*
+ * Release 0.13.7
+ *
+ * The full notes are in CHANGELOG.md. The screen scrolls this list (right stick).
+ */
+static const evo_changelog_item EVO_CL_0137[] = {
+    { EVO_CL_NEW,      "PLAY A YOUTUBE LINK - THE WHOLE VIDEO IN EVO, UP TO 1080P60" },
+    { EVO_CL_IMPROVED, "YOUTUBE CASTS PLAY IN FULL INSTEAD OF STOPPING AFTER A MINUTE" },
+    { EVO_CL_NEW,      "YOUR PHONE AS A REMOTE - OPEN <CONSOLE>:9780/REMOTE (#238)" },
+    { EVO_CL_IMPROVED, "SETTINGS ROWS NEVER CUT OFF - THE SECTION LIST FOLDS TO ICONS" },
+    { EVO_CL_NEW,      "PICTURE PREVIEWS AND ONE ICON FOR EVERY SETTING" },
+    { EVO_CL_NEW,      "DID YOU KNOW - TIPS ABOUT WHAT EVO CAN DO, ON HOME" },
+    { EVO_CL_NEW,      "UPMIX STEREO TO 4.0 AND CONTROLLER PHONE AUDIO (SETTINGS > AUDIO)" },
+    { EVO_CL_NEW,      "SUBTITLE STYLE AND LIBRARY FILTERS - THANKS ANDREA17982" },
+    { EVO_CL_IMPROVED, "RESUME KEEPS YOUR AUDIO TRACK" },
+    { EVO_CL_FIXED,    "CAST SEEKING, DASH CASTS AND THE LIVE LOG'S STORY AND MEMORY LINE" }
+};
+
+/*
  * Release 0.13.6
  *
  * The full notes are in CHANGELOG.md. The screen scrolls this list (right stick).
@@ -277,6 +295,7 @@ static const evo_changelog_item EVO_CL_001[] = {
 };
 
 static const evo_changelog_release EVO_CHANGELOG_RELEASES[] = {
+    { "0.13.7", "WHOLE YOUTUBE VIDEOS, PHONE REMOTE & CLEARER SETTINGS", "NOVEMBER 2026", EVO_CL_0137, sizeof(EVO_CL_0137)/sizeof(EVO_CL_0137[0]) },
     { "0.13.6", "PLAYBACK STUTTER FIXES & EXPERIMENTAL BROWSER", "NOVEMBER 2026", EVO_CL_0136, sizeof(EVO_CL_0136)/sizeof(EVO_CL_0136[0]) },
     { "0.13.5", "NETWORK SHARES, DETAIL PAGE & STREMIO ACCOUNT", "NOVEMBER 2026", EVO_CL_0135, sizeof(EVO_CL_0135)/sizeof(EVO_CL_0135[0]) },
     { "0.13.0", "UPDATER, CHAPTERS & PROVIDER SHELVES", "OCTOBER 2026", EVO_CL_0130, sizeof(EVO_CL_0130)/sizeof(EVO_CL_0130[0]) },

@@ -5,6 +5,53 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ---
 
+## 0.13.7
+
+![](https://img.shields.io/badge/Release-v0.13.7-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-13.60%20and%20below-blue?style=flat-square)
+
+**Whole YouTube videos, your phone as a remote, and a clearer Settings screen.** Paste a YouTube link, or cast from the YouTube app, and EVO now plays the whole video in its own player (up to 1080p60) instead of stopping after about a minute. Your phone can drive playback from a web page, Settings shows every setting in full with a picture of what it does, and Home now shows a short tip about something EVO can do. 0.13.6 was not released on its own, so this release also contains everything listed under 0.13.6 below.
+
+Download **`PPSA99039.ffpfsc`** and deploy it with ShadowMountPlus, or the folder-title **`.zip`**, then launch EVO from the Games row. Or install it straight from the console with **[ProsperoStore](https://github.com/blackbearreloaded/ProsperoStore)**. Runs on any jailbroken PS5 on firmware 13.60 and below. PS5 Pro owners can use the `-pro` package for the larger memory mode.
+
+Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47Nc8WtXh)**.
+
+### ![](https://img.shields.io/badge/YOUTUBE-ff0000?style=flat-square) YouTube in EVO's player
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Play a YouTube link, whole video.** Settings → Interface & Storage → **Play a YouTube link**, the **Play a YouTube link** box on the phone page (`<console>:9780/input`), or a POST to the cast port. Up to 1080p60. EVO solves YouTube's playback check with yt-dlp's challenge solver running in an embedded QuickJS engine.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Casts from the YouTube app play in full.** A cast used to stop after about a minute; it now takes the same full-length route (up to 1080p60), keeping the phone's start time.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Seeking in a cast** jumps straight to the right place instead of decoding from the start.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **DASH casts play** past the first segment (the stream address lost its signature inside the manifest).
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **A cast in the browser closes itself** when the phone stops or disconnects, or the video ends, with a hint on screen.
+
+### ![](https://img.shields.io/badge/PHONE-3ddc84?style=flat-square) Phone
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Your phone as a remote (#238).** Open `<console>:9780/remote`: play/pause, 10 s back and forward, a scrub bar, chapters, stop, subtitles and audio tracks, and a D-pad with OK, Back, Info and Options for EVO's menus. Works in every build; nothing to install.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Enter sends** on the phone keyboard page (Shift+Enter for a new line), and in the YouTube box.
+
+### ![](https://img.shields.io/badge/INTERFACE-7c4dff?style=flat-square) Interface
+
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Settings rows are never cut off.** While you are in the rows, the section list shrinks to its icons; Left brings it back.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Picture previews** for the settings that only had text, from Upmix 4.0 and the cast settings to Volume boost, Audio delay and Network buffer.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **One icon per setting**, instead of the same few repeated; the Cast to EVO Player row had none.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **"Did you know" on Home**: one tip at a time about what EVO can do, with this console's address in the phone tips.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Library filters (#220):** Years, Rating and Watched-only in the Jellyfin/Emby Sort & filter panel. Thanks @Andrea17982.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Subtitle style (#231):** size, colour, position and background for the main subtitle line in Settings → Subtitles. Thanks @Andrea17982.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **In-provider options,** an L1 jump to the library, R2 for sort, and a dual-subtitle preview with real dialogue.
+
+### ![](https://img.shields.io/badge/AUDIO-e91e63?style=flat-square) Audio & playback
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Upmix stereo to 4.0** (Settings → Audio): stereo tracks fill the surround and rear speakers with their ambience; voices stay in front.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Controller phone audio** (Settings → Audio): phone calls in a film play on the DualSense speaker, found from the subtitles.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Resume keeps your audio track.**
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) Subtitle samples reset on a new file or track.
+
+### ![](https://img.shields.io/badge/DIAGNOSTICS-607d8b?style=flat-square) Diagnostics
+
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Live log, What happened:** a video's log lines stay open while new lines arrive, and each video can **copy its lines**.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Live log, Now:** the memory line says what each number is (app memory, video buffers, UI GPU pool) instead of calling app memory "video memory".
+
+---
+
 ## 0.13.6
 
 ![](https://img.shields.io/badge/Release-v0.13.6-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-below%2013.60-blue?style=flat-square)

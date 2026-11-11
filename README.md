@@ -14,7 +14,17 @@ Plays video from USB drives (exFAT, FAT32 and read-only NTFS), internal storage,
 
 ---
 
-## What's New in v0.13.6
+## What's New in v0.13.7
+
+- **Play a YouTube link, whole video:** paste a link in Settings → Interface & Storage → **Play a YouTube link**, or on the phone page, and EVO plays the full video in its own player, up to 1080p60.
+- **YouTube casts play in full:** casting from the YouTube app no longer stops after about a minute.
+- **Your phone as a remote (#238):** open `<console>:9780/remote` for play/pause, seeking, chapters, subtitles, audio tracks and a D-pad for EVO's menus.
+- **Clearer Settings:** rows are never cut off, every setting has a picture preview and its own icon.
+- **"Did you know" on Home**, **Upmix stereo to 4.0**, **controller phone audio**, **subtitle style** and **library filters** (thanks @Andrea17982).
+
+0.13.6 was not released on its own; its changes ship in 0.13.7 too.
+
+### Highlights from v0.13.6
 
 - **YouTube Cast Receiver (DIAL & Lounge):** Cast YouTube videos straight from your phone (Android or iOS) to EVO Player without signing in. Supports SSDP discovery, DIAL launch, and direct pairing via YouTube Lounge companion screen protocol.
 - **Native Player Casting:** Stream YouTube videos directly in EVO's native hardware player with full controller support, or fall back to the system browser. Configurable via **Settings → Network → CAST TO EVO PLAYER**.
