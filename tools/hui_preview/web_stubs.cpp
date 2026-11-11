@@ -10,6 +10,8 @@
 
 extern "C" {
 
+/* Settings > Experimental > Web browser (06b4c76): on in the preview, so the rail shows Web. */
+int evo_settings_web_browser_enabled(void) { return 1; }
 void evo_browser_open(void) {}
 evo_browser_state_t evo_browser_state(char *why, int why_cap)
 {
