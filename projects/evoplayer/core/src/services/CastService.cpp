@@ -276,8 +276,10 @@ void CastService::update(double deltaMs) {
 
             if (useNative) {
                 if (videoId[0]) {
+                    /* Full length (web_embedded HLS, up to 1080p60) first; the
+                     * ANDROID route it falls back to stops at about 60 s. */
                     toast("Cast", "Resolving YouTube stream...");
-                    startResolve(videoId, timeOffset);
+                    startResolve(videoId, timeOffset, true);
                 } else {
                     toast("Cast", "YouTube connected from phone");
                     evo_log("cast: Phone connected, awaiting video selection from Lounge");

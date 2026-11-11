@@ -189,7 +189,7 @@ const PreviewSpec kPreviews[] = {
     {SettingKey::PhoneCast, EVO_RMLUI_PREVIEW_INFO,
      "Allows casting YouTube from your phone directly to EVO Player (DIAL receiver on port 8765)."},
     {SettingKey::CastNativePlayer, EVO_RMLUI_PREVIEW_INFO,
-     "Plays YouTube casts in EVO Player (up to 4K), instead of the 720p WebKit browser."},
+     "Plays YouTube casts in EVO Player, full length up to 1080p60, instead of the 720p WebKit browser."},
     {SettingKey::YouTubeLink, EVO_RMLUI_PREVIEW_INFO,
      "Paste or type a YouTube link (or use the phone page) and EVO plays the whole video, up to 1080p60."},
     {SettingKey::AskStream, EVO_RMLUI_PREVIEW_ASK_STREAM,
@@ -654,7 +654,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
 
     case SettingKey::YouTubeLink:
         d = actionDef(key, "PLAY A YOUTUBE LINK", "PASTE OR TYPE A LINK - PLAYS FULL LENGTH (UP TO 1080P60)",
-                      "../icons/icon_play.png", "");
+                      "../icons/icon_tv.png", "");
         break;
 
     case SettingKey::AskStream:
@@ -945,7 +945,7 @@ void toggleSetting(SettingKey key) {
         break;
     case SettingKey::CastNativePlayer:
         st->setCastNativePlayerEnabled(!st->isCastNativePlayerEnabled());
-        toast("CAST PLAYER", st->isCastNativePlayerEnabled() ? "EVO Player (up to 4K)" : "System WebKit (720p)");
+        toast("CAST PLAYER", st->isCastNativePlayerEnabled() ? "EVO Player (up to 1080p60)" : "System WebKit (720p)");
         break;
     case SettingKey::AskStream:        st->setAskStreamEnabled(!st->isAskStreamEnabled()); break;
     case SettingKey::AddonAutoPick:    st->setAddonAutoPickEnabled(!st->isAddonAutoPickEnabled()); break;
