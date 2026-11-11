@@ -637,7 +637,12 @@ function renderNow(s) {
   if (mapFail0 == null) mapFail0 = mem.map_fail || 0;
   if ((mem.map_fail || 0) > mapFail0) alerts.push(["bad", "EVO ran out of memory", "Video may stop. Lower the network buffer, or turn off motion smoothing and upscaling."]);
   // one span per fact, so a narrow screen wraps between them, never inside one
-  $("mem").innerHTML = "<span>Video memory free <b>" + Math.round(mem.flex_free_mb || 0) + " of " + Math.round(mem.flex_total_mb || 0) + " MB</b></span><span>GPU pool <b>" +
+  // flex = the flexible pool for EVO's small allocations (param.json, 1 GiB);
+  // direct = video frames and big buffers (the 12 GB pool); gpu_pool = EVO's
+  // own drawing (UI, textures), not the video.
+  $("mem").innerHTML = '<span title="EVO\'s pool for small allocations">App memory free <b>' + Math.round(mem.flex_free_mb || 0) + " of " + Math.round(mem.flex_total_mb || 0) + " MB</b></span>" +
+    '<span title="Video frames and large buffers, in the PS5\'s direct memory">Video buffers <b>' + Math.round(mem.direct_mb || 0) + " MB</b></span>" +
+    '<span title="EVO\'s own drawing: menus, text and textures, not the video">UI GPU pool <b>' +
     Math.round(mem.gpu_pool_mb || 0) + " of " + Math.round(mem.gpu_pool_total_mb || 0) + " MB</b></span>" + (mem.map_fail ? "<span><b style='color:var(--danger)'>" + mem.map_fail + " failed allocations</b></span>" : "");
   // diag: findings from the diagnostic engine come first
   const d = []; for (let i = L.length - 1; i >= sessionStart && d.length < 3; i--) if (L[i].diag && now - (wallBase + L[i].t * 1000) < 600000) d.push(L[i]);
