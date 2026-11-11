@@ -4,6 +4,7 @@
 #include "evo_controller_speaker.h"
 #include "evo_subtitle.h"
 #include "evo_boot_log.h"
+#include "evo_thread.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -12,11 +13,6 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <ctype.h>
-#include <math.h>
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 
 extern int g_ps5_user_id;
 
@@ -68,40 +64,17 @@ static inline float biquad_process(biquad_t *f, float in) {
     return out;
 }
 
+/* RBJ biquads at fs = 48 kHz, Q = 0.7071: high-pass 350 Hz, low-pass 3400 Hz.
+ * The coefficients are precomputed on the host because sinf/cosf are not
+ * calls EVO made anywhere else, and a libc function the app module's shim
+ * lacks binds to NULL and crashes at address 0 on first use. */
 static void init_telephone_filters(void) {
-    const float fs = 48000.0f;
-    const float q = 0.7071f;
-
-    /* High-pass filter at 350 Hz */
-    {
-        float w0 = 2.0f * (float)M_PI * 350.0f / fs;
-        float alpha = sinf(w0) / (2.0f * q);
-        float cos_w = cosf(w0);
-        float a0 = 1.0f + alpha;
-        s_hp_filter.b0 = ((1.0f + cos_w) / 2.0f) / a0;
-        s_hp_filter.b1 = (-(1.0f + cos_w)) / a0;
-        s_hp_filter.b2 = ((1.0f + cos_w) / 2.0f) / a0;
-        s_hp_filter.a1 = (-2.0f * cos_w) / a0;
-        s_hp_filter.a2 = (1.0f - alpha) / a0;
-        s_hp_filter.s1 = 0.0f;
-        s_hp_filter.s2 = 0.0f;
-    }
-
-    /* Low-pass filter at 3400 Hz */
-    {
-        float w0 = 2.0f * (float)M_PI * 3400.0f / fs;
-        float alpha = sinf(w0) / (2.0f * q);
-        float cos_w = cosf(w0);
-        float a0 = 1.0f + alpha;
-        s_lp_filter.b0 = ((1.0f - cos_w) / 2.0f) / a0;
-        s_lp_filter.b1 = (1.0f - cos_w) / a0;
-        s_lp_filter.b2 = ((1.0f - cos_w) / 2.0f) / a0;
-        s_lp_filter.a1 = (-2.0f * cos_w) / a0;
-        s_lp_filter.a2 = (1.0f - alpha) / a0;
-        s_lp_filter.s1 = 0.0f;
-        s_lp_filter.s2 = 0.0f;
-    }
-
+    static const biquad_t hp = { 9.681226875e-01f, -1.936245375e+00f, 9.681226875e-01f,
+                                 -1.935228973e+00f, 9.372617774e-01f, 0.0f, 0.0f };
+    static const biquad_t lp = { 3.734023477e-02f, 7.468046954e-02f, 3.734023477e-02f,
+                                 -1.383887278e+00f, 5.332482170e-01f, 0.0f, 0.0f };
+    s_hp_filter = hp;
+    s_lp_filter = lp;
     s_filters_initialized = 1;
 }
 
@@ -120,11 +93,27 @@ static int evo_ascii_has_ci(const char *haystack, const char *needle) {
     return 0;
 }
 
+/* True when `word` appears in buf (already lower-case) as a whole word, so
+ * "phone" matches "[on phone]" but not "microphone" or "headphones". */
+static int has_word(const char *buf, const char *word) {
+    size_t wl = strlen(word);
+    for (const char *h = strstr(buf, word); h; h = strstr(h + 1, word)) {
+        int left_ok = (h == buf) || !isalpha((unsigned char)h[-1]);
+        char after = h[wl];
+        int right_ok = !isalpha((unsigned char)after) ||
+                       (after == 's' && !isalpha((unsigned char)h[wl + 1]));
+        if (left_ok && right_ok) return 1;
+    }
+    return 0;
+}
+
 static int descriptor_has_phone(const char *tag, size_t len) {
+    /* Only words that mean a phone call. "cell", "receiver", "filtered" and
+     * "distorted" used to be here: "[cell door slams]" or "[distorted
+     * screaming]" then ducked the whole main mix. */
     static const char * const kw[] = {
-        "phone", "telephone", "cell", "caller", "receiver",
-        "answering machine", "voicemail", "speakerphone",
-        "filtered", "distorted"
+        "phone", "telephone", "cellphone", "cell phone", "caller",
+        "answering machine", "voicemail", "speakerphone"
     };
     char buf[128];
     if (len >= sizeof(buf)) len = sizeof(buf) - 1;
@@ -134,7 +123,7 @@ static int descriptor_has_phone(const char *tag, size_t len) {
     buf[len] = '\0';
 
     for (size_t k = 0; k < sizeof(kw) / sizeof(kw[0]); ++k) {
-        if (strstr(buf, kw[k])) {
+        if (has_word(buf, kw[k])) {
             return 1;
         }
     }
@@ -286,7 +275,15 @@ void evo_controller_speaker_start(int enabled) {
     s_phone_active = 0;
     s_hangover = 0;
     s_thread_running = 1;
-    pthread_create(&s_thread, NULL, controller_speaker_worker, NULL);
+    /* The console's default pthread stack is too small for a thread that
+     * calls into the audio library with an 8 KB buffer on its stack. */
+    if (evo_thread_create(&s_thread, controller_speaker_worker, NULL) != 0) {
+        s_thread_running = 0;
+        if (s_pad_handle >= 0) {
+            sceAudioOutClose(s_pad_handle);
+            s_pad_handle = -1;
+        }
+    }
 }
 
 void evo_controller_speaker_stop(void) {
