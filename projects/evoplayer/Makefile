@@ -237,6 +237,7 @@ CORE_SRCS := \
     core/src/services/FileSystemBrowser.cpp \
     core/src/services/FileTransferService.cpp \
     core/src/services/CastService.cpp \
+    core/src/services/PhoneRemote.cpp \
     core/src/services/PlaybackController.cpp \
     core/src/audio/iec61937.cpp \
     core/src/audio/bitstream.cpp \

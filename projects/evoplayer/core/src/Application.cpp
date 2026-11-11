@@ -69,6 +69,7 @@ extern "C" int perf_render_fps;
 #include "evo_net.h"
 #include "evo_subtitle.h"
 #include "evo_usb_remote.h"
+#include "evo_phone_remote.h"
 #include "evo_webui.h"
 /* #90: providers are reached through the vtable registry, never by name.
  * addon_emby.h is gone from here - provider_emby.c is the only thing that
@@ -1312,6 +1313,7 @@ int Application::run() {
             }
         }
         evo_usb_remote_poll();
+        evo_phone_remote_poll();   /* #238: commands from the phone remote page */
         evo_webui_pump();   /* #101: the system browser, when a web UI is open */
         webui_playback_pump();
 
@@ -1397,6 +1399,7 @@ int Application::run() {
              * Compiles to nothing without --usb-remote.
              */
             padData.buttons |= evo_usb_remote_take_buttons();
+            padData.buttons |= evo_phone_remote_take_buttons();   /* #238, every build */
 
             pressed = padData.buttons & ~lastButtons;
             released = ~padData.buttons & lastButtons;

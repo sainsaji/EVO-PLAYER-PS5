@@ -26,6 +26,9 @@
  *                      open keyboard (evo_keyboard_open_phone) and send it
  *   GET /input/state   {"open","seq","title","text","max","secret"} for that page
  *   POST /input        the text as the body; needs the X-EVO-Input header
+ *   POST /youtube      a YouTube link to play in full; same header
+ *   GET  /remote       the phone remote (#238); POST /remote = one command
+ *                      (evo_phone_remote.h), same header; GET /remote/state
  *
  * Case-insensitive paths and trailing slashes are accepted for /input, /input/state,
  * /log, etc. Unknown GET paths redirect (302) to /input.
@@ -62,6 +65,7 @@
 #include "evo_build_id.h"
 #include "evo_cast_receiver.h"
 #include "evo_data_path.h"
+#include "evo_phone_remote.h"
 #include "evo_hw.h"
 #include "evo_keyboard.h"
 #include "evo_prev_run.h"
@@ -109,7 +113,8 @@ static const char k_input_page[] =
 "<p id=cnt></p><button id=b disabled>Send to PS5</button><p id=msg></p>"
 "<h2>Play a YouTube link</h2><p class=dim>Plays the whole video in EVO, up to 1080p60.</p>"
 "<input id=y type=url inputmode=url enterkeyhint=go autocapitalize=off autocorrect=off autocomplete=off spellcheck=false maxlength=500 "
-"placeholder='https://youtu.be/...'><button id=yb>Play on PS5</button><p id=ym></p></main><script>"
+"placeholder='https://youtu.be/...'><button id=yb>Play on PS5</button><p id=ym></p>"
+"<p class=dim style='text-align:center;margin-top:24px'><a href=/remote style='color:var(--ac)'>Use this phone as a remote</a></p></main><script>"
 "var Y=document.getElementById('y'),YB=document.getElementById('yb'),YM=document.getElementById('ym');"
 "YB.onclick=function(){var v=Y.value.trim();if(!v){YM.textContent='Paste a YouTube link first.';return}"
 "YB.disabled=true;YM.textContent='Sending...';"
@@ -142,6 +147,63 @@ static const char k_input_page[] =
 "else M.textContent=r.status==409?'The PS5 moved on to another prompt. Check it and send again.':'Could not send.';"
 "poll()})"
 ".catch(function(){busy=false;M.textContent='Could not reach the PS5.';B.disabled=false})};"
+"poll();setInterval(poll,1000);</script>";
+
+/* #238: the phone as a remote. Now playing (title, time, a scrub bar), the
+ * transport buttons, a D-pad for EVO's menus and the player's own shortcuts.
+ * Commands go to POST /remote (X-EVO-Input, like /input); /remote/state is
+ * polled once a second. No external files: any phone browser on the LAN. */
+static const char k_remote_page[] =
+"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1,user-scalable=no'>"
+"<title>EVO remote</title><style>"
+":root{color-scheme:dark;--bg:#0b0f19;--card:#151b2b;--line:#273049;--fg:#eef1f7;--dim:#8d97ad;--ac:#ffcd00}"
+"*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}"
+"body{margin:0;font:16px/1.35 system-ui,sans-serif;background:var(--bg);color:var(--fg);user-select:none}"
+"main{max-width:460px;margin:0 auto;padding:14px 16px 28px}"
+"header{display:flex;align-items:center;gap:8px;margin-bottom:12px}h1{font-size:18px;margin:0;flex:1}"
+"#dot{width:9px;height:9px;border-radius:50%;background:#666}#dot.on{background:#3ddc84}"
+".card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px}"
+"#title{font-weight:600;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:1.35em}"
+"#time{display:flex;justify-content:space-between;color:var(--dim);font:13px ui-monospace,monospace;margin-top:6px}"
+"input[type=range]{width:100%;margin:10px 0 2px;accent-color:var(--ac);height:28px}"
+".row{display:grid;gap:10px;margin-top:12px}.r3{grid-template-columns:1fr 1.3fr 1fr}.r4{grid-template-columns:repeat(4,1fr)}"
+"button{font:inherit;font-weight:600;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:14px;"
+"padding:16px 6px;touch-action:manipulation}button:active{background:#232c45;transform:scale(.97)}"
+"button.big{background:var(--ac);color:#111;border:0;font-size:22px}button small{display:block;font-weight:400;color:var(--dim);font-size:12px}"
+".pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px auto 0;max-width:300px}"
+".pad button{padding:20px 0;font-size:20px}.pad .ok{border-radius:50%;aspect-ratio:1;padding:0;background:#232c45}"
+"#msg{color:var(--dim);font-size:13px;text-align:center;margin-top:12px;min-height:1.3em}"
+"h2{font-size:13px;letter-spacing:.12em;color:var(--dim);margin:20px 0 0;font-weight:600}"
+"</style><main><header><span id=dot></span><h1>EVO remote</h1></header>"
+"<div class=card><div id=title>Nothing playing</div><input id=bar type=range min=0 max=1000 value=0 disabled>"
+"<div id=time><span id=pos>0:00</span><span id=dur>0:00</span></div></div>"
+"<div class='row r3'><button data-c='seek -10'>&#8630; 10s</button><button class=big id=pp data-c=pause>&#9654;&#10074;&#10074;</button>"
+"<button data-c='seek +10'>10s &#8631;</button></div>"
+"<div class='row r3'><button data-c='chapter -1'>&#9198;<small>Chapter</small></button><button data-c=stop>&#9632;<small>Stop</small></button>"
+"<button data-c='chapter +1'>&#9197;<small>Chapter</small></button></div>"
+"<h2>PLAYER</h2><div class='row r4'><button data-c='key up'>CC<small>Subs on/off</small></button>"
+"<button data-c='key down'>Subs<small>Pick track</small></button><button data-c='key r2'>Audio<small>Tracks</small></button>"
+"<button data-c='key triangle'>Skip<small>Intro / aspect</small></button></div>"
+"<h2>MENUS</h2><div class=pad><span></span><button data-c='key up'>&#9650;</button><span></span>"
+"<button data-c='key left'>&#9664;</button><button class=ok data-c='key cross'>OK</button><button data-c='key right'>&#9654;</button>"
+"<span></span><button data-c='key down'>&#9660;</button><span></span></div>"
+"<div class='row r3'><button data-c='key circle'>Back</button><button data-c='key square'>Info</button><button data-c='key options'>Options</button></div>"
+"<div id=msg></div></main><script>"
+"var $=function(i){return document.getElementById(i)},drag=false,last=null;"
+"function fmt(s){s=Math.max(0,Math.floor(s||0));var h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;"
+"return (h?h+':'+(m<10?'0':''):'')+m+':'+(x<10?'0':'')+x}"
+"function send(c){if(navigator.vibrate)navigator.vibrate(15);"
+"fetch('/remote',{method:'POST',headers:{'X-EVO-Input':'1','Content-Type':'text/plain'},body:c})"
+".then(function(r){$('msg').textContent=r.ok?'':r.status==409?'Nothing is playing':'Not sent'})"
+".catch(function(){$('msg').textContent='Cannot reach the PS5'});setTimeout(poll,250)}"
+"document.querySelectorAll('[data-c]').forEach(function(b){b.onclick=function(){send(b.dataset.c)}});"
+"$('bar').oninput=function(){drag=true;if(last)$('pos').textContent=fmt(last.dur*$('bar').value/1000)};"
+"$('bar').onchange=function(){if(last&&last.dur>0)send('seek '+(last.dur*$('bar').value/1000).toFixed(1));drag=false};"
+"function poll(){fetch('/remote/state',{cache:'no-store'}).then(function(r){return r.json()}).then(function(s){last=s;$('dot').className='on';"
+"$('title').textContent=s.active?(s.title||'Playing'):'Nothing playing';$('bar').disabled=!s.active||!(s.dur>0);"
+"$('pp').innerHTML=s.active&&!s.paused?'&#10074;&#10074;':'&#9654;';"
+"if(!drag){$('bar').value=s.dur>0?Math.round(1000*s.pos/s.dur):0;$('pos').textContent=fmt(s.pos)}$('dur').textContent=fmt(s.dur)})"
+".catch(function(){$('dot').className='';$('title').textContent='Cannot reach the PS5'})}"
 "poll();setInterval(poll,1000);</script>";
 
 /* #229: the phone page for sending a problem report. It loads /report.txt once,
@@ -497,6 +559,39 @@ static void serve_youtube_post(int fd, const char *head, const char *body, size_
     send_str(fd, "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nok\n");
 }
 
+/* POST /remote - one phone-remote command (evo_phone_remote.h). Same guard as
+ * /input: the custom header keeps other web pages from driving the console. */
+static void serve_remote_post(int fd, const char *head, const char *body, size_t blen, int too_big)
+{
+    if (!header_value(head, "x-evo-input:")) {
+        send_str(fd, "HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+        return;
+    }
+    char cmd[80];
+    if (too_big || blen >= sizeof cmd) {
+        send_str(fd, "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+        return;
+    }
+    memcpy(cmd, body ? body : "", blen);
+    cmd[blen] = '\0';
+    if (evo_phone_remote_post(cmd) != 0) {
+        send_str(fd, "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        return;
+    }
+    send_str(fd, "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nok\n");
+}
+
+static void serve_remote_state(int fd)
+{
+    char body[768], head[160];
+    const size_t n = evo_phone_remote_state_json(body, sizeof body);
+    snprintf(head, sizeof head,
+             "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n"
+             "Cache-Control: no-store\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n", n);
+    send_str(fd, head);
+    send_all(fd, body, n);
+}
+
 /* ---- #229: the problem report ------------------------------------------ */
 
 typedef struct { evo_report_sink_fn sink; void *ud; long total; int stop; } rp_t;
@@ -841,7 +936,8 @@ static void *conn_thread(void *arg)
 
         const int post_input = !strcmp(method, "POST") && !strcmp(norm, "/input");
         const int post_youtube = !strcmp(method, "POST") && !strcmp(norm, "/youtube");
-        if (strcmp(method, "GET") != 0 && !post_input && !post_youtube)
+        const int post_remote = !strcmp(method, "POST") && !strcmp(norm, "/remote");
+        if (strcmp(method, "GET") != 0 && !post_input && !post_youtube && !post_remote)
             send_str(fd, "HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n");
         else if (busy)
             send_str(fd, "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\ntoo many log clients\n");
@@ -850,6 +946,18 @@ static void *conn_thread(void *arg)
                 serve_input_post(fd, req, body, blen, too_big);
             } else if (post_youtube) {
                 serve_youtube_post(fd, req, body, blen, too_big);
+            } else if (post_remote) {
+                serve_remote_post(fd, req, body, blen, too_big);
+            } else if (!strcmp(norm, "/remote")) {
+                char head[160];
+                snprintf(head, sizeof head,
+                         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+                         "Cache-Control: no-store\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
+                         sizeof k_remote_page - 1);
+                send_str(fd, head);
+                send_all(fd, k_remote_page, sizeof k_remote_page - 1);
+            } else if (!strcmp(norm, "/remote/state")) {
+                serve_remote_state(fd);
             } else if (!strcmp(norm, "/input")) {
                 char head[160];
                 snprintf(head, sizeof head,
