@@ -362,6 +362,110 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
             {EVO_RMLUI_ROW_ACTION, "CONSOLE", "DETECTED HARDWARE MODEL", "../icons/icon_tv.png", "PS5", 0, 0, "", {}, 0, -1, false}
         });
     }
+    else if (kind == "skip_segments")
+    {
+        build_preview_section(p, 0, "Video & Display", "DECODER, UPSCALING, 120 HZ & HDR", {
+            {EVO_RMLUI_ROW_VALUE, "SKIP INTROS & CREDITS", "OFF NEVER OFFERS A SKIP; ASK SHOWS A BUTTON; AUTO SKIPS ONCE", "../icons/icon_skip_forward.png", "ASK", 0, EVO_RMLUI_PREVIEW_SKIP_SEGMENTS, "Off never offers a skip. Ask shows a Skip button during an intro or credits and Triangle presses it. Auto skips by itself once and says so.", {"OFF", "ASK", "AUTO"}, 1, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "VIDEO DECODER", "WHICH BACKEND DECODES VIDEO", "../icons/icon_cpu.png", "AUTO", 0, 0, "", {"AUTO", "HARDWARE", "SOFTWARE"}, 0, -1, false},
+            {EVO_RMLUI_ROW_TOGGLE, "RESUME PLAYBACK", "REMEMBER PLAYBACK POSITION", "../icons/icon_rotate_ccw.png", "", 1, 0, "", {}, 0, -1, false}
+        });
+    }
+    else if (kind == "hdr_peak")
+    {
+        build_preview_section(p, 0, "Video & Display", "DECODER, UPSCALING, 120 HZ & HDR", {
+            {EVO_RMLUI_ROW_VALUE, "HDR OUTPUT", "HDR10 FOR HDR VIDEO - THE TV GOES BLACK BRIEFLY AT START & END", "../icons/icon_sun.png", "AUTO", 0, 0, "", {"OFF (TONE-MAP TO SDR)", "AUTO (MATCH CONTENT)"}, 1, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "HDR PEAK", "FIT HDR & DOLBY VISION TO YOUR TV'S PEAK - OFF LEAVES IT TO THE TV", "../icons/icon_sun_medium.png", "1500 NITS", 0, EVO_RMLUI_PREVIEW_HDR_PEAK, "Fits bright HDR films to your TV's real peak, shot by shot for Dolby Vision, instead of leaving it to the TV. Set your TV's peak (about 1500 nits for an LG G5) and turn its dynamic tone mapping off.", {"OFF (TV DECIDES)", "800 NITS", "1000 NITS", "1500 NITS", "2000 NITS", "3000 NITS"}, 3, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "120 HZ OUTPUT", "SMOOTHER 24 FPS - THE TV GOES BLACK BRIEFLY ON EACH SWITCH", "../icons/icon_gauge.png", "OFF", 0, 0, "", {"OFF", "AUTO (ALWAYS 120 HZ)", "PLAYBACK ONLY"}, 0, -1, false}
+        });
+    }
+    else if (kind == "audio_language")
+    {
+        build_preview_section(p, 1, "Audio", "OUTPUT CHANNELS, SPEAKERS & SOUNDS", {
+            {EVO_RMLUI_ROW_VALUE, "OUTPUT CHANNELS", "STEREO DOWNMIXES 5.1 & 7.1 TO 2.0", "../icons/icon_speaker.png", "AUTO", 0, 0, "", {"AUTO", "STEREO (2.0)"}, 0, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "AUDIO LANGUAGE", "THE TRACK A FILM STARTS WITH", "../icons/icon_languages.png", "ENGLISH", 0, EVO_RMLUI_PREVIEW_AUDIO_LANGUAGE, "The audio track a film starts with when it has several languages. Auto takes the first one.", {"AUTO", "ITALIANO", "ENGLISH", "ESPAÑOL", "FRANÇAIS", "DEUTSCH", "PORTUGUÊS", "JAPANESE"}, 2, -1, false},
+            {EVO_RMLUI_ROW_TOGGLE, "AUDIO PASSTHROUGH", "BITSTREAM DOLBY & DTS TO RECEIVER OVER HDMI", "../icons/icon_cable.png", "", 0, 0, "", {}, 0, -1, false}
+        });
+    }
+    else if (kind == "sub_language")
+    {
+        build_preview_section(p, 2, "Subtitles", "PREFERENCES & APPEARANCE", {
+            {EVO_RMLUI_ROW_TOGGLE, "AUTO SUBTITLES", "AUTOMATICALLY LOAD SUBTITLES ON PLAYBACK", "../icons/icon_captions.png", "", 1, 0, "", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "SUBTITLE LANGUAGE", "EMBEDDED FIRST, THEN ONLINE FROM YOUR ADDONS", "../icons/icon_languages.png", "ENGLISH", 0, EVO_RMLUI_PREVIEW_SUB_LANGUAGE, "The subtitles chosen when a film opens: embedded tracks first, then online subtitles from your Stremio addons. Forced (signs only) tracks are only picked when the audio is already in your language.", {"AUTO", "ITALIANO", "ENGLISH", "ESPAÑOL", "FRANÇAIS", "DEUTSCH", "PORTUGUÊS", "JAPANESE"}, 2, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "DEFAULT FONT STYLE", "SUBTITLE TYPEFACE", "../icons/icon_type.png", "STANDARD", 0, 0, "", {"STANDARD", "LIGHT", "ROUNDED", "BOLD"}, 0, -1, false}
+        });
+    }
+    else if (kind == "volume_boost")
+    {
+        build_preview_section(p, 1, "Audio", "OUTPUT CHANNELS, SPEAKERS & SOUNDS", {
+            {EVO_RMLUI_ROW_VALUE, "VOLUME BOOST", "RAISE QUIET FILES. LOUD PASSAGES CLIP, NEVER WRAP", "../icons/icon_volume.png", "+100%", 0, EVO_RMLUI_PREVIEW_VOLUME_BOOST, "Makes quiet files louder. Very loud passages are cut off cleanly instead of wrapping into noise. Has no effect on Dolby/DTS passthrough.", {"OFF", "+50%", "+100%", "+200%", "+300%"}, 2, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "AUDIO DELAY", "SHIFTS SOUND AGAINST PICTURE TO FIX LIP-SYNC", "../icons/icon_timer.png", "0 ms", 0, 0, "", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "OUTPUT CHANNELS", "STEREO DOWNMIXES 5.1 & 7.1 TO 2.0", "../icons/icon_speaker.png", "AUTO", 0, 0, "", {"AUTO", "STEREO (2.0)"}, 0, -1, false}
+        });
+    }
+    else if (kind == "audio_delay")
+    {
+        build_preview_section(p, 1, "Audio", "OUTPUT CHANNELS, SPEAKERS & SOUNDS", {
+            {EVO_RMLUI_ROW_VALUE, "VOLUME BOOST", "RAISE QUIET FILES. LOUD PASSAGES CLIP, NEVER WRAP", "../icons/icon_volume.png", "OFF", 0, 0, "", {"OFF", "+50%", "+100%", "+200%", "+300%"}, 0, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "AUDIO DELAY", "SHIFTS SOUND AGAINST PICTURE TO FIX LIP-SYNC", "../icons/icon_timer.png", "+100 ms", 0, EVO_RMLUI_PREVIEW_AUDIO_DELAY, "Shifts sound against picture to fix lip-sync on a TV, soundbar or Bluetooth speaker. Positive = sound later.", {"-200 ms", "-100 ms", "0 ms", "+100 ms", "+200 ms"}, 3, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "OUTPUT CHANNELS", "STEREO DOWNMIXES 5.1 & 7.1 TO 2.0", "../icons/icon_speaker.png", "AUTO", 0, 0, "", {"AUTO", "STEREO (2.0)"}, 0, -1, false}
+        });
+    }
+    else if (kind == "network_buffer")
+    {
+        build_preview_section(p, 0, "Video & Display", "DECODER, UPSCALING, 120 HZ & HDR", {
+            {EVO_RMLUI_ROW_VALUE, "HDR PEAK", "FIT HDR & DOLBY VISION TO YOUR TV'S PEAK - OFF LEAVES IT TO THE TV", "../icons/icon_sun_medium.png", "1500 NITS", 0, 0, "", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "NETWORK BUFFER", "HOW FAR AHEAD STREAMS LOAD. HIGH BITRATE FILES GET LESS", "../icons/icon_hard_drive_download.png", "2 MIN", 0, EVO_RMLUI_PREVIEW_NETWORK_BUFFER, "How far ahead network streams load. A bigger buffer rides out Wi-Fi drops but uses more memory, and very high bitrate files get less than you pick. Applies from the next file.", {"30 SEC", "1 MIN", "2 MIN", "5 MIN"}, 2, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "VIDEO DECODER", "WHICH BACKEND DECODES VIDEO", "../icons/icon_cpu.png", "AUTO", 0, 0, "", {"AUTO", "HARDWARE", "SOFTWARE"}, 0, -1, false}
+        });
+    }
+    else if (kind == "dev_tools")
+    {
+        build_preview_section(p, 4, "System & Diagnostics", "DIAGNOSTICS & SYSTEM MANAGEMENT", {
+            {EVO_RMLUI_ROW_TOGGLE, "DEBUG OVERLAY", "ON-SCREEN HARDWARE PERFORMANCE METRICS", "../icons/icon_activity.png", "", 0, 0, "", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_ACTION, "DEVELOPER TOOLS", "SYSTEM DIAGNOSTICS & PERFORMANCE STATS", "../icons/icon_developer_tools.png", "OPEN", 0, EVO_RMLUI_PREVIEW_DEV_TOOLS, "System diagnostics and performance stats.", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_ACTION, "CONSOLE", "DETECTED HARDWARE MODEL", "../icons/icon_monitor.png", "PS5 PRO", 0, 0, "", {}, 0, -1, false}
+        });
+    }
+    else if (kind == "console")
+    {
+        build_preview_section(p, 4, "System & Diagnostics", "DIAGNOSTICS & SYSTEM MANAGEMENT", {
+            {EVO_RMLUI_ROW_ACTION, "DEVELOPER TOOLS", "SYSTEM DIAGNOSTICS & PERFORMANCE STATS", "../icons/icon_developer_tools.png", "OPEN", 0, 0, "", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_ACTION, "CONSOLE", "DETECTED HARDWARE MODEL", "../icons/icon_monitor.png", "PS5 PRO", 0, EVO_RMLUI_PREVIEW_CONSOLE, "The console EVO detected. Some features, like Maximum AI upscaling, need a PS5 Pro.", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_ACTION, "MEMORY", "12.9 GIB - PRO MODE", "../icons/icon_memory_stick.png", "12.9 GIB - PRO MODE", 0, 0, "", {}, 0, -1, false}
+        });
+    }
+    else if (kind == "memory")
+    {
+        build_preview_section(p, 4, "System & Diagnostics", "DIAGNOSTICS & SYSTEM MANAGEMENT", {
+            {EVO_RMLUI_ROW_ACTION, "CONSOLE", "DETECTED HARDWARE MODEL", "../icons/icon_monitor.png", "PS5 PRO", 0, 0, "", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_ACTION, "MEMORY", "12.9 GIB - PRO MODE", "../icons/icon_memory_stick.png", "12.9 GIB - PRO MODE", 0, EVO_RMLUI_PREVIEW_MEMORY, "How much GPU memory EVO was given. A PS5 Pro gives about 1.2 GiB more to the Pro memory package. Standard mode is the normal amount.", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_ACTION, "SOFTWARE UPDATE", "RUNNING v0.13.6 - CROSS TO CHECK FOR UPDATES", "../icons/icon_download.png", "UPDATE", 0, 0, "", {}, 0, -1, false}
+        });
+    }
+    else if (kind == "update")
+    {
+        build_preview_section(p, 4, "System & Diagnostics", "DIAGNOSTICS & SYSTEM MANAGEMENT", {
+            {EVO_RMLUI_ROW_ACTION, "MEMORY", "12.9 GIB - PRO MODE", "../icons/icon_memory_stick.png", "12.9 GIB - PRO MODE", 0, 0, "", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_ACTION, "SOFTWARE UPDATE", "RUNNING v0.13.6 - CROSS TO CHECK FOR UPDATES", "../icons/icon_download.png", "UPDATE", 0, EVO_RMLUI_PREVIEW_UPDATE, "Checks GitHub for a newer EVO. It downloads only after you say so, checks the file against GitHub's checksum, and replaces the installed image just once, when you confirm. EVO then closes; open it again from the Games row.", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_ACTION, "QUIT EVO", "RELEASE EVERYTHING, THEN CLOSE FROM THE SWITCHER", "../icons/icon_power.png", "QUIT", 0, 0, "", {}, 0, -1, false}
+        });
+    }
+    else if (kind == "quit")
+    {
+        build_preview_section(p, 4, "System & Diagnostics", "DIAGNOSTICS & SYSTEM MANAGEMENT", {
+            {EVO_RMLUI_ROW_ACTION, "SOFTWARE UPDATE", "RUNNING v0.13.6 - CROSS TO CHECK FOR UPDATES", "../icons/icon_download.png", "UPDATE", 0, 0, "", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_ACTION, "QUIT EVO", "RELEASE EVERYTHING, THEN CLOSE FROM THE SWITCHER", "../icons/icon_power.png", "QUIT", 0, EVO_RMLUI_PREVIEW_QUIT, "Releases everything, then close EVO from the switcher.", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_ACTION, "CONSOLE", "DETECTED HARDWARE MODEL", "../icons/icon_monitor.png", "PS5 PRO", 0, 0, "", {}, 0, -1, false}
+        });
+    }
+    else if (kind == "web")
+    {
+        build_preview_section(p, 5, "Experimental", "UNFINISHED WORK - EXPECT ARTEFACTS", {
+            {EVO_RMLUI_ROW_VALUE, "DEEP BLACKS", "PULLS ELEVATED SHADOWS TO TRUE OLED BLACK", "../icons/icon_moon.png", "OFF", 0, 0, "", {"OFF", "LOW", "HIGH"}, 0, -1, false},
+            {EVO_RMLUI_ROW_TOGGLE, "WEB BROWSER", "BUILT-IN PROSPERO BROWSER ON THE NAVIGATION RAIL", "../icons/icon_globe.png", "", 1, EVO_RMLUI_PREVIEW_WEB, "Enables the built-in Prospero Web browser section on the navigation rail. Unfinished experimental feature.", {}, 0, -1, false},
+            {EVO_RMLUI_ROW_TOGGLE, "MATCH VIDEO FRAME RATE", "24P / 50 HZ OUTPUT DURING PLAYBACK - FALLS BACK TO 120 HZ OR 60 HZ", "../icons/icon_refresh_cw.png", "", 0, 0, "", {}, 0, -1, false}
+        });
+    }
 }
 
 #endif /* SETTINGS_PREVIEW_FIXTURES_INC */

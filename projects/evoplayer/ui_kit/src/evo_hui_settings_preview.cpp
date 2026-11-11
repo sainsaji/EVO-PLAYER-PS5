@@ -2254,6 +2254,611 @@ void draw_yt_link(DrawList &list, const Context &ctx, const Rect &box, const Set
     caption(list, ctx, a, frame.y + frame.h + 32.0f, "Or paste it on your phone: <ps5>:9780/input", false);
 }
 
+/* ---- SKIP INTROS & CREDITS: 16:9 mock scene, progress bar, intro stretch, skip jump / button ---- */
+static void draw_skip_segments(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const ui::Fonts &fonts = ctx.fonts;
+    const Palette &p = ctx.palette;
+    const int sel = std::clamp(pv.index, 0, 2); // 0: OFF, 1: ASK, 2: AUTO
+
+    const float fw = 360.0f, fh = fw * 9.0f / 16.0f * 0.76f;
+    const float fx = a.x + (a.w - fw) * 0.5f;
+    Rect frame{fx, a.top, fw, fh};
+    mock_scene(list, frame, 0.4f, false);
+    frame_border(list, ctx, frame, sel > 0);
+    tag(list, ctx, frame, sel == 2 ? "AUTO SKIP" : (sel == 1 ? "ASK TO SKIP" : "NO SKIP"), sel > 0);
+
+    /* ASK: "Skip intro" pill button in the bottom right of the frame */
+    if (sel == 1)
+    {
+        const std::string btn = "Skip intro";
+        const float bw = fonts.semibold.measure(btn, 14) + 24.0f;
+        Rect pill{frame.x + frame.w - bw - 10.0f, frame.y + frame.h - 38.0f, bw, 28.0f};
+        list.rounded_rect(pill, 14.0f, p.accent);
+        ui::text(list, fonts.semibold, btn, pill.cx(), pill.cy() + 5.0f, 14, kInk, Align::center);
+    }
+
+    /* Progress bar with intro stretch marked in accent */
+    const float bar_y = frame.y + frame.h + 16.0f, bar_h = 8.0f;
+    Rect bar_bg{fx, bar_y, fw, bar_h};
+    list.rounded_rect(bar_bg, 4.0f, kWhite.with_alpha(0.12f));
+
+    const float intro_x0 = fx + fw * 0.20f;
+    const float intro_x1 = fx + fw * 0.50f;
+    list.rounded_rect({intro_x0, bar_y, intro_x1 - intro_x0, bar_h}, 4.0f, p.accent.with_alpha(0.70f));
+    ui::text(list, fonts.semibold, "INTRO", (intro_x0 + intro_x1) * 0.5f, bar_y - 6.0f, 11, p.accent, Align::center);
+
+    /* AUTO: arrow jumping over the intro stretch */
+    if (sel == 2)
+    {
+        const float ax0 = intro_x0 - 4.0f, ax1 = intro_x1 + 14.0f;
+        flow_arrow(list, ctx, ax0, ax1, bar_y + bar_h + 16.0f, true);
+        list.circle(ax1, bar_y + bar_h * 0.5f, 5.0f, kWhite);
+    }
+    else
+    {
+        list.circle(fx + fw * 0.28f, bar_y + bar_h * 0.5f, 5.0f, kWhite);
+    }
+
+    const char *cap = (sel == 2) ? "Auto: jumps over intros without asking"
+                    : (sel == 1) ? "Ask: button appears during intro, Triangle skips"
+                                 : "Off: intros play straight through";
+    const float cap_y = bar_y + bar_h + (sel == 2 ? 32.0f : 24.0f);
+    caption(list, ctx, a, cap_y, cap, sel > 0);
+    const float y = chips(list, ctx, a, cap_y + 24.0f, chip_labels(pv), pv.index);
+    benefit_fit(list, ctx, a, y + 20.0f, pv.benefit);
+}
+
+/* ---- HDR PEAK: vertical brightness scale beside bright HDR frame ---- */
+static void draw_hdr_peak(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const ui::Fonts &fonts = ctx.fonts;
+    const Palette &p = ctx.palette;
+    const int sel = std::clamp(pv.index, 0, 5); // 0: Off, 1: 800, 2: 1000, 3: 1500, 4: 2000, 5: 3000
+    const bool off = (sel == 0);
+
+    /* Bright HDR frame on the left */
+    const float fw = 280.0f, fh = 150.0f;
+    Rect frame{a.x, a.top, fw, fh};
+    mock_scene(list, frame, 0.0f, false, true);
+    frame_border(list, ctx, frame, !off);
+    tag(list, ctx, frame, off ? "PASSTHROUGH" : "TONE-MAPPED", !off);
+
+    /* Vertical brightness scale (0 to 3000 nits) on the right */
+    const float sx = a.x + 360.0f, sy_top = a.top + 10.0f, sy_bot = a.top + 140.0f;
+    list.line(sx, sy_top, sx, sy_bot, 2.0f, kWhite.with_alpha(0.25f));
+
+    struct Tick { int nits; float frac; const char *label; };
+    const Tick ticks[6] = {
+        {3000, 0.00f, "3000 nits"},
+        {2000, 0.22f, "2000"},
+        {1500, 0.40f, "1500"},
+        {1000, 0.60f, "1000"},
+        {800,  0.74f, "800"},
+        {0,    1.00f, "0"}
+    };
+
+    float marker_y = sy_bot;
+    for (const Tick &t : ticks)
+    {
+        const float ty = sy_top + (sy_bot - sy_top) * t.frac;
+        list.line(sx - 4.0f, ty, sx + 4.0f, ty, 1.0f, kWhite.with_alpha(0.35f));
+        ui::text(list, fonts.mono, t.label, sx + 10.0f, ty + 4.0f, 12, p.text_muted);
+    }
+
+    if (!off)
+    {
+        const float fracs[6] = {1.0f, 0.74f, 0.60f, 0.40f, 0.22f, 0.00f};
+        marker_y = sy_top + (sy_bot - sy_top) * fracs[sel];
+        list.triangle({sx - 14.0f, marker_y - 5.0f, 10.0f, 10.0f}, p.accent, 0.0f, 1.5708f);
+        list.circle(sx, marker_y, 4.0f, kWhite);
+    }
+    else
+    {
+        list.circle(sx, sy_bot, 4.0f, p.text_faint);
+    }
+
+    const char *cap = off ? "Your TV picks the brightness" : "HDR fitted to target peak brightness";
+    const float cap_y = frame.y + frame.h + 24.0f;
+    caption(list, ctx, a, cap_y, cap, !off);
+    const float y = chips(list, ctx, a, cap_y + 24.0f, chip_labels(pv), pv.index);
+    benefit_fit(list, ctx, a, y + 20.0f, pv.benefit);
+}
+
+/* ---- AUDIO LANGUAGE: track list card with default track highlighted ---- */
+static void draw_audio_language(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const ui::Fonts &fonts = ctx.fonts;
+    const Palette &p = ctx.palette;
+
+    const float cw = 380.0f, ch = 142.0f;
+    const float cx = a.x + (a.w - cw) * 0.5f;
+    Rect card{cx, a.top, cw, ch};
+    list.rounded_rect(card, 12.0f, kWhite.with_alpha(0.04f));
+    frame_border(list, ctx, card, false);
+
+    ui::text(list, fonts.semibold, "AUDIO TRACKS", card.x + 16.0f, card.y + 22.0f, 13, p.text_muted, Align::left, 1.5f);
+
+    /* Determine which row to highlight based on chosen language (AUTO highlights the first) */
+    int highlight = 0;
+    std::string sel = (!pv.choices.empty() && pv.index >= 0 && pv.index < static_cast<int>(pv.choices.size()))
+                          ? ui::upper(pv.choices[pv.index]) : "";
+    if (sel.find("JAP") != std::string::npos) highlight = 1;
+    else if (sel.find("FRAN") != std::string::npos || sel.find("FREN") != std::string::npos) highlight = 2;
+    else highlight = 0;
+
+    const char *rows[3] = {"English 5.1 (Surround)", "Japanese 2.0 (Stereo)", "French 2.0 (Stereo)"};
+    for (int i = 0; i < 3; ++i)
+    {
+        const bool lit = (i == highlight);
+        Rect r{card.x + 12.0f, card.y + 34.0f + i * 34.0f, card.w - 24.0f, 28.0f};
+        list.rounded_rect(r, 6.0f, lit ? p.accent.with_alpha(0.20f) : kWhite.with_alpha(0.02f));
+        if (lit) list.bordered_rect(r, 6.0f, Color::rgb(0, 0), 1.0f, p.accent);
+        ui::text(list, fonts.semibold, rows[i], r.x + 12.0f, r.cy() + 5.0f, 14, lit ? kWhite : p.text_faint);
+        if (lit)
+            ui::text(list, fonts.semibold, "START", r.x + r.w - 12.0f, r.cy() + 5.0f, 12, p.accent, Align::right);
+    }
+
+    const float cap_y = card.y + card.h + 24.0f;
+    caption(list, ctx, a, cap_y, "A film starts with this track", true);
+    const float y = chips(list, ctx, a, cap_y + 24.0f, chip_labels(pv), pv.index);
+    benefit_fit(list, ctx, a, y + 20.0f, pv.benefit);
+}
+
+/* ---- SUBTITLE LANGUAGE: track list card + ASCII subtitle sample ---- */
+static void draw_sub_language(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const ui::Fonts &fonts = ctx.fonts;
+    const Palette &p = ctx.palette;
+
+    const float cw = 380.0f, ch = 138.0f;
+    const float cx = a.x + (a.w - cw) * 0.5f;
+    Rect card{cx, a.top, cw, ch};
+    list.rounded_rect(card, 12.0f, kWhite.with_alpha(0.04f));
+    frame_border(list, ctx, card, false);
+
+    ui::text(list, fonts.semibold, "SUBTITLES", card.x + 16.0f, card.y + 22.0f, 13, p.text_muted, Align::left, 1.5f);
+
+    int highlight = 0;
+    std::string sel = (!pv.choices.empty() && pv.index >= 0 && pv.index < static_cast<int>(pv.choices.size()))
+                          ? ui::upper(pv.choices[pv.index]) : "";
+    if (sel.find("SPA") != std::string::npos) highlight = 2;
+    else if (sel.find("SDH") != std::string::npos) highlight = 1;
+    else highlight = 0;
+
+    const char *rows[3] = {"English (Dialogue)", "English (SDH)", "Spanish (Dialogo)"};
+    for (int i = 0; i < 3; ++i)
+    {
+        const bool lit = (i == highlight);
+        Rect r{card.x + 12.0f, card.y + 34.0f + i * 32.0f, card.w - 24.0f, 26.0f};
+        list.rounded_rect(r, 6.0f, lit ? p.accent.with_alpha(0.20f) : kWhite.with_alpha(0.02f));
+        if (lit) list.bordered_rect(r, 6.0f, Color::rgb(0, 0), 1.0f, p.accent);
+        ui::text(list, fonts.semibold, rows[i], r.x + 12.0f, r.cy() + 5.0f, 14, lit ? kWhite : p.text_faint);
+        if (lit)
+            ui::text(list, fonts.semibold, "ACTIVE", r.x + r.w - 12.0f, r.cy() + 5.0f, 12, p.accent, Align::right);
+    }
+
+    /* Subtitle line drawn under it in the chosen language (plain ASCII only) */
+    const char *sample = (highlight == 2) ? "Buenos dias, amigo."
+                       : (highlight == 1) ? "[ambient music playing softly]"
+                                          : "Hello, how are you?";
+    const float sub_y = card.y + card.h + 12.0f;
+    Rect sub_box{cx + 20.0f, sub_y, cw - 40.0f, 30.0f};
+    list.rounded_rect(sub_box, 6.0f, Color::rgb(0x000000, 0.70f));
+    ui::text(list, fonts.semibold, sample, sub_box.cx(), sub_box.cy() + 5.0f, 14, kWhite, Align::center);
+
+    const float cap_y = sub_box.y + sub_box.h + 20.0f;
+    caption(list, ctx, a, cap_y, "Preferred subtitle track selected automatically", true);
+    const float y = chips(list, ctx, a, cap_y + 24.0f, chip_labels(pv), pv.index);
+    benefit_fit(list, ctx, a, y + 20.0f, pv.benefit);
+}
+
+/* ---- VOLUME BOOST: two waveform strips (quiet original vs boosted clipped) ---- */
+static void draw_volume_boost(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const ui::Fonts &fonts = ctx.fonts;
+    const Palette &p = ctx.palette;
+    const int sel = std::clamp(pv.index, 0, 4); // 0: OFF, 1: +50%, 2: +100%, 3: +200%, 4: +300%
+    const float mults[5] = {1.0f, 1.5f, 2.0f, 3.0f, 4.0f};
+    const float mult = mults[sel];
+
+    static const float kOriginalHeights[40] = {
+        6, 10, 14, 8, 12, 16, 20, 14, 8, 12,
+        15, 18, 10, 6, 14, 18, 20, 16, 12, 8,
+        14, 18, 16, 12, 6, 10, 15, 20, 14, 8,
+        12, 16, 18, 14, 10, 15, 12, 8, 14, 6
+    };
+
+    const float pw = 420.0f, px = a.x + (a.w - pw) * 0.5f;
+    Rect row_orig{px, a.top, pw, 54.0f};
+    list.rounded_rect(row_orig, 8.0f, kWhite.with_alpha(0.04f));
+    ui::text(list, fonts.semibold, "ORIGINAL", row_orig.x + 10.0f, row_orig.y + 16.0f, 11, p.text_muted);
+
+    const float bar_w = 4.0f, gap = 4.0f;
+    const float start_x = row_orig.x + 80.0f;
+    for (int i = 0; i < 40; ++i)
+    {
+        const float bh = kOriginalHeights[i];
+        const float bx = start_x + i * (bar_w + gap);
+        list.rounded_rect({bx, row_orig.cy() - bh * 0.5f, bar_w, bh}, 2.0f, p.text_muted);
+    }
+
+    Rect row_boost{px, a.top + 62.0f, pw, 54.0f};
+    list.rounded_rect(row_boost, 8.0f, kWhite.with_alpha(0.04f));
+    frame_border(list, ctx, row_boost, sel > 0);
+    ui::text(list, fonts.semibold, "BOOSTED", row_boost.x + 10.0f, row_boost.y + 16.0f, 11, sel > 0 ? p.accent : p.text_muted);
+
+    const float clip_limit = 44.0f;
+    list.line(start_x, row_boost.cy() - clip_limit * 0.5f, start_x + 40 * (bar_w + gap), row_boost.cy() - clip_limit * 0.5f, 1.0f,
+              Color::rgb(0xf87171, 0.60f));
+    list.line(start_x, row_boost.cy() + clip_limit * 0.5f, start_x + 40 * (bar_w + gap), row_boost.cy() + clip_limit * 0.5f, 1.0f,
+              Color::rgb(0xf87171, 0.60f));
+
+    for (int i = 0; i < 40; ++i)
+    {
+        float bh = kOriginalHeights[i] * mult;
+        if (bh > clip_limit) bh = clip_limit; // clipped at the limit, never wrap
+        const float bx = start_x + i * (bar_w + gap);
+        list.rounded_rect({bx, row_boost.cy() - bh * 0.5f, bar_w, bh}, 2.0f, sel > 0 ? p.accent : p.text_muted);
+    }
+
+    const char *cap_pcts[5] = {"Volume boost: Off", "Boosted by +50%", "Boosted by +100%", "Boosted by +200%", "Boosted by +300%"};
+    const float cap_y = row_boost.y + row_boost.h + 22.0f;
+    caption(list, ctx, a, cap_y, cap_pcts[sel], sel > 0);
+    const float y = chips(list, ctx, a, cap_y + 24.0f, chip_labels(pv), pv.index);
+    benefit_fit(list, ctx, a, y + 20.0f, pv.benefit);
+}
+
+/* ---- AUDIO DELAY: picture flash lane above shifted sound spike lane ---- */
+static void draw_audio_delay(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const ui::Fonts &fonts = ctx.fonts;
+    const Palette &p = ctx.palette;
+
+    /* Parse or calculate delay in ms: range -500 to +500 ms */
+    int ms = 0;
+    if (!pv.choices.empty() && pv.index >= 0 && pv.index < static_cast<int>(pv.choices.size()))
+        std::sscanf(pv.choices[pv.index].c_str(), "%d", &ms);
+    else if (pv.index >= 0 && pv.index <= 20)
+        ms = (pv.index - 10) * 50;
+
+    const float lw = 420.0f, lx = a.x + (a.w - lw) * 0.5f;
+
+    /* Picture lane with white clapperboard flash at centre */
+    Rect r_pic{lx, a.top, lw, 52.0f};
+    list.rounded_rect(r_pic, 8.0f, kWhite.with_alpha(0.04f));
+    ui::text(list, fonts.semibold, "PICTURE", r_pic.x + 12.0f, r_pic.cy() + 5.0f, 13, p.text_muted);
+    Rect flash{r_pic.cx() - 14.0f, r_pic.cy() - 14.0f, 28.0f, 28.0f};
+    list.rounded_rect(flash, 4.0f, kWhite);
+    list.glow(flash, 4.0f, 6.0f, kWhite.with_alpha(0.6f));
+    ui::text(list, fonts.mono, "FLASH", flash.cx(), r_pic.y + r_pic.h - 6.0f, 10, p.text_faint, Align::center);
+
+    /* Centre reference line across lanes */
+    list.line(r_pic.cx(), r_pic.y + 4.0f, r_pic.cx(), a.top + 120.0f, 1.0f, kWhite.with_alpha(0.20f));
+
+    /* Sound lane with waveform spike shifted proportional to delay */
+    Rect r_snd{lx, a.top + 64.0f, lw, 52.0f};
+    list.rounded_rect(r_snd, 8.0f, kWhite.with_alpha(0.04f));
+    ui::text(list, fonts.semibold, "SOUND", r_snd.x + 12.0f, r_snd.cy() + 5.0f, 13, p.text_muted);
+
+    const float shift_px = std::clamp((static_cast<float>(ms) / 500.0f) * 110.0f, -110.0f, 110.0f);
+    const float spike_cx = r_snd.cx() + shift_px;
+
+    const float spike_h[7] = {6.0f, 12.0f, 22.0f, 38.0f, 22.0f, 12.0f, 6.0f};
+    for (int i = 0; i < 7; ++i)
+    {
+        const float bx = spike_cx + (i - 3) * 5.0f;
+        const float sh = spike_h[i];
+        list.rounded_rect({bx - 1.5f, r_snd.cy() - sh * 0.5f, 3.0f, sh}, 1.5f, ms != 0 ? p.accent : kWhite);
+    }
+
+    char cap[64];
+    if (ms == 0) std::snprintf(cap, sizeof(cap), "Sound in sync with picture");
+    else if (ms > 0) std::snprintf(cap, sizeof(cap), "Sound %d ms later", ms);
+    else std::snprintf(cap, sizeof(cap), "Sound %d ms earlier", -ms);
+
+    const float cap_y = r_snd.y + r_snd.h + 22.0f;
+    caption(list, ctx, a, cap_y, cap, ms != 0);
+
+    /* Show clean key choice chips so 21 items do not overflow */
+    static const std::vector<std::string> kDelayChips = {"-200 MS", "-100 MS", "0 MS", "+100 MS", "+200 MS"};
+    int delay_sel = 2; // default 0 ms
+    if (ms <= -200) delay_sel = 0;
+    else if (ms < 0) delay_sel = 1;
+    else if (ms == 0) delay_sel = 2;
+    else if (ms < 200) delay_sel = 3;
+    else delay_sel = 4;
+
+    const float y = chips(list, ctx, a, cap_y + 24.0f, kDelayChips, delay_sel);
+    benefit_fit(list, ctx, a, y + 20.0f, pv.benefit);
+}
+
+/* ---- NETWORK BUFFER: timeline with played stretch, loaded ahead buffer and drop gap ---- */
+static void draw_network_buffer(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const ui::Fonts &fonts = ctx.fonts;
+    const Palette &p = ctx.palette;
+    const int sel = std::clamp(pv.index, 0, 3); // 0: 30 SEC, 1: 1 MIN, 2: 2 MIN, 3: 5 MIN
+
+    const float pw = 420.0f, ph = 130.0f;
+    const float px = a.x + (a.w - pw) * 0.5f;
+    Rect panel{px, a.top, pw, ph};
+    list.rounded_rect(panel, 12.0f, kWhite.with_alpha(0.04f));
+    frame_border(list, ctx, panel, false);
+
+    ui::text(list, fonts.semibold, "PLAYBACK TIMELINE", panel.x + 16.0f, panel.y + 22.0f, 13, p.text_muted, Align::left, 1.5f);
+
+    const float bar_w = panel.w - 32.0f;
+    const float bar_y = panel.y + 44.0f, bar_h = 14.0f;
+    Rect bar_bg{panel.x + 16.0f, bar_y, bar_w, bar_h};
+    list.rounded_rect(bar_bg, 7.0f, kWhite.with_alpha(0.12f));
+
+    /* Played part in accent */
+    const float played_w = bar_w * 0.22f;
+    list.rounded_rect({bar_bg.x, bar_y, played_w, bar_h}, 7.0f, p.accent);
+    list.circle(bar_bg.x + played_w, bar_bg.cy(), 8.0f, kWhite);
+
+    /* Lighter loaded ahead stretch whose length grows with choice */
+    const float ahead_fracs[4] = {0.15f, 0.32f, 0.52f, 0.72f};
+    const float ahead_w = bar_w * ahead_fracs[sel];
+    list.rounded_rect({bar_bg.x + played_w, bar_y, ahead_w, bar_h}, 7.0f, p.accent.with_alpha(0.38f));
+
+    /* Wi-Fi drop gap drawn on the timeline */
+    const float drop_x = bar_bg.x + played_w + bar_w * 0.35f;
+    const float drop_w = 40.0f;
+    Rect drop_box{drop_x, bar_y - 12.0f, drop_w, bar_h + 24.0f};
+    list.rounded_rect(drop_box, 4.0f, Color::rgb(0xf87171, 0.18f));
+    list.bordered_rect(drop_box, 4.0f, Color::rgb(0, 0), 1.0f, Color::rgb(0xf87171, 0.70f));
+    ui::text(list, fonts.semibold, "DROP", drop_box.cx(), drop_box.y - 4.0f, 10, Color::rgb(0xf87171), Align::center);
+
+    const bool covers = (bar_bg.x + played_w + ahead_w >= drop_x + drop_w);
+    ui::text(list, fonts.semibold, covers ? "Buffer rides out the drop" : "Buffer runs out: playback stalls",
+             panel.cx(), panel.y + panel.h - 14.0f, 13, covers ? p.accent : Color::rgb(0xf87171), Align::center);
+
+    const char *lens[4] = {"30 sec", "1 min", "2 min", "5 min"};
+    char cap[48];
+    std::snprintf(cap, sizeof(cap), "Loads %s ahead", lens[sel]);
+    const float cap_y = panel.y + panel.h + 22.0f;
+    caption(list, ctx, a, cap_y, cap, true);
+    const float y = chips(list, ctx, a, cap_y + 24.0f, chip_labels(pv), pv.index);
+    benefit_fit(list, ctx, a, y + 20.0f, pv.benefit);
+}
+
+/* ---- DEVELOPER TOOLS: terminal-like panel with live stats lines ---- */
+static void draw_dev_tools(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const ui::Fonts &fonts = ctx.fonts;
+    const Palette &p = ctx.palette;
+
+    const float pw = 420.0f, ph = 154.0f;
+    const float px = a.x + (a.w - pw) * 0.5f;
+    Rect term{px, a.top, pw, ph};
+    list.rounded_rect(term, 10.0f, Color::rgb(0x0a0d14));
+    frame_border(list, ctx, term, false);
+
+    /* Terminal title bar with 3 dots */
+    list.rounded_rect({term.x, term.y, term.w, 24.0f}, 10.0f, Color::rgb(0x141824));
+    list.circle(term.x + 14.0f, term.y + 12.0f, 3.5f, Color::rgb(0xed6a5e));
+    list.circle(term.x + 25.0f, term.y + 12.0f, 3.5f, Color::rgb(0xf4bf4f));
+    list.circle(term.x + 36.0f, term.y + 12.0f, 3.5f, Color::rgb(0x61c554));
+    ui::text(list, fonts.semibold, "DEVELOPER OVERLAY", term.cx(), term.y + 16.0f, 11, p.text_muted, Align::center);
+
+    const char *lines[5] = {
+        "decoder   hardware  4K HEVC",
+        "fps       60",
+        "memory    app 751 MB",
+        "network   12.4 MB/s",
+        "pipeline  sceAgc  present"
+    };
+
+    float ty = term.y + 44.0f;
+    for (int i = 0; i < 5; ++i)
+    {
+        ui::text(list, fonts.mono, lines[i], term.x + 18.0f, ty, 13, (i < 2) ? p.accent : kWhite);
+        ty += 20.0f;
+    }
+
+    const float cap_y = term.y + term.h + 24.0f;
+    caption(list, ctx, a, cap_y, "Live numbers for testing", true);
+    benefit_fit(list, ctx, a, cap_y + 36.0f, pv.benefit);
+}
+
+/* ---- CONSOLE MODEL: PS5 console silhouette with standard/pro badges ---- */
+static void draw_console(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const Palette &p = ctx.palette;
+
+    const float cx = a.x + a.w * 0.5f;
+    const float cy = a.top + 72.0f;
+
+    /* PS5 silhouette: dark core with white curved side panels */
+    Rect core{cx - 16.0f, cy - 65.0f, 32.0f, 130.0f};
+    list.rounded_rect(core, 6.0f, Color::rgb(0x0a0c12));
+    list.line(core.x + 2.0f, core.y + 12.0f, core.x + 2.0f, core.y + core.h - 12.0f, 1.5f, p.accent);
+
+    /* Left and right white side panels */
+    Rect left_panel{core.x - 20.0f, core.y - 4.0f, 22.0f, 138.0f};
+    Rect right_panel{core.x + core.w - 2.0f, core.y - 4.0f, 22.0f, 138.0f};
+    list.rounded_rect(left_panel, 10.0f, Color::rgb(0xedf1fa));
+    list.rounded_rect(right_panel, 10.0f, Color::rgb(0xedf1fa));
+
+    /* Console stand / base */
+    Rect base{cx - 42.0f, core.y + core.h - 2.0f, 84.0f, 8.0f};
+    list.rounded_rect(base, 4.0f, Color::rgb(0x181c26));
+
+    /* PS5 and PS5 PRO badges on sides */
+    Rect b_std{cx - 150.0f, cy - 18.0f, 90.0f, 36.0f};
+    Rect b_pro{cx + 60.0f, cy - 18.0f, 90.0f, 36.0f};
+    flow_box(list, ctx, b_std, "PS5", false, 15);
+    flow_box(list, ctx, b_pro, "PS5 PRO", false, 15);
+
+    const float cap_y = base.y + 36.0f;
+    caption(list, ctx, a, cap_y, "The model EVO detected", false);
+    benefit_fit(list, ctx, a, cap_y + 36.0f, pv.benefit);
+}
+
+/* ---- MEMORY MODE: horizontal bar split into Video buffers & App ---- */
+static void draw_memory(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const ui::Fonts &fonts = ctx.fonts;
+    const Palette &p = ctx.palette;
+
+    const float pw = 420.0f, ph = 130.0f;
+    const float px = a.x + (a.w - pw) * 0.5f;
+    Rect panel{px, a.top, pw, ph};
+    list.rounded_rect(panel, 12.0f, kWhite.with_alpha(0.04f));
+    frame_border(list, ctx, panel, false);
+
+    ui::text(list, fonts.semibold, "DIRECT MEMORY POOL", panel.x + 16.0f, panel.y + 22.0f, 13, p.text_muted, Align::left, 1.5f);
+    ui::text(list, fonts.mono, "12.9 GIB", panel.x + panel.w - 16.0f, panel.y + 22.0f, 13, kWhite, Align::right);
+
+    const float bar_w = panel.w - 32.0f;
+    const float bar_y = panel.y + 44.0f, bar_h = 24.0f;
+    const float vid_w = bar_w * 0.68f;
+    const float app_w = bar_w - vid_w;
+
+    Rect r_vid{panel.x + 16.0f, bar_y, vid_w, bar_h};
+    Rect r_app{panel.x + 16.0f + vid_w + 3.0f, bar_y, app_w - 3.0f, bar_h};
+    list.rounded_rect(r_vid, 6.0f, p.accent);
+    list.rounded_rect(r_app, 6.0f, p.text_muted.with_alpha(0.35f));
+
+    ui::text(list, fonts.semibold, "VIDEO BUFFERS (8.8 GiB)", r_vid.x + 10.0f, r_vid.cy() + 5.0f, 12, kInk);
+    ui::text(list, fonts.semibold, "APP (4.1 GiB)", r_app.cx(), r_app.cy() + 5.0f, 12, kWhite, Align::center);
+
+    ui::text(list, fonts.regular, "4K video queues, AI upscaler networks & stream cache",
+             panel.cx(), panel.y + panel.h - 16.0f, 13, p.text_faint, Align::center);
+
+    const float cap_y = panel.y + panel.h + 24.0f;
+    caption(list, ctx, a, cap_y, "More memory for 4K and big buffers on PS5 Pro", true);
+    benefit_fit(list, ctx, a, cap_y + 36.0f, pv.benefit);
+}
+
+/* ---- SOFTWARE UPDATE: version progression with download progress bar ---- */
+static void draw_update(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const ui::Fonts &fonts = ctx.fonts;
+    const Palette &p = ctx.palette;
+
+    const float cw = 420.0f, ch = 140.0f;
+    const float cx = a.x + (a.w - cw) * 0.5f;
+    Rect card{cx, a.top, cw, ch};
+    list.rounded_rect(card, 12.0f, kWhite.with_alpha(0.04f));
+    frame_border(list, ctx, card, true);
+
+    /* "v0.13.6" -> "newer version" */
+    Rect b_cur{card.x + 18.0f, card.y + 18.0f, 110.0f, 36.0f};
+    flow_box(list, ctx, b_cur, "v0.13.6", false, 15);
+
+    flow_arrow(list, ctx, b_cur.x + b_cur.w + 12.0f, card.x + card.w - 150.0f, b_cur.cy(), true);
+
+    Rect b_new{card.x + card.w - 138.0f, card.y + 18.0f, 120.0f, 36.0f};
+    flow_box(list, ctx, b_new, "v0.14.0", true, 15);
+
+    /* Progress bar animating with ctx.time */
+    const float t = std::fmod(ctx.time * 0.20f, 1.0f);
+    const float pct = 0.15f + 0.85f * t;
+    const float bar_y = card.y + 76.0f, bar_h = 8.0f;
+    const float bar_w = card.w - 36.0f;
+    Rect bar_bg{card.x + 18.0f, bar_y, bar_w, bar_h};
+    list.rounded_rect(bar_bg, 4.0f, kWhite.with_alpha(0.12f));
+    list.rounded_rect({bar_bg.x, bar_bg.y, bar_w * pct, bar_h}, 4.0f, p.accent);
+
+    char pct_str[32];
+    std::snprintf(pct_str, sizeof(pct_str), "Downloading update: %d %%", static_cast<int>(pct * 100.0f));
+    ui::text(list, fonts.semibold, pct_str, bar_bg.x, card.y + card.h - 16.0f, 13, p.accent);
+    ui::text(list, fonts.mono, "SHA-256 ok", card.x + card.w - 18.0f, card.y + card.h - 16.0f, 12, p.text_muted, Align::right);
+
+    const float cap_y = card.y + card.h + 24.0f;
+    caption(list, ctx, a, cap_y, "Downloads, checks and installs the update", true);
+    benefit_fit(list, ctx, a, cap_y + 36.0f, pv.benefit);
+}
+
+/* ---- QUIT EVO: 3 flow boxes STOP VIDEO -> RELEASE GPU -> CLOSE IN SWITCHER ---- */
+static void draw_quit(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+
+    const float bw1 = 120.0f, bw2 = 130.0f, bw3 = 160.0f;
+    const float bh = 56.0f;
+    const float arr_w = 26.0f;
+    const float total_w = bw1 + bw2 + bw3 + 2.0f * arr_w;
+    const float x0 = a.x + (a.w - total_w) * 0.5f;
+    const float y = a.top + 32.0f;
+
+    Rect b1{x0, y, bw1, bh};
+    flow_box(list, ctx, b1, "STOP VIDEO", true, 13);
+
+    flow_arrow(list, ctx, b1.x + b1.w + 4.0f, b1.x + b1.w + arr_w - 4.0f, b1.cy(), true);
+
+    Rect b2{b1.x + b1.w + arr_w, y, bw2, bh};
+    flow_box(list, ctx, b2, "RELEASE GPU", true, 13);
+
+    flow_arrow(list, ctx, b2.x + b2.w + 4.0f, b2.x + b2.w + arr_w - 4.0f, b2.cy(), true);
+
+    Rect b3{b2.x + b2.w + arr_w, y, bw3, bh};
+    flow_box(list, ctx, b3, "CLOSE IN SWITCHER", true, 12);
+
+    const float cap_y = y + bh + 36.0f;
+    caption(list, ctx, a, cap_y, "Closes EVO safely", true);
+    benefit_fit(list, ctx, a, cap_y + 36.0f, pv.benefit);
+}
+
+/* ---- WEB BROWSER: browser window mock inside a frame ---- */
+static void draw_web(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const ui::Fonts &fonts = ctx.fonts;
+    const Palette &p = ctx.palette;
+    const bool on = (pv.index == 1);
+
+    const float fw = 380.0f, fh = 140.0f;
+    const float fx = a.x + (a.w - fw) * 0.5f;
+    Rect frame{fx, a.top, fw, fh};
+    list.rounded_rect(frame, 12.0f, on ? Color::rgb(0x101522) : Color::rgb(0x0e0e12));
+    frame_border(list, ctx, frame, on);
+
+    /* Address bar pill with https:// */
+    Rect bar{frame.x, frame.y, frame.w, 32.0f};
+    list.rounded_rect({bar.x, bar.y, bar.w, 32.0f}, 12.0f, on ? Color::rgb(0x1a2130) : Color::rgb(0x14161c));
+    list.circle(bar.x + 14.0f, bar.cy(), 3.5f, on ? Color::rgb(0xed6a5e) : Color::rgb(0x404450));
+    list.circle(bar.x + 25.0f, bar.cy(), 3.5f, on ? Color::rgb(0xf4bf4f) : Color::rgb(0x404450));
+    list.circle(bar.x + 36.0f, bar.cy(), 3.5f, on ? Color::rgb(0x61c554) : Color::rgb(0x404450));
+
+    Rect addr{bar.x + 50.0f, bar.cy() - 10.0f, bar.w - 60.0f, 20.0f};
+    list.rounded_rect(addr, 10.0f, on ? Color::rgb(0x242d3e) : Color::rgb(0x1a1c22));
+    list.bordered_rect(addr, 10.0f, Color::rgb(0, 0), 1.0f, on ? p.accent : kWhite.with_alpha(0.12f));
+    ui::text(list, fonts.mono, "https://prospero.local", addr.x + 10.0f, addr.cy() + 4.0f, 11, on ? kWhite : p.text_faint);
+
+    /* A few grey content blocks inside frame */
+    const float cy = bar.y + bar.h + 10.0f;
+    Rect hero{frame.x + 14.0f, cy, frame.w - 28.0f, 32.0f};
+    list.rounded_rect(hero, 6.0f, on ? p.accent.with_alpha(0.18f) : kWhite.with_alpha(0.04f));
+
+    const float col_w = (hero.w - 16.0f) / 3.0f;
+    const float cy2 = hero.y + hero.h + 8.0f;
+    for (int i = 0; i < 3; ++i)
+    {
+        Rect col{hero.x + i * (col_w + 8.0f), cy2, col_w, 24.0f};
+        list.rounded_rect(col, 4.0f, on ? kWhite.with_alpha(0.08f) : kWhite.with_alpha(0.03f));
+    }
+
+    const float cap_y = frame.y + frame.h + 24.0f;
+    caption(list, ctx, a, cap_y, on ? "Web section on the rail" : "Web section hidden", on);
+    const float y = chips(list, ctx, a, cap_y + 24.0f, chip_labels(pv), pv.index);
+    benefit_fit(list, ctx, a, y + 20.0f, pv.benefit);
+}
+
 void draw_settings_preview(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
 {
     switch (pv.kind)
@@ -2356,6 +2961,45 @@ void draw_settings_preview(DrawList &list, const Context &ctx, const Rect &box, 
         break;
     case EVO_RMLUI_PREVIEW_YT_LINK:
         draw_yt_link(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_SKIP_SEGMENTS:
+        draw_skip_segments(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_HDR_PEAK:
+        draw_hdr_peak(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_AUDIO_LANGUAGE:
+        draw_audio_language(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_SUB_LANGUAGE:
+        draw_sub_language(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_VOLUME_BOOST:
+        draw_volume_boost(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_AUDIO_DELAY:
+        draw_audio_delay(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_NETWORK_BUFFER:
+        draw_network_buffer(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_DEV_TOOLS:
+        draw_dev_tools(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_CONSOLE:
+        draw_console(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_MEMORY:
+        draw_memory(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_UPDATE:
+        draw_update(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_QUIT:
+        draw_quit(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_WEB:
+        draw_web(list, ctx, box, pv);
         break;
     default: /* INFO and every kind that has no drawing yet */
         draw_info(list, ctx, box, pv);
