@@ -115,6 +115,7 @@ svg.spark{display:block;width:100%;height:38px;margin-top:8px}
 .sum{margin:6px 0 0;padding-left:20px}
 .sum li{margin:3px 0}
 .more{margin-top:10px;font-size:13px;font-weight:600;color:var(--accent-alt);cursor:pointer;background:none;border:0;padding:0}
+.acts{display:flex;gap:18px;flex-wrap:wrap}
 .lines{display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:8px;max-height:360px;overflow:auto}
 .lines.on{display:block}
 /* LOG */
@@ -421,6 +422,29 @@ function playSummary(p) {
   p.marks.filter((k) => k.k === "e" && !/out of memory|could not open/.test(k.s)).slice(0, 3).forEach((k) => sum.push(clock(k.t, 1) + ": " + k.s));
   return sum;
 }
+const STORY_OPEN = new Set();
+let CARD_LINES = {};
+// Numbers only, so it is safe in an attribute: start time and first log line.
+function cardKey(p) { return String(p.t) + "-" + (p.lines.length ? p.lines[0] : "x"); }
+// The result of the last Copy, kept briefly so a redraw does not wipe it.
+const COPIED = {};
+function copyLabel(k) {
+  const c = COPIED[k];
+  if (c && Date.now() < c.until) return c.text;
+  return "Copy its log lines";
+}
+function moreLabel(n, open) { return open ? "Hide the log lines &#9652;" : "Show its " + n + " log lines &#9662;"; }
+// navigator.clipboard needs https or localhost; this page is plain http on the
+// console's address, so fall back to a hidden textarea and execCommand.
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text).then(() => true, () => false);
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.top = "-1000px";
+  document.body.appendChild(ta); ta.select();
+  let ok = false; try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+  ta.remove();
+  return Promise.resolve(ok);
+}
 function playCard(p, live) {
   const t1 = p.end || (live && L.length ? L[L.length - 1].t : p.t);
   const span = Math.max(1, t1 - p.t);
@@ -440,10 +464,15 @@ function playCard(p, live) {
   if (p.warn) chips.push('<span class="pill w">' + p.warn + " warning" + (p.warn > 1 ? "s" : "") + "</span>");
   if (!p.rebuf && !p.err && !p.warn && !p.mem && !p.failed && (p.end || p.started)) chips.push('<span class="pill g">no problems</span>');
   const raw = p.lines.slice(0, 400).map((i) => rowHTML(L[i], i, "")).join("");
+  // The page redraws as lines arrive: an opened card stays open (STORY_OPEN).
+  const key = cardKey(p), open = STORY_OPEN.has(key);
+  CARD_LINES[key] = p.lines;
   return '<div class="ev' + (p.failed || p.err ? " bad" : "") + '"><div class="when">' + clock(p.t) + '</div><div class="card' + (nowPlaying ? " now" : "") + '">' +
     "<h3>" + esc(p.title) + '</h3><div class="src">' + esc(p.src) + (fmtLine(p).length ? " &middot; " + esc(fmtLine(p).join(" · ")) : "") + "</div>" +
     (p.failed ? "" : tl) + "<div>" + chips.join("") + "</div>" + (sum.length ? '<ul class="sum">' + sum.map((s) => "<li>" + esc(s) + "</li>").join("") + "</ul>" : "") +
-    '<button class="more" data-more>Show its ' + p.lines.length + " log lines &#9662;</button>" + '<div class="lines log">' + raw + "</div></div></div>";
+    '<div class="acts"><button class="more" data-more data-k="' + key + '">' + moreLabel(p.lines.length, open) + "</button>" +
+    (p.lines.length ? '<button class="more" data-copy data-k="' + key + '">' + copyLabel(key) + "</button>" : "") + "</div>" +
+    '<div class="lines log' + (open ? " on" : "") + '" data-lk="' + key + '">' + raw + "</div></div></div>";
 }
 function minor(t, dot, html) {
   return '<div class="ev minor"><div class="when">' + clock(t) + '</div><div class="body"><span class="dot ' + dot + '"></span><span>' + html + "</span></div></div>";
@@ -478,7 +507,11 @@ function renderStory() {
     out.push(INFO.last_run === "crashed" ? minor(t, "e", '<b style="color:var(--danger)">EVO crashed here.</b> Send the report for this run: <a href="/report?run=last">report page</a>.')
                                          : minor(t, "w", "The run ended here without closing EVO (the PS button, or it froze)."));
   }
+  // Keep where the reader had scrolled inside each open card's lines.
+  const keep = {};
+  document.querySelectorAll("#story .lines.on").forEach((el) => { keep[el.dataset.lk] = el.scrollTop; });
   $("story").innerHTML = out.length ? out.join("") : '<div class="empty">Nothing has happened yet in this run.</div>';
+  document.querySelectorAll("#story .lines.on").forEach((el) => { if (keep[el.dataset.lk] != null) el.scrollTop = keep[el.dataset.lk]; });
   const b = $("b-story"); b.hidden = !problems; b.textContent = problems;
 }
 
@@ -792,9 +825,21 @@ $("tabs").onclick = (e) => { const b = e.target.closest(".tab"); if (b) show(b.d
 $("runsel").onclick = (e) => { const b = e.target.closest("button"); if (b && b.dataset.run !== RUN) load(b.dataset.run); };
 document.addEventListener("click", (e) => {
   const m = e.target.closest("[data-more]");
-  if (m) { const l = m.nextElementSibling, open = l.classList.toggle("on");
-    if (!m.dataset.label) m.dataset.label = m.innerHTML;
-    m.innerHTML = open ? "Hide the log lines &#9652;" : m.dataset.label; return; }
+  if (m) { const k = m.dataset.k, l = document.querySelector('#story .lines[data-lk="' + k + '"]');
+    const open = !STORY_OPEN.has(k);
+    if (open) STORY_OPEN.add(k); else STORY_OPEN.delete(k);
+    if (l) l.classList.toggle("on", open);
+    m.innerHTML = moreLabel((CARD_LINES[k] || []).length, open); return; }
+  const cp = e.target.closest("[data-copy]");
+  if (cp) { const idx = CARD_LINES[cp.dataset.k] || [];
+    const text = idx.map((i) => L[i] && (L[i].raw != null ? L[i].raw : L[i].msg)).filter((s) => s != null).join("\n");
+    const k = cp.dataset.k;
+    copyText(text).then((ok) => {
+      COPIED[k] = { text: ok ? "Copied " + idx.length + " lines" : "Could not copy", until: Date.now() + 2000 };
+      const b = document.querySelector('#story [data-copy][data-k="' + k + '"]'); if (b) b.textContent = COPIED[k].text;
+      setTimeout(() => { const b2 = document.querySelector('#story [data-copy][data-k="' + k + '"]'); if (b2) b2.textContent = copyLabel(k); }, 2100);
+    });
+    return; }
   const g = e.target.closest("[data-goto]"); if (g) { e.preventDefault(); gotoLine(g.dataset.goto); return; }
   const ls = e.target.closest("[data-last]"); if (ls) { e.preventDefault(); load("last"); show("story"); return; }
   const r = e.target.closest("#log .r"); if (r) { LOG.sel = LOG.sel === +r.dataset.i ? -1 : +r.dataset.i; LOG.follow = false; renderLog(); }
