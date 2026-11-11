@@ -68,6 +68,9 @@ struct PlaybackSource {
      *  all assume otherwise, so this has to be known rather than discovered
      *  by a seek that fails. */
     bool is_live = false;
+    /** Keep out of Recent and the resume store (a cast: the phone owns the
+     *  session, and its signed stream URL cannot be replayed later). */
+    bool no_history = false;
     /** A text subtitle file for this stream (a media server's sidecar); empty = none. */
     std::string subtitleUrl;
 

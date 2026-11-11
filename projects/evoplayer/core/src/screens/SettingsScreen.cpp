@@ -187,7 +187,7 @@ const PreviewSpec kPreviews[] = {
     {SettingKey::PhoneCast, EVO_RMLUI_PREVIEW_INFO,
      "Allows casting YouTube from your phone directly to EVO Player (DIAL receiver on port 8765)."},
     {SettingKey::CastNativePlayer, EVO_RMLUI_PREVIEW_INFO,
-     "Plays YouTube casts in EVO Player (up to 4K) using hardware decoding, instead of the 720p WebKit browser."},
+     "Plays YouTube casts in EVO Player (up to 4K), instead of the 720p WebKit browser."},
     {SettingKey::AskStream, EVO_RMLUI_PREVIEW_ASK_STREAM,
      "Lets you choose the format and quality each time you open a live channel."},
     {SettingKey::ReportProblem, EVO_RMLUI_PREVIEW_REPORT,
@@ -644,7 +644,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         break;
 
     case SettingKey::CastNativePlayer:
-        d = toggleDef(key, "CAST TO EVO PLAYER", "PLAY CAST IN NATIVE PLAYER (UP TO 4K)",
+        d = toggleDef(key, "CAST TO EVO PLAYER", "PLAY CAST IN NATIVE PLAYER (UP TO 1080P)",
                       "../icons/icon_play.png", settings->isCastNativePlayerEnabled());
         break;
 

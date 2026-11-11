@@ -284,6 +284,21 @@ int start_video_playback_source(const char *url, const char *title, double resum
     return 0;
 }
 
+/* A cast: played like a source, but never written to Recent or the resume
+ * store - the phone owns the session and the stream URL is single-use. */
+int start_video_playback_cast(const char *url, const char *title, double resume_seconds) {
+    if (auto pb = evo::Application::getInstance().getPlaybackController()) {
+        evo::PlaybackSource src;
+        src.url = url ? url : "";
+        if (title && title[0]) {
+            src.title = title;
+        }
+        src.no_history = true;
+        return pb->startPlaybackSource(src, resume_seconds) ? 1 : 0;
+    }
+    return 0;
+}
+
 int start_video_playback(const char *path) {
     return start_video_playback_at(path, 0.0);
 }

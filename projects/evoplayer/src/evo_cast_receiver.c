@@ -12,6 +12,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <inttypes.h>
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
@@ -52,9 +55,14 @@ static evo_cast_launch_cb s_on_launch = NULL;
 static evo_cast_stop_cb   s_on_stop = NULL;
 static void           *s_userdata = NULL;
 
-static char            s_dash_mpd[65536] = {0};
+static char           *s_dash_mpd = NULL;
+static size_t          s_dash_mpd_len = 0;
 static char            s_cast_media_title[256] = {0};
 static char            s_direct_media_url[4096] = {0};
+/* The real googlevideo URLs of the cast's video and audio. The MPD names them
+ * http://127.0.0.1:<port>/cast/v and /cast/a, and the DIAL server answers
+ * those with a 302 to these. See parse_innertube_streams for why. */
+static char           *s_cast_seg_url[2] = { NULL, NULL };
 
 static evo_cast_kv_t   s_add_data[MAX_ADDITIONAL_DATA];
 static int             s_add_data_count = 0;
@@ -745,12 +753,42 @@ static void handle_dial_client(int cfd, const char *local_ip, int port)
         return;
     }
 
+    /* Route: GET /cast/v and /cast/a - redirect to the cast's googlevideo URL.
+     * FFmpeg follows the 302 and keeps the byte range it asked for. */
+    if (strcasecmp(method, "GET") == 0 &&
+        (strcmp(route_path, "/cast/v") == 0 || strcmp(route_path, "/cast/a") == 0)) {
+        int which = (route_path[6] == 'v') ? 0 : 1;
+        char *resp = NULL;
+        pthread_mutex_lock(&s_cast_lock);
+        if (s_cast_seg_url[which]) {
+            size_t cap = strlen(s_cast_seg_url[which]) + 256;
+            resp = (char *)malloc(cap);
+            if (resp) {
+                snprintf(resp, cap,
+                    "HTTP/1.1 302 Found\r\n"
+                    "Location: %s\r\n"
+                    "Content-Length: 0\r\n"
+                    "Connection: close\r\n\r\n", s_cast_seg_url[which]);
+            }
+        }
+        pthread_mutex_unlock(&s_cast_lock);
+        if (resp) {
+            (void)write(cfd, resp, strlen(resp));
+            free(resp);
+        } else {
+            const char *err = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            (void)write(cfd, err, strlen(err));
+        }
+        close(cfd);
+        return;
+    }
+
     /* Route: GET /cast/stream.mpd or /apps/<name>/stream.mpd (DASH MPD Manifest) */
     if (strcasecmp(method, "GET") == 0 &&
         (strcmp(route_path, "/cast/stream.mpd") == 0 ||
          (strncmp(route_path, "/apps/", 6) == 0 && strstr(route_path, "stream.mpd") != NULL))) {
         pthread_mutex_lock(&s_cast_lock);
-        size_t mlen = strlen(s_dash_mpd);
+        size_t mlen = s_dash_mpd ? s_dash_mpd_len : 0;
         if (mlen == 0) {
             pthread_mutex_unlock(&s_cast_lock);
             const char *err = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
@@ -1081,9 +1119,10 @@ static int lounge_listen_channel(const char *poll_url, const char *token)
         return -1;
     }
 
-    /* 45s read timeout on the streaming socket */
+    /* Handshake and header reads: short timeout. The stream itself is read
+     * through poll() below so a stop request is seen within half a second. */
     struct timeval tv;
-    tv.tv_sec = 45;
+    tv.tv_sec = 5;
     tv.tv_usec = 0;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
@@ -1156,8 +1195,30 @@ static int lounge_listen_channel(const char *poll_url, const char *token)
         return status;
     }
 
-    /* Stream chunks as they arrive from YouTube */
+    /* Stream chunks as they arrive from YouTube. Wait in poll() (500 ms
+     * slices) rather than a long blocking SSL_read, so evo_cast_receiver_stop()
+     * - which runs on the soft-close path - never waits on this thread for
+     * more than a moment. YouTube sends a noop about every 30 s; 45 s of
+     * silence means the channel is dead. */
+    int idle_ms = 0;
     while (s_running && s_lounge_running) {
+        if (SSL_pending(ssl) <= 0) {
+            struct pollfd pfd = { sock, POLLIN, 0 };
+            int pr = poll(&pfd, 1, 500);
+            if (pr < 0) {
+                evo_log("cast: Lounge channel poll failed (errno %d)", errno);
+                break;
+            }
+            if (pr == 0) {
+                idle_ms += 500;
+                if (idle_ms >= 45000) {
+                    evo_log("cast: Lounge channel idle 45 s, reconnecting");
+                    break;
+                }
+                continue;
+            }
+        }
+        idle_ms = 0;
         char chunk[4096];
         int r = SSL_read(ssl, chunk, sizeof(chunk) - 1);
         if (r <= 0) {
@@ -1166,7 +1227,8 @@ static int lounge_listen_channel(const char *poll_url, const char *token)
             break;
         }
         chunk[r] = '\0';
-        evo_log("cast: Lounge chunk (%d bytes):\n%s", r, chunk);
+        /* Not logged: logging every chunk's body flooded evo.log (and the USB
+         * writes that costs) for as long as EVO was open. */
 
         /* Update gsessionid from stream if YouTube assigned a new one */
         const char *ss = strstr(chunk, "[\"S\",\"");
@@ -1276,9 +1338,23 @@ static int lounge_listen_channel(const char *poll_url, const char *token)
 #endif
 }
 
+/* Sleep between Lounge retries, waking every 250 ms to honour a stop. The
+ * wait doubles per consecutive failure (1 s .. 60 s) so an offline console
+ * does not hammer YouTube, or evo.log with net failures, every two seconds. */
+static void lounge_backoff_nap(int *fails)
+{
+    int n = *fails < 6 ? *fails : 6;
+    int ms = 1000 << n;
+    if (ms > 60000) ms = 60000;
+    (*fails)++;
+    for (int waited = 0; waited < ms && s_running && s_lounge_running; waited += 250)
+        usleep(250 * 1000);
+}
+
 static void *lounge_thread(void *arg)
 {
     (void)arg;
+    int fails = 0;
     evo_log("cast: Lounge background listener started");
 
     while (s_running && s_lounge_running) {
@@ -1308,7 +1384,7 @@ static void *lounge_thread(void *arg)
             has_sid = (s_screen_id[0] != '\0');
             pthread_mutex_unlock(&s_cast_lock);
             if (!has_sid) {
-                sleep(2);
+                lounge_backoff_nap(&fails);
                 continue;
             }
         }
@@ -1350,7 +1426,7 @@ static void *lounge_thread(void *arg)
             has_tok = (s_lounge_token[0] != '\0');
             pthread_mutex_unlock(&s_cast_lock);
             if (!has_tok) {
-                sleep(2);
+                lounge_backoff_nap(&fails);
                 continue;
             }
         }
@@ -1409,7 +1485,7 @@ static void *lounge_thread(void *arg)
             has_bsid = (s_lounge_sid[0] != '\0');
             pthread_mutex_unlock(&s_cast_lock);
             if (!has_bsid) {
-                sleep(2);
+                lounge_backoff_nap(&fails);
                 continue;
             }
         }
@@ -1430,6 +1506,7 @@ static void *lounge_thread(void *arg)
 
         int ret = lounge_listen_channel(poll_url, cur_tok);
         if (!s_running || !s_lounge_running) break;
+        if (ret == 200) fails = 0;
 
         if (ret == 400 || ret == 404) {
             pthread_mutex_lock(&s_cast_lock);
@@ -1440,10 +1517,10 @@ static void *lounge_thread(void *arg)
             s_lounge_rid = 1;
             pthread_mutex_unlock(&s_cast_lock);
             evo_log("cast: Lounge session expired (status %d), re-establishing", ret);
-            sleep(1);
+            lounge_backoff_nap(&fails);
         } else if (ret != 200) {
             evo_log("cast: Lounge channel exited (code %d), retrying in 1s", ret);
-            sleep(1);
+            lounge_backoff_nap(&fails);
         }
     }
 
@@ -1474,7 +1551,10 @@ int evo_cast_receiver_start(const char *friendly_name, int preferred_port)
 
     pthread_attr_t at;
     pthread_attr_init(&at);
-    pthread_attr_setstacksize(&at, 128 * 1024);
+    /* 512 KB: handle_dial_client keeps a 64 KB request buffer on the stack
+     * and can then run an HTTPS request (pairing code) through OpenSSL; the
+     * Lounge thread runs TLS and cJSON. 128 KB left too little headroom. */
+    pthread_attr_setstacksize(&at, 512 * 1024);
     pthread_attr_setdetachstate(&at, PTHREAD_CREATE_JOINABLE);
 
     if (pthread_create(&s_dial_th, &at, dial_thread, NULL) != 0) {
@@ -1513,16 +1593,10 @@ void evo_cast_receiver_stop(void)
     s_lounge_running = 0;
     pthread_mutex_unlock(&s_cast_lock);
 
-    /* Close sockets to unblock poll() */
-    if (s_ssdp_fd >= 0) {
-        close(s_ssdp_fd);
-        s_ssdp_fd = -1;
-    }
-    if (s_dial_fd >= 0) {
-        close(s_dial_fd);
-        s_dial_fd = -1;
-    }
-
+    /* The worker threads own their sockets: each polls with a short timeout,
+     * sees s_running drop and closes its own fd. Closing them here as well
+     * closed the same descriptor number twice, and the second close could hit
+     * a file or socket another subsystem had opened in between. */
     pthread_join(s_ssdp_th, NULL);
     pthread_join(s_dial_th, NULL);
     if (s_lounge_th) {
@@ -1532,6 +1606,15 @@ void evo_cast_receiver_stop(void)
 
     pthread_mutex_lock(&s_cast_lock);
     s_last_cast_vid[0] = '\0';
+    if (s_dash_mpd) {
+        free(s_dash_mpd);
+        s_dash_mpd = NULL;
+        s_dash_mpd_len = 0;
+    }
+    for (int i = 0; i < 2; i++) {
+        free(s_cast_seg_url[i]);
+        s_cast_seg_url[i] = NULL;
+    }
     pthread_mutex_unlock(&s_cast_lock);
 
     evo_log("cast: receiver stopped");
@@ -1540,10 +1623,14 @@ void evo_cast_receiver_stop(void)
 int evo_cast_receiver_set_stream_mpd(const char *mpd_xml, const char *title)
 {
     pthread_mutex_lock(&s_cast_lock);
+    if (s_dash_mpd) {
+        free(s_dash_mpd);
+        s_dash_mpd = NULL;
+        s_dash_mpd_len = 0;
+    }
     if (mpd_xml) {
-        snprintf(s_dash_mpd, sizeof(s_dash_mpd), "%s", mpd_xml);
-    } else {
-        s_dash_mpd[0] = '\0';
+        s_dash_mpd = strdup(mpd_xml);
+        s_dash_mpd_len = s_dash_mpd ? strlen(s_dash_mpd) : 0;
     }
     if (title && title[0]) {
         snprintf(s_cast_media_title, sizeof(s_cast_media_title), "%s", title);
@@ -1564,7 +1651,11 @@ int evo_cast_receiver_set_direct_stream(const char *url, const char *title)
     if (title && title[0]) {
         snprintf(s_cast_media_title, sizeof(s_cast_media_title), "%s", title);
     }
-    s_dash_mpd[0] = '\0';
+    if (s_dash_mpd) {
+        free(s_dash_mpd);
+        s_dash_mpd = NULL;
+        s_dash_mpd_len = 0;
+    }
     pthread_mutex_unlock(&s_cast_lock);
     return 0;
 }
@@ -1572,30 +1663,6 @@ int evo_cast_receiver_set_direct_stream(const char *url, const char *title)
 const char* evo_cast_receiver_stream_title(void)
 {
     return s_cast_media_title;
-}
-
-static void escape_xml_url(const char *in, char *out, size_t cap)
-{
-    if (!in || !out || cap == 0) return;
-    size_t j = 0;
-    for (size_t i = 0; in[i] != '\0' && j + 6 < cap; i++) {
-        if (in[i] == '&') {
-            memcpy(out + j, "&amp;", 5);
-            j += 5;
-        } else if (in[i] == '<') {
-            memcpy(out + j, "&lt;", 4);
-            j += 4;
-        } else if (in[i] == '>') {
-            memcpy(out + j, "&gt;", 4);
-            j += 4;
-        } else if (in[i] == '"') {
-            memcpy(out + j, "&quot;", 6);
-            j += 6;
-        } else {
-            out[j++] = in[i];
-        }
-    }
-    out[j] = '\0';
 }
 
 static void extract_codec_from_mime(const char *mime, char *out, size_t cap, const char *fallback)
@@ -1613,6 +1680,138 @@ static void extract_codec_from_mime(const char *mime, char *out, size_t cap, con
         }
     }
     snprintf(out, cap, "%s", fallback ? fallback : "");
+}
+
+struct yt_segment_range {
+    uint64_t start;
+    uint64_t end;
+};
+
+struct mpd_builder {
+    char *buf;
+    size_t len;
+    size_t cap;
+};
+
+static void mpd_append(struct mpd_builder *b, const char *fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    va_list args_copy;
+    va_copy(args_copy, args);
+    int needed = vsnprintf(NULL, 0, fmt, args_copy);
+    va_end(args_copy);
+    if (needed <= 0) {
+        va_end(args);
+        return;
+    }
+    if (b->len + (size_t)needed + 1 > b->cap) {
+        size_t new_cap = b->cap ? b->cap * 2 : 16384;
+        while (b->len + (size_t)needed + 1 > new_cap) {
+            new_cap *= 2;
+        }
+        char *nb = (char*)realloc(b->buf, new_cap);
+        if (!nb) {
+            va_end(args);
+            return;
+        }
+        b->buf = nb;
+        b->cap = new_cap;
+    }
+    vsnprintf(b->buf + b->len, b->cap - b->len, fmt, args);
+    b->len += (size_t)needed;
+    va_end(args);
+}
+
+static int parse_range_obj(cJSON *obj, uint64_t *out_start, uint64_t *out_end)
+{
+    if (!obj || !out_start || !out_end) return -1;
+    cJSON *s = cJSON_GetObjectItemCaseSensitive(obj, "start");
+    cJSON *e = cJSON_GetObjectItemCaseSensitive(obj, "end");
+    if (!s || !e) return -1;
+    *out_start = s->valuestring ? (uint64_t)strtoull(s->valuestring, NULL, 10) : (uint64_t)s->valuedouble;
+    *out_end = e->valuestring ? (uint64_t)strtoull(e->valuestring, NULL, 10) : (uint64_t)e->valuedouble;
+    return (*out_end >= *out_start) ? 0 : -1;
+}
+
+static int fetch_and_parse_sidx(const char *url, uint64_t idx_start, uint64_t idx_end,
+                                struct yt_segment_range **out_ranges, int *out_count)
+{
+    if (!url || idx_end <= idx_start || !out_ranges || !out_count) return -1;
+    *out_ranges = NULL;
+    *out_count = 0;
+
+    char range_hdr[128];
+    snprintf(range_hdr, sizeof(range_hdr), "Range: bytes=%" PRIu64 "-%" PRIu64, idx_start, idx_end);
+    const char *hdrs[] = {
+        range_hdr,
+        "User-Agent: com.google.android.youtube/20.02.35 (Linux; U; Android 11) gzip"
+    };
+
+    char *body = NULL;
+    size_t body_len = 0;
+    int status = 0;
+    int rc = evo_net_http_get_sync(url, hdrs, 2, &body, &body_len, &status);
+    if (rc != EVO_NET_OK || !body || body_len < 24) {
+        if (body) free(body);
+        return -1;
+    }
+
+    const uint8_t *p = (const uint8_t*)body;
+    if (memcmp(p + 4, "sidx", 4) != 0) {
+        free(body);
+        return -1;
+    }
+
+    uint8_t version = p[8];
+    size_t pos = 20;
+    uint64_t first_offset = 0;
+
+    if (version == 0) {
+        if (pos + 8 > body_len) { free(body); return -1; }
+        first_offset = ((uint64_t)p[pos+4] << 24) | ((uint64_t)p[pos+5] << 16) |
+                       ((uint64_t)p[pos+6] << 8)  | (uint64_t)p[pos+7];
+        pos += 8;
+    } else {
+        if (pos + 16 > body_len) { free(body); return -1; }
+        first_offset = ((uint64_t)p[pos+8]  << 56) | ((uint64_t)p[pos+9]  << 48) |
+                       ((uint64_t)p[pos+10] << 40) | ((uint64_t)p[pos+11] << 32) |
+                       ((uint64_t)p[pos+12] << 24) | ((uint64_t)p[pos+13] << 16) |
+                       ((uint64_t)p[pos+14] << 8)  | (uint64_t)p[pos+15];
+        pos += 16;
+    }
+
+    if (pos + 4 > body_len) { free(body); return -1; }
+    uint16_t ref_count = ((uint16_t)p[pos+2] << 8) | (uint16_t)p[pos+3];
+    pos += 4;
+
+    if (ref_count == 0 || pos + (size_t)ref_count * 12 > body_len) {
+        free(body);
+        return -1;
+    }
+
+    struct yt_segment_range *ranges = (struct yt_segment_range*)calloc(ref_count, sizeof(struct yt_segment_range));
+    if (!ranges) {
+        free(body);
+        return -1;
+    }
+
+    uint64_t cur_offset = idx_end + 1 + first_offset;
+    for (int i = 0; i < (int)ref_count; i++) {
+        uint32_t ref_size = ((uint32_t)(p[pos] & 0x7F) << 24) |
+                            ((uint32_t)p[pos+1] << 16) |
+                            ((uint32_t)p[pos+2] << 8)  |
+                            (uint32_t)p[pos+3];
+        pos += 12;
+        ranges[i].start = cur_offset;
+        ranges[i].end = cur_offset + (uint64_t)ref_size - 1;
+        cur_offset += ref_size;
+    }
+
+    free(body);
+    *out_ranges = ranges;
+    *out_count = (int)ref_count;
+    return 0;
 }
 
 static int parse_innertube_streams(cJSON *root, const char *video_id,
@@ -1671,11 +1870,13 @@ static int parse_innertube_streams(cJSON *root, const char *video_id,
         return 0;
     }
 
-    /* Search adaptiveFormats for best video and audio */
+    /* Search adaptiveFormats for best video and audio with sidx indexRange */
     cJSON *adaptive = cJSON_GetObjectItemCaseSensitive(sd, "adaptiveFormats");
     cJSON *best_video = NULL;
     cJSON *best_audio = NULL;
     int best_height = 0;
+    int best_video_br = 0;
+    int best_video_avc = 0;
     int best_audio_br = 0;
 
     if (adaptive && cJSON_IsArray(adaptive)) {
@@ -1686,17 +1887,36 @@ static int parse_innertube_streams(cJSON *root, const char *video_id,
             if (!u || !u->valuestring || !u->valuestring[0]) continue;
             cJSON *m = cJSON_GetObjectItemCaseSensitive(item, "mimeType");
             if (!m || !m->valuestring) continue;
+            cJSON *init_r = cJSON_GetObjectItemCaseSensitive(item, "initRange");
+            cJSON *idx_r = cJSON_GetObjectItemCaseSensitive(item, "indexRange");
+            if (!init_r || !idx_r) continue;
 
             const char *mime = m->valuestring;
-            if (strncmp(mime, "video/", 6) == 0) {
+            if (strncmp(mime, "video/mp4", 9) == 0) {
                 cJSON *h = cJSON_GetObjectItemCaseSensitive(item, "height");
                 int height = h ? h->valueint : 0;
-                /* Preference: pick highest resolution up to 4K */
-                if (height > best_height) {
+                cJSON *br = cJSON_GetObjectItemCaseSensitive(item, "bitrate");
+                int bitrate = br ? br->valueint : 0;
+                /* video/mp4 carries both H.264 (avc1, up to 1080p) and AV1
+                 * (av01, up to 8K). H.264 runs on the hardware decoder; AV1
+                 * decodes in software (dav1d), which handles 4K since #94/#95.
+                 * So: the tallest picture up to 2160p; at the same height
+                 * H.264 wins (hardware), then the higher bitrate. */
+                int is_avc = strstr(mime, "avc1") != NULL;
+                int is_av1 = strstr(mime, "av01") != NULL;
+                if (!is_avc && !is_av1) continue;
+                if (height > 2160) continue;
+                if (!best_video ||
+                    height > best_height ||
+                    (height == best_height &&
+                     (is_avc > best_video_avc ||
+                      (is_avc == best_video_avc && bitrate > best_video_br)))) {
                     best_height = height;
+                    best_video_br = bitrate;
+                    best_video_avc = is_avc;
                     best_video = item;
                 }
-            } else if (strncmp(mime, "audio/", 6) == 0) {
+            } else if (strncmp(mime, "audio/mp4", 9) == 0) {
                 cJSON *br = cJSON_GetObjectItemCaseSensitive(item, "bitrate");
                 int bitrate = br ? br->valueint : 0;
                 if (bitrate > best_audio_br) {
@@ -1707,8 +1927,15 @@ static int parse_innertube_streams(cJSON *root, const char *video_id,
         }
     }
 
-    /* Build DASH MPD if both video and audio streams were found */
+    /* Build DASH MPD if both video and audio streams were found with segment ranges */
     if (best_video && best_audio) {
+        uint64_t v_init_s = 0, v_init_e = 0, v_idx_s = 0, v_idx_e = 0;
+        uint64_t a_init_s = 0, a_init_e = 0, a_idx_s = 0, a_idx_e = 0;
+        parse_range_obj(cJSON_GetObjectItemCaseSensitive(best_video, "initRange"), &v_init_s, &v_init_e);
+        parse_range_obj(cJSON_GetObjectItemCaseSensitive(best_video, "indexRange"), &v_idx_s, &v_idx_e);
+        parse_range_obj(cJSON_GetObjectItemCaseSensitive(best_audio, "initRange"), &a_init_s, &a_init_e);
+        parse_range_obj(cJSON_GetObjectItemCaseSensitive(best_audio, "indexRange"), &a_idx_s, &a_idx_e);
+
         const char *v_url = cJSON_GetObjectItemCaseSensitive(best_video, "url")->valuestring;
         const char *v_mime = cJSON_GetObjectItemCaseSensitive(best_video, "mimeType")->valuestring;
         int v_w = cJSON_GetObjectItemCaseSensitive(best_video, "width") ? cJSON_GetObjectItemCaseSensitive(best_video, "width")->valueint : 1920;
@@ -1722,74 +1949,120 @@ static int parse_innertube_streams(cJSON *root, const char *video_id,
         int a_rate = (asr && asr->valuestring) ? atoi(asr->valuestring) : 44100;
         if (a_rate <= 0) a_rate = 44100;
 
-        char v_codec[64] = "avc1.640028";
-        extract_codec_from_mime(v_mime, v_codec, sizeof(v_codec), "avc1.640028");
-        char a_codec[64] = "mp4a.40.2";
-        extract_codec_from_mime(a_mime, a_codec, sizeof(a_codec), "mp4a.40.2");
+        struct yt_segment_range *v_segs = NULL;
+        int v_seg_count = 0;
+        struct yt_segment_range *a_segs = NULL;
+        int a_seg_count = 0;
 
-        char *v_esc = (char*)malloc(8192);
-        char *a_esc = (char*)malloc(8192);
-        char *mpd = (char*)malloc(32768);
+        int v_rc = fetch_and_parse_sidx(v_url, v_idx_s, v_idx_e, &v_segs, &v_seg_count);
+        int a_rc = fetch_and_parse_sidx(a_url, a_idx_s, a_idx_e, &a_segs, &a_seg_count);
 
-        if (v_esc && a_esc && mpd) {
-            escape_xml_url(v_url, v_esc, 8192);
-            escape_xml_url(a_url, a_esc, 8192);
+        if (v_rc == 0 && a_rc == 0 && v_seg_count > 0 && a_seg_count > 0) {
+            char v_codec[64] = "avc1.640028";
+            extract_codec_from_mime(v_mime, v_codec, sizeof(v_codec), "avc1.640028");
+            char a_codec[64] = "mp4a.40.2";
+            extract_codec_from_mime(a_mime, a_codec, sizeof(a_codec), "mp4a.40.2");
 
-            char v_mime_clean[32] = "video/mp4";
-            if (strstr(v_mime, "webm")) snprintf(v_mime_clean, sizeof(v_mime_clean), "video/webm");
-            char a_mime_clean[32] = "audio/mp4";
-            if (strstr(a_mime, "webm")) snprintf(a_mime_clean, sizeof(a_mime_clean), "audio/webm");
+            /* The BaseURLs are short local URLs that 302 to googlevideo, not
+             * the googlevideo URLs themselves. FFmpeg's dash demuxer writes a
+             * BaseURL back into the XML tree (resolve_content_path ->
+             * xmlNodeSetContent), and the bundled libxml2 re-parses each '&'
+             * of the query as an entity ("unterminated entity reference"). The
+             * URL lost its signature and every cast got 403 on its first
+             * segment, so no DASH cast ever played - only itag 18 (360p),
+             * which never goes through an MPD. Reproduced with
+             * tools/host-ffmpeg-probe.sh's ffprobe; the 302 opens there. */
+            int port_l = evo_cast_receiver_port();
+            char *v_esc = (char*)malloc(128);
+            char *a_esc = (char*)malloc(128);
+            char *v_real = strdup(v_url);
+            char *a_real = strdup(a_url);
+            if (v_esc && a_esc && v_real && a_real) {
+                snprintf(v_esc, 128, "http://127.0.0.1:%d/cast/v", port_l);
+                snprintf(a_esc, 128, "http://127.0.0.1:%d/cast/a", port_l);
+                pthread_mutex_lock(&s_cast_lock);
+                free(s_cast_seg_url[0]);
+                free(s_cast_seg_url[1]);
+                s_cast_seg_url[0] = v_real;
+                s_cast_seg_url[1] = a_real;
+                v_real = a_real = NULL;
+                pthread_mutex_unlock(&s_cast_lock);
 
-            int duration_ms = (int)(duration_sec * 1000.0);
+                struct mpd_builder b = {0};
+                mpd_append(&b,
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                    "<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\" type=\"static\" mediaPresentationDuration=\"PT%.3fS\" minBufferTime=\"PT1S\" profiles=\"urn:mpeg:dash:profile:isoff-main:2011\">\n"
+                    "  <Period duration=\"PT%.3fS\">\n"
+                    "    <AdaptationSet contentType=\"video\" mimeType=\"video/mp4\" codecs=\"%s\">\n"
+                    "      <Representation id=\"v\" bandwidth=\"%d\" width=\"%d\" height=\"%d\">\n"
+                    "        <BaseURL>%s</BaseURL>\n"
+                    "        <SegmentList>\n"
+                    "          <Initialization range=\"%" PRIu64 "-%" PRIu64 "\"/>\n",
+                    duration_sec, duration_sec,
+                    v_codec, v_br, v_w, v_h,
+                    v_esc, v_init_s, v_init_e);
 
-            snprintf(mpd, 32768,
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                "<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\" type=\"static\" mediaPresentationDuration=\"PT%.3fS\" minBufferTime=\"PT1S\" profiles=\"urn:mpeg:dash:profile:isoff-on-demand:2011\">\n"
-                "  <Period duration=\"PT%.3fS\">\n"
-                "    <AdaptationSet contentType=\"video\" mimeType=\"%s\" codecs=\"%s\">\n"
-                "      <Representation id=\"v\" bandwidth=\"%d\" width=\"%d\" height=\"%d\">\n"
-                "        <BaseURL>%s</BaseURL>\n"
-                "        <SegmentList duration=\"%d\" timescale=\"1000\"><SegmentURL media=\"%s\"/></SegmentList>\n"
-                "      </Representation>\n"
-                "    </AdaptationSet>\n"
-                "    <AdaptationSet contentType=\"audio\" mimeType=\"%s\" codecs=\"%s\">\n"
-                "      <Representation id=\"a\" bandwidth=\"%d\" audioSamplingRate=\"%d\">\n"
-                "        <BaseURL>%s</BaseURL>\n"
-                "        <SegmentList duration=\"%d\" timescale=\"1000\"><SegmentURL media=\"%s\"/></SegmentList>\n"
-                "      </Representation>\n"
-                "    </AdaptationSet>\n"
-                "  </Period>\n"
-                "</MPD>\n",
-                duration_sec, duration_sec,
-                v_mime_clean, v_codec, v_br, v_w, v_h,
-                v_esc, duration_ms, v_esc,
-                a_mime_clean, a_codec, a_br, a_rate,
-                a_esc, duration_ms, a_esc);
+                for (int i = 0; i < v_seg_count; i++) {
+                    mpd_append(&b, "          <SegmentURL mediaRange=\"%" PRIu64 "-%" PRIu64 "\"/>\n",
+                               v_segs[i].start, v_segs[i].end);
+                }
 
-            evo_cast_receiver_set_stream_mpd(mpd, title_buf);
+                mpd_append(&b,
+                    "        </SegmentList>\n"
+                    "      </Representation>\n"
+                    "    </AdaptationSet>\n"
+                    "    <AdaptationSet contentType=\"audio\" mimeType=\"audio/mp4\" codecs=\"%s\">\n"
+                    "      <Representation id=\"a\" bandwidth=\"%d\" audioSamplingRate=\"%d\">\n"
+                    "        <BaseURL>%s</BaseURL>\n"
+                    "        <SegmentList>\n"
+                    "          <Initialization range=\"%" PRIu64 "-%" PRIu64 "\"/>\n",
+                    a_codec, a_br, a_rate,
+                    a_esc, a_init_s, a_init_e);
 
-            /* Also save to local file for direct file opening fallback */
-            const char *cfg_mpd = evo_data_path("cast_yt.mpd");
-            FILE *mf = fopen(cfg_mpd, "w");
-            if (mf) {
-                fputs(mpd, mf);
-                fclose(mf);
+                for (int i = 0; i < a_seg_count; i++) {
+                    mpd_append(&b, "          <SegmentURL mediaRange=\"%" PRIu64 "-%" PRIu64 "\"/>\n",
+                               a_segs[i].start, a_segs[i].end);
+                }
+
+                mpd_append(&b,
+                    "        </SegmentList>\n"
+                    "      </Representation>\n"
+                    "    </AdaptationSet>\n"
+                    "  </Period>\n"
+                    "</MPD>\n");
+
+                evo_cast_receiver_set_stream_mpd(b.buf, title_buf);
+
+                /* Also save to local file for direct file opening fallback */
+                const char *cfg_mpd = evo_data_path("cast_yt.mpd");
+                FILE *mf = fopen(cfg_mpd, "w");
+                if (mf) {
+                    if (b.buf) fputs(b.buf, mf);
+                    fclose(mf);
+                }
+
+                int port = evo_cast_receiver_port();
+                snprintf(out_url, url_cap, "http://127.0.0.1:%d/apps/YouTube/stream.mpd", port);
+                evo_log("cast: Resolved YouTube %s -> DASH %dp (%s) / %s (%d video / %d audio segs): %s",
+                        video_id, v_h, v_codec, a_codec, v_seg_count, a_seg_count, out_url);
+
+                if (b.buf) free(b.buf);
+                free(v_esc);
+                free(a_esc);
+                free(v_segs);
+                free(a_segs);
+                return 0;
             }
-
-            int port = evo_cast_receiver_port();
-            snprintf(out_url, url_cap, "http://127.0.0.1:%d/apps/YouTube/stream.mpd", port);
-            evo_log("cast: Resolved YouTube %s -> DASH %dp (%s) / %s: %s",
-                    video_id, v_h, v_codec, a_codec, out_url);
-
             free(v_esc);
             free(a_esc);
-            free(mpd);
-            return 0;
+            free(v_real);
+            free(a_real);
+        } else {
+            evo_log("cast: sidx fetch failed (v_rc=%d a_rc=%d), falling back to progressive format", v_rc, a_rc);
         }
 
-        if (v_esc) free(v_esc);
-        if (a_esc) free(a_esc);
-        if (mpd) free(mpd);
+        if (v_segs) free(v_segs);
+        if (a_segs) free(a_segs);
     }
 
     /* Fallback: Check combined progressive formats (prefer highest resolution) */
@@ -1830,20 +2103,30 @@ int evo_cast_resolve_youtube(const char *video_id, char *out_url, size_t url_cap
     if (!video_id || !video_id[0] || !out_url || url_cap == 0) {
         return -1;
     }
+    /* The id can come from any device on the LAN (DIAL POST body) and goes
+     * straight into a JSON request: accept only a real 11-char YouTube id. */
+    if (strlen(video_id) != 11) return -1;
+    for (const char *c = video_id; *c; c++) {
+        if (!((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') ||
+              (*c >= '0' && *c <= '9') || *c == '-' || *c == '_'))
+            return -1;
+    }
 
     if (out_title && title_cap > 0) {
         out_title[0] = '\0';
     }
 
-    /* Attempt 1: ANDROID_VR (provides DASH 4K/1080p MPD when allowed) */
-    char payload_vr[512];
-    snprintf(payload_vr, sizeof(payload_vr),
-        "{\"videoId\":\"%s\",\"context\":{\"client\":{\"clientName\":\"ANDROID_VR\",\"clientVersion\":\"1.61.48\",\"deviceModel\":\"Quest 3\"}}}",
+    /* Attempt 1: ANDROID mobile client (clientVersion 20.02.35 - bypasses bot verification, provides direct 4K/1080p adaptive stream URLs) */
+    char payload_android[512];
+    snprintf(payload_android, sizeof(payload_android),
+        "{\"videoId\":\"%s\",\"context\":{\"client\":{\"clientName\":\"ANDROID\",\"clientVersion\":\"20.02.35\",\"androidSdkVersion\":30,\"hl\":\"en\",\"gl\":\"US\"}},\"contentCheckOk\":true,\"racyCheckOk\":true}",
         video_id);
 
-    const char *headers_vr[] = {
+    const char *headers_android[] = {
         "Content-Type: application/json",
-        "User-Agent: Mozilla/5.0"
+        "User-Agent: com.google.android.youtube/20.02.35 (Linux; U; Android 11) gzip",
+        "X-YouTube-Client-Name: 3",
+        "X-YouTube-Client-Version: 20.02.35"
     };
 
     char *res_body = NULL;
@@ -1851,39 +2134,7 @@ int evo_cast_resolve_youtube(const char *video_id, char *out_url, size_t url_cap
     int status = 0;
 
     int rc = evo_net_http_post_sync("https://www.youtube.com/youtubei/v1/player",
-                                    payload_vr, headers_vr, 2, &res_body, &res_len, &status);
-    if (rc == EVO_NET_OK && status == 200 && res_body) {
-        cJSON *root = cJSON_Parse(res_body);
-        free(res_body);
-        res_body = NULL;
-        if (root) {
-            if (parse_innertube_streams(root, video_id, out_url, url_cap, out_title, title_cap) == 0) {
-                cJSON_Delete(root);
-                return 0;
-            }
-            cJSON_Delete(root);
-        }
-    } else {
-        if (res_body) { free(res_body); res_body = NULL; }
-    }
-
-    evo_log("cast: ANDROID_VR client failed for %s, trying ANDROID mobile client fallback...", video_id);
-
-    /* Attempt 2: ANDROID mobile client (bypasses bot verification, provides progressive MP4 stream) */
-    char payload_android[512];
-    snprintf(payload_android, sizeof(payload_android),
-        "{\"videoId\":\"%s\",\"context\":{\"client\":{\"clientName\":\"ANDROID\",\"clientVersion\":\"21.26.364\",\"androidSdkVersion\":30,\"hl\":\"en\",\"gl\":\"US\"}},\"contentCheckOk\":true,\"racyCheckOk\":true}",
-        video_id);
-
-    const char *headers_android[] = {
-        "Content-Type: application/json",
-        "User-Agent: com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip",
-        "X-YouTube-Client-Name: 3",
-        "X-YouTube-Client-Version: 21.26.364"
-    };
-
-    rc = evo_net_http_post_sync("https://www.youtube.com/youtubei/v1/player",
-                                payload_android, headers_android, 4, &res_body, &res_len, &status);
+                                    payload_android, headers_android, 4, &res_body, &res_len, &status);
     if (rc == EVO_NET_OK && status == 200 && res_body) {
         cJSON *root = cJSON_Parse(res_body);
         free(res_body);
@@ -1898,6 +2149,36 @@ int evo_cast_resolve_youtube(const char *video_id, char *out_url, size_t url_cap
     } else {
         if (res_body) { free(res_body); res_body = NULL; }
         evo_log("cast: ANDROID mobile client POST failed (rc=%d, status=%d)", rc, status);
+    }
+
+    evo_log("cast: ANDROID mobile client failed for %s, trying ANDROID_VR fallback...", video_id);
+
+    /* Attempt 2: ANDROID_VR fallback (provides DASH 4K/1080p MPD when allowed) */
+    char payload_vr[512];
+    snprintf(payload_vr, sizeof(payload_vr),
+        "{\"videoId\":\"%s\",\"context\":{\"client\":{\"clientName\":\"ANDROID_VR\",\"clientVersion\":\"1.61.48\",\"deviceModel\":\"Quest 3\"}}}",
+        video_id);
+
+    const char *headers_vr[] = {
+        "Content-Type: application/json",
+        "User-Agent: Mozilla/5.0"
+    };
+
+    rc = evo_net_http_post_sync("https://www.youtube.com/youtubei/v1/player",
+                                payload_vr, headers_vr, 2, &res_body, &res_len, &status);
+    if (rc == EVO_NET_OK && status == 200 && res_body) {
+        cJSON *root = cJSON_Parse(res_body);
+        free(res_body);
+        res_body = NULL;
+        if (root) {
+            if (parse_innertube_streams(root, video_id, out_url, url_cap, out_title, title_cap) == 0) {
+                cJSON_Delete(root);
+                return 0;
+            }
+            cJSON_Delete(root);
+        }
+    } else {
+        if (res_body) { free(res_body); res_body = NULL; }
     }
 
     evo_log("cast: No playable video streams could be resolved for YouTube %s", video_id);

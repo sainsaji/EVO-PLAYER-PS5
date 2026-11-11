@@ -313,6 +313,7 @@ void evo_stream_io_apply_network_options(AVDictionary **opts, const char *url)
      * AVERROR_INVALIDDATA after 8 s. Same class of channel as the one above.
      */
     av_dict_set(opts, "extension_picky", "0", 0);
+    av_dict_set(opts, "protocol_whitelist", "file,http,https,tcp,tls,crypto,data,ftp", 0);
 }
 
 /*

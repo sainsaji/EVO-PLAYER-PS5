@@ -1733,7 +1733,7 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
      * all: there is no position to come back to, and a channel that happens to
      * be on right now is not a thing the user asked to resume.
      */
-    if (!m_source.is_live) {
+    if (!m_source.is_live && !m_source.no_history) {
         std::string recentKey = filePath;
         std::string mediaTitle = m_source.title, mediaCat;
         if (m_source.isProvider())
@@ -2111,7 +2111,7 @@ void PlaybackController::saveResumePosition() {
      * next launch of that channel seek to a point the stream does not have,
      * which on an HLS endpoint is a failed open rather than a wrong position.
      */
-    if (m_source.is_live) return;
+    if (m_source.is_live || m_source.no_history) return;
 
     if (pos < 5.0 || (m_durationSeconds > 0.0 && pos >= m_durationSeconds - 10.0)) {
         pos = 0.0; // Clear near start or finish

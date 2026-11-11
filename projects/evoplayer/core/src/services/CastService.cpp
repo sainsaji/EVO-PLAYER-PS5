@@ -10,10 +10,13 @@
 #include "evo_toast.h"
 #include "evo_usb_remote.h"
 #include "evo_hui.h"
+#include "evo_thread.h"
+
+#include <cstdlib>
 
 extern "C" {
     int start_video_playback_at(const char *path, double resume_seconds);
-    int start_video_playback_source(const char *url, const char *title, double resume_seconds);
+    int start_video_playback_cast(const char *url, const char *title, double resume_seconds);
     void stop_video_playback(void);
 }
 
@@ -34,14 +37,87 @@ void CastService::initialize() {
         m_deviceName = settings->getCastDeviceName();
     }
 
+    /* Always register the callbacks: Settings can start the receiver later
+     * (SettingsService::setCastReceiverEnabled), and a receiver started
+     * without them silently ignored every cast until EVO was restarted. */
+    evo_cast_receiver_set_callbacks(&CastService::onLaunchThunk, &CastService::onStopThunk, this);
     if (m_enabled) {
-        evo_cast_receiver_set_callbacks(&CastService::onLaunchThunk, &CastService::onStopThunk, this);
         evo_cast_receiver_start(m_deviceName.c_str(), m_port);
     }
 }
 
 void CastService::shutdown() {
     evo_cast_receiver_stop();
+    joinResolve();
+}
+
+void* CastService::resolveThreadMain(void* arg) {
+    auto* self = static_cast<CastService*>(arg);
+    char streamUrl[4096] = {0};
+    char ytTitle[256] = {0};
+    int rc = evo_cast_resolve_youtube(self->m_resolveVideoId.c_str(),
+                                      streamUrl, sizeof(streamUrl), ytTitle, sizeof(ytTitle));
+    self->m_resolveUrl = streamUrl;
+    self->m_resolveTitle = ytTitle;
+    self->m_resolveRc = (rc == 0 && streamUrl[0]) ? 0 : -1;
+    self->m_resolveDone.store(true);
+    return nullptr;
+}
+
+void CastService::startResolve(const char* videoId, const char* timeOffset) {
+    m_resolveVideoId = videoId;
+    m_resolveTimeOffset = timeOffset ? timeOffset : "";
+    m_resolveUrl.clear();
+    m_resolveTitle.clear();
+    m_resolveRc = -1;
+    m_resolveCancelled = false;
+    m_resolveDone.store(false);
+    if (evo_thread_create(&m_resolveThread, &CastService::resolveThreadMain, this) == 0) {
+        m_resolveThreadValid = true;
+    } else {
+        evo_log("cast: could not start the resolve thread");
+        toast("Cast", "Failed to resolve YouTube stream");
+    }
+}
+
+void CastService::joinResolve() {
+    if (m_resolveThreadValid) {
+        pthread_join(m_resolveThread, nullptr);
+        m_resolveThreadValid = false;
+    }
+}
+
+/* Main thread, once the resolve thread has finished. */
+void CastService::finishResolve() {
+    joinResolve();
+    const std::string& videoId = m_resolveVideoId;
+    if (m_resolveCancelled) {
+        evo_log("cast: resolve of %s finished after the phone stopped; dropped", videoId.c_str());
+        return;
+    }
+    if (m_resolveRc == 0) {
+        const std::string& title = m_resolveTitle;
+        std::string msg = "Playing YouTube: " + (title.empty() ? videoId : title);
+        toast("Cast", msg.c_str());
+        double resumeSec = m_resolveTimeOffset.empty() ? 0.0 : std::atof(m_resolveTimeOffset.c_str());
+        evo_log("cast: Playing native YouTube %s: %s (resume %.1fs)",
+                videoId.c_str(), m_resolveUrl.c_str(), resumeSec);
+        if (start_video_playback_cast(m_resolveUrl.c_str(), title.c_str(), resumeSec)) {
+            if (auto sm = Application::getInstance().getScreenManager()) {
+                sm->navigateTo(ScreenId::Player);
+            }
+            if (evo_webui_session_active()) {
+                evo_webui_close();
+                m_webActive = false;
+            }
+            return;
+        }
+        evo_log("cast: start_video_playback_cast failed");
+        toast("Cast", "Playback start failed");
+    } else {
+        evo_log("cast: Native resolve failed for %s", videoId.c_str());
+        toast("Cast", "Failed to resolve YouTube stream");
+    }
 }
 
 bool CastService::isRunning() const {
@@ -111,9 +187,14 @@ void CastService::update(double deltaMs) {
     std::string launchData;
     bool doStop = false;
 
+    if (m_resolveThreadValid && m_resolveDone.load()) {
+        finishResolve();
+    }
+    const bool resolving = m_resolveThreadValid;
+
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        if (m_pendingLaunch) {
+        if (m_pendingLaunch && !resolving) {
             doLaunch = true;
             launchData = m_pendingLaunchData;
             m_pendingLaunch = false;
@@ -126,6 +207,7 @@ void CastService::update(double deltaMs) {
     }
 
     if (doStop) {
+        if (m_resolveThreadValid) m_resolveCancelled = true;
         toast("Cast", "Phone disconnected");
         evo_cast_receiver_set_app_running(0);
         evo_webui_close();
@@ -152,7 +234,10 @@ void CastService::update(double deltaMs) {
         if (directUrl[0]) {
             toast("Cast", "Playing cast stream...");
             evo_log("cast: Direct media play: %s", directUrl);
-            evo_open_media_path(directUrl);
+            if (start_video_playback_cast(directUrl, "", 0.0)) {
+                if (auto sm = Application::getInstance().getScreenManager())
+                    sm->navigateTo(ScreenId::Player);
+            }
         } else {
             bool useNative = false;
             auto settings = Application::getInstance().getSettingsService();
@@ -163,33 +248,7 @@ void CastService::update(double deltaMs) {
             if (useNative) {
                 if (videoId[0]) {
                     toast("Cast", "Resolving YouTube stream...");
-                    char streamUrl[4096] = {0};
-                    char ytTitle[256] = {0};
-                    int rrc = evo_cast_resolve_youtube(videoId, streamUrl, sizeof(streamUrl), ytTitle, sizeof(ytTitle));
-                    if (rrc == 0 && streamUrl[0]) {
-                        std::string msg = "Playing YouTube: " + std::string(ytTitle[0] ? ytTitle : videoId);
-                        toast("Cast", msg.c_str());
-                        double resumeSec = 0.0;
-                        if (timeOffset[0]) {
-                            resumeSec = std::atof(timeOffset);
-                        }
-                        evo_log("cast: Playing native YouTube %s: %s (resume %.1fs)", videoId, streamUrl, resumeSec);
-                        if (start_video_playback_source(streamUrl, ytTitle, resumeSec)) {
-                            if (auto sm = Application::getInstance().getScreenManager()) {
-                                sm->navigateTo(ScreenId::Player);
-                            }
-                            if (evo_webui_session_active()) {
-                                evo_webui_close();
-                                m_webActive = false;
-                            }
-                            return;
-                        }
-                        evo_log("cast: start_video_playback_source failed");
-                        toast("Cast", "Playback start failed");
-                    } else {
-                        evo_log("cast: Native resolve failed for %s", videoId);
-                        toast("Cast", "Failed to resolve YouTube stream");
-                    }
+                    startResolve(videoId, timeOffset);
                 } else {
                     toast("Cast", "YouTube connected from phone");
                     evo_log("cast: Phone connected, awaiting video selection from Lounge");
