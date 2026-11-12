@@ -178,6 +178,14 @@ float SettingsScreen::row_top(int index) const
     return y_pos;
 }
 
+float SettingsScreen::rows_bottom() const
+{
+    if (rows_.empty())
+        return kRowsBottom;
+    const float content_bottom = row_top(static_cast<int>(rows_.size()) - 1) + row_h(rows_.back().kind);
+    return content_bottom > kRowsBottom ? kRowsBottom - 34.0f : kRowsBottom;
+}
+
 void SettingsScreen::update(float dt)
 {
     age_ += dt;
@@ -224,7 +232,7 @@ void SettingsScreen::update(float dt)
     {
         const float content_bottom = row_top(static_cast<int>(rows_.size()) - 1) +
                                      row_h(rows_.back().kind);
-        max_scroll = std::max(0.0f, content_bottom - kRowsBottom);
+        max_scroll = std::max(0.0f, content_bottom - rows_bottom());
     }
 
     if (focus_idx >= 0)
@@ -242,8 +250,8 @@ void SettingsScreen::update(float dt)
         for (size_t j = static_cast<size_t>(focus_idx) + 1;
              j < rows_.size() && rows_[j].kind == EVO_RMLUI_ROW_OPTION; ++j)
             bottom = row_top(static_cast<int>(j)) + 56.0f;
-        if (bottom - want > kRowsBottom)
-            want = std::min(bottom - kRowsBottom, top - kRowsTop);
+        if (bottom - want > rows_bottom())
+            want = std::min(bottom - rows_bottom(), top - kRowsTop);
         scroll_.target = std::clamp(want, 0.0f, max_scroll);
         if (!row_cursor_snapped_)
             scroll_.snap(scroll_.target);
@@ -426,7 +434,8 @@ void SettingsScreen::draw(DrawList &list, const Context &ctx) const
         list.glow(rc, page::kRadiusTile, 20, p.accent.with_alpha(0.4f));
     }
 
-    list.push_clip({pane.x, kRowsTop - 12.0f, pane.w, kRowsBottom - kRowsTop + 24.0f});
+    const float rb = rows_bottom();
+    list.push_clip({pane.x, kRowsTop - 12.0f, pane.w, rb - kRowsTop + 12.0f});
     for (size_t i = 0; i < rows_.size(); ++i)
     {
         float row_in = tween::stagger(section_age_, static_cast<int>(i), 0.05f, 0.4f);
@@ -444,6 +453,50 @@ void SettingsScreen::draw(DrawList &list, const Context &ctx) const
         list.pop_opacity();
     }
 
+    /* More rows than fit: fades at the edge that hides some, and a scrollbar
+     * in the gap beside the rows with an arrow at each end that has more.
+     * Drawn under the focus outline so the focused row stays crisp. */
+    int more_below_n = 0, more_above_n = 0;
+    const float rows_w = pane.w - 48.0f - (preview_.kind ? kPreviewW + 24.0f : 0.0f);
+    if (!rows_.empty())
+    {
+        const float content_bottom = row_top(static_cast<int>(rows_.size()) - 1) + row_h(rows_.back().kind);
+        const float max_scroll = std::max(0.0f, content_bottom - rb);
+        if (max_scroll > 1.0f)
+        {
+            const float s = std::clamp(scroll_.value, 0.0f, max_scroll);
+            const bool more_above = s > 2.0f, more_below = s < max_scroll - 2.0f;
+            const float fx = pane.x + 12.0f, fw = rows_w + 24.0f;
+            if (more_below)
+                list.gradient_rect({fx, rb - 28.0f, fw, 28.0f}, 0, p.surface.with_alpha(0.0f), p.surface);
+            if (more_above)
+                list.gradient_rect({fx, kRowsTop - 12.0f, fw, 36.0f}, 0, p.surface, p.surface.with_alpha(0.0f));
+
+            const float view_h = rb - kRowsTop;
+            const float bx = pane.x + 24.0f + rows_w + (preview_.kind ? 9.0f : 3.0f);
+            const float track_top = kRowsTop + 22.0f, track_h = view_h - 44.0f;
+            list.rounded_rect({bx, track_top, 6.0f, track_h}, 3.0f, kWhite.with_alpha(0.12f));
+            const float thumb_h = std::max(48.0f, track_h * view_h / (view_h + max_scroll));
+            const float thumb_y = track_top + (track_h - thumb_h) * (s / max_scroll);
+            list.rounded_rect({bx, thumb_y, 6.0f, thumb_h}, 3.0f, kWhite.with_alpha(0.7f));
+            const Color up_c = more_above ? kWhite.with_alpha(0.85f) : kWhite.with_alpha(0.15f);
+            const Color dn_c = more_below ? kWhite.with_alpha(0.85f) : kWhite.with_alpha(0.15f);
+            list.triangle({bx - 3.0f, kRowsTop + 2.0f, 12.0f, 9.0f}, up_c);
+            list.triangle({bx - 3.0f, rb - 11.0f, 12.0f, 9.0f}, dn_c, 0.0f, 3.14159265f);
+
+            /* "v 2 MORE" / "^ 3 MORE": how many rows the edge hides, so a
+             * section that does not fit says so in words, not only the bar. */
+            for (size_t i = 0; i < rows_.size(); ++i)
+            {
+                const float top = row_top(static_cast<int>(i)) - s;
+                if (top + row_h(rows_[i].kind) > rb + 1.0f)
+                    ++more_below_n;
+                else if (top < kRowsTop - 1.0f)
+                    ++more_above_n;
+            }
+        }
+    }
+
     if (!params_.sidebar_focused && row_cursor_snapped_)
     {
         Rect rc = row_cursor_.value();
@@ -451,6 +504,23 @@ void SettingsScreen::draw(DrawList &list, const Context &ctx) const
     }
 
     list.pop_clip();
+
+    /* Outside the rows' clip: the strip rows_bottom() keeps free below, and
+     * the gap between the heading and the first row. */
+    auto more_pill = [&](int n, float cy, bool down) {
+        const std::string label = std::to_string(n) + " MORE";
+        const float tw = fonts.semibold.measure(label, 15, 1.5f);
+        const float pw = tw + 46.0f, cx = pane.x + 24.0f + rows_w * 0.5f;
+        Rect pill{cx - pw * 0.5f, cy - 14.0f, pw, 28.0f};
+        list.rounded_rect(pill, 14.0f, Color::rgb(0x000000, 0.55f));
+        list.bordered_rect(pill, 14.0f, Color::rgb(0x000000, 0.0f), 1.0f, kWhite.with_alpha(0.18f));
+        list.triangle({pill.x + 13.0f, pill.cy() - 4.0f, 11.0f, 8.0f}, p.accent, 0.0f, down ? 3.14159265f : 0.0f);
+        ui::text(list, fonts.semibold, label, pill.x + 32.0f, pill.cy() + 5.5f, 15, kWhite, Align::left, 1.5f);
+    };
+    if (more_below_n > 0)
+        more_pill(more_below_n, rb + 19.0f, true);
+    if (more_above_n > 0)
+        more_pill(more_above_n, kRowsTop - 17.0f, false);
     if (preview_.kind)
         draw_settings_preview(list, ctx, {pane.x + pane.w - kPreviewW - 24.0f, kRowsTop - 12.0f, kPreviewW, kRowsBottom - kRowsTop + 24.0f}, preview_);
     list.pop_clip();

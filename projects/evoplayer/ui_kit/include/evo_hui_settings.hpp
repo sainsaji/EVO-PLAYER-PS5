@@ -78,6 +78,9 @@ class SettingsScreen
     bool collapse_snapped_ = false;
     float side_w() const;
     float pane_left() const;
+    /* Bottom of the visible rows: kRowsBottom, or 34 px higher when the
+     * section does not fit, leaving room for the "N MORE" pill below. */
+    float rows_bottom() const;
 };
 
 } // namespace evo::kit
