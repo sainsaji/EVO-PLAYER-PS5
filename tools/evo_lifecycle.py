@@ -25,6 +25,7 @@ Subcommands (print one word / line, exit 0 unless the FTP read failed):
   coldboot                 COLDBOOT | NO   (booted, and the title never ran
                            since - the only sound reading of an UNKNOWN slot)
   heartbeat                RUNNING | PARKED | STILL | ABSENT
+  hookfresh                FRESH | USED   (last hook install served no launch yet)
   foreign                  other titles started and not released (or NONE)
   smlen                    current debug.log length, a baseline for wait-*
   wait-registered  BASE S  REGISTERED | TIMEOUT   (new install/mount.lnk after BASE)
@@ -154,6 +155,19 @@ def coldboot(text):
     return "NO" if (STARTED in boot or RELEASED in boot) else "COLDBOOT"
 
 
+def hookfresh(text):
+    """FRESH when ShadowMount's last hook install has served no launch yet.
+
+    The launch hook serves one launch, so `launch` restarts ShadowMount first.
+    Right after a deploy (which restarts it itself) that second restart is
+    wasted and has failed on its own (2026-11-12). Any title's start uses the
+    hook up, not only ours."""
+    hooks = [m.start() for m in HOOKED.finditer(text)]
+    if not hooks:
+        return "USED"
+    return "USED" if text.rfind("[GAME] started: ") > hooks[-1] else "FRESH"
+
+
 def foreign(text):
     """Other ShadowMount titles started and not released since: a launch now
     meets the PS5's "close the other app?" dialog (or "Can't start"), which no
@@ -216,6 +230,8 @@ def main(argv):
             print(slot(sm_both()))
         elif cmd == "coldboot":
             print(coldboot(sm_both()))
+        elif cmd == "hookfresh":
+            print(hookfresh(sm_both()))
         elif cmd == "foreign":
             print(foreign(sm_both()))
         elif cmd == "heartbeat":

@@ -302,6 +302,10 @@ with FTP() as ftp:
         try: ftp.sendcmd(f"DELE /mnt/usb0/{name}"); cleared += 1
         except error_perm: pass
     print(f"cleared {cleared} stale /mnt/usb0 log file(s)")
+    # evo_lifecycle.py reads /data/evoplayer/evo_status FIRST; a stale parked=1
+    # left there by the last close blocked the next launch (2026-11-12).
+    try: ftp.sendcmd("DELE /data/evoplayer/evo_status"); print("cleared /data/evoplayer/evo_status")
+    except error_perm: pass
     for path in (tmp, remote):
         try: ftp.sendcmd(f"DELE {path}")
         except error_perm: pass

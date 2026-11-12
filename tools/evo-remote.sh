@@ -340,8 +340,12 @@ do_launch() {
         || die "ShadowMount's log is still moving after 120 s - it is not idle. Not launching."
     # ShadowMount's launch hook serves one launch: after a deploy, and after
     # EVO has run and closed, the next launch gets 0x80940033 (2026-11-05). So
-    # every launch restarts it first, then waits out the startup scan.
-    if [[ "${1:-}" != --no-sm-restart ]]; then
+    # every launch restarts it first, then waits out the startup scan - unless
+    # the hook installed last has not served a launch yet (deploy-app.sh just
+    # restarted it): a second restart then only adds a way to fail.
+    if [[ "${1:-}" != --no-sm-restart && "$(lc hookfresh)" == FRESH ]]; then
+        ok "ShadowMount's launch hook is fresh (no launch since it was installed) - no restart"
+    elif [[ "${1:-}" != --no-sm-restart ]]; then
         ( do_smrestart ) || die "ShadowMount restart failed - not launching."
         [[ "$(lc wait-quiet 15 120)" == QUIET ]] \
             || die "ShadowMount's log is still moving 120 s after its restart. Not launching."
