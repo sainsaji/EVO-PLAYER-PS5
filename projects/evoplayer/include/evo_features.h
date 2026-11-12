@@ -55,4 +55,14 @@
 #define EVO_ENABLE_EMBY EVO_ENABLE_PROVIDERS
 #endif
 
+/*
+ * Plex: OFF until it works after login (#222). provider_plex.c still compiles
+ * (and the host tests still link it); 0 only leaves it out of the provider
+ * table, so it is not offered in Providers, Settings or the phone remote.
+ * Saved Plex sign-ins stay on disk and come back when this is 1 again.
+ */
+#ifndef EVO_ENABLE_PLEX
+#define EVO_ENABLE_PLEX 0
+#endif
+
 #endif /* EVO_FEATURES_H */

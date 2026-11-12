@@ -481,7 +481,7 @@ void LaunchScreen::fillHomeTips(evo_rmlui_launch_params_t& params) {
     add("Stereo can fill four speakers: Settings > Audio > Upmix stereo to 4.0");
     add("Phone calls in films can play on the controller speaker: Settings > Audio");
     add("Watch from a PC or NAS: Browse > Add Server (SMB or FTP)");
-    add("Jellyfin, Emby, Plex, Stremio and IPTV are under Providers");
+    add("Jellyfin, Emby, Stremio and IPTV are under Providers");
     add("Subtitles from any folder: press Down in the player, then Load from file");
     add("Skip intros and credits: press Triangle when the Skip button shows");
     add("Upscaling sharpens SD and HD video on a 4K TV: Settings > Video & Display");

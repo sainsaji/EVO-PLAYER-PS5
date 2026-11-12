@@ -17,6 +17,7 @@
 #include "evo_provider.h"
 #include "evo_provider_log.h"
 #include "evo_data_path.h"
+#include "evo_features.h"
 
 /* ------------------------------------------------------------------------- */
 /* The table                                                                 */
@@ -48,7 +49,9 @@ static const evo_provider_t *const PROVIDERS[] = {
     &evo_provider_xtream,
     &evo_provider_emby,
     &evo_provider_jellyfin,
+#if EVO_ENABLE_PLEX
     &evo_provider_plex,     /* native screens; the web UI as an extra */
+#endif
     &evo_provider_stremio,      /* Stremio addons, native (provider_stremio.c) */
     &evo_provider_nuvio,        /* native over its addons; the web app as an extra */
 };
