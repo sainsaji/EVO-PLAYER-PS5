@@ -37,6 +37,12 @@ extern "C" {
  * new disks are mounted. Cheap when nothing changed. Returns the count. */
 int  evo_ntfs_refresh(void);
 
+/* The same on a background thread, for the UI: probing a new drive reads it
+ * (3.7 s through the helper for a 1 TB exFAT stick), which froze the frame
+ * loop. Starts one refresh unless one is running and returns the count as it
+ * is now; new volumes show on the caller's next look. */
+int  evo_ntfs_refresh_async(void);
+
 /* Mounts every NTFS volume found in an image file or device node under the
  * name `name` (+ "pN" for partitions). For tests and the test image. Returns
  * how many volumes were added. */

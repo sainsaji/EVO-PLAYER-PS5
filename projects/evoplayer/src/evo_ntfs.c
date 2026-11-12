@@ -1217,7 +1217,48 @@ static void refresh_remote(void)
 }
 #endif
 
+/* One refresh at a time: the disk probe state above (g_disk_empty, the helper
+ * statics) is not locked, and a background refresh can run while a caller
+ * that needs the answer (opening an ntfs:// path) asks for one. */
+static pthread_mutex_t g_refresh = PTHREAD_MUTEX_INITIALIZER;
+static volatile int g_refresh_busy;
+
+static void refresh_locked(void);
+
 int evo_ntfs_refresh(void)
+{
+    pthread_mutex_lock(&g_refresh);
+    refresh_locked();
+    pthread_mutex_unlock(&g_refresh);
+    return evo_ntfs_volume_count();
+}
+
+static void *refresh_worker(void *arg)
+{
+    (void)arg;
+    evo_ntfs_refresh();
+    __atomic_store_n(&g_refresh_busy, 0, __ATOMIC_RELEASE);
+    return NULL;
+}
+
+int evo_ntfs_refresh_async(void)
+{
+    if (!__atomic_exchange_n(&g_refresh_busy, 1, __ATOMIC_ACQ_REL)) {
+        pthread_t t;
+        pthread_attr_t a;
+        pthread_attr_init(&a);
+        pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
+        pthread_attr_setstacksize(&a, 256 * 1024);
+        if (pthread_create(&t, &a, refresh_worker, NULL) != 0) {
+            __atomic_store_n(&g_refresh_busy, 0, __ATOMIC_RELEASE);
+            EVO_LOGW("ntfs", "no refresh thread - NTFS drives show on the next try");
+        }
+        pthread_attr_destroy(&a);
+    }
+    return evo_ntfs_volume_count();
+}
+
+static void refresh_locked(void)
 {
     char path[32], name[16];
     log_dev_view();
@@ -1271,7 +1312,6 @@ int evo_ntfs_refresh(void)
         add_device_disk("/data/evoplayer/test/ntfs.img", "img0", MAX_DISKS, 0);
     }
 #endif
-    return evo_ntfs_volume_count();
 }
 
 int evo_ntfs_volume_count(void)
@@ -1282,18 +1322,31 @@ int evo_ntfs_volume_count(void)
     return n;
 }
 
+/* Copies, not the volume's own strings: a background refresh may drop (and
+ * free) a pulled drive's volume while the UI is still reading the name. */
+static char g_url_copy[MAX_VOLS][40];
+static char g_label_copy[MAX_VOLS][96];
+
 const char *evo_ntfs_volume_url(int i)
 {
+    const char *u = NULL;
     pthread_mutex_lock(&g_reg);
-    const char *u = (i >= 0 && i < g_nvols) ? g_vols[i]->url : NULL;
+    if (i >= 0 && i < g_nvols && i < MAX_VOLS) {
+        snprintf(g_url_copy[i], sizeof g_url_copy[i], "%s", g_vols[i]->url);
+        u = g_url_copy[i];
+    }
     pthread_mutex_unlock(&g_reg);
     return u;
 }
 
 const char *evo_ntfs_volume_label(int i)
 {
+    const char *l = NULL;
     pthread_mutex_lock(&g_reg);
-    const char *l = (i >= 0 && i < g_nvols) ? g_vols[i]->label : NULL;
+    if (i >= 0 && i < g_nvols && i < MAX_VOLS) {
+        snprintf(g_label_copy[i], sizeof g_label_copy[i], "%s", g_vols[i]->label);
+        l = g_label_copy[i];
+    }
     pthread_mutex_unlock(&g_reg);
     return l;
 }

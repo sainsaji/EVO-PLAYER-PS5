@@ -86,8 +86,9 @@ std::vector<std::string> FileSystemBrowser::usbMounts() const {
         if (hasEntries(m)) out.push_back(m);
     }
     /* #217: NTFS drives the console leaves unmounted, read by evo_ntfs.
-     * Listed even when empty: a volume that mounted is a drive. */
-    evo_ntfs_refresh();
+     * Listed even when empty: a volume that mounted is a drive. Probed in the
+     * background: a new drive shows on the next look (kUsbMountsTtlMs). */
+    evo_ntfs_refresh_async();
     for (int i = 0; i < evo_ntfs_volume_count(); ++i) {
         if (const char* url = evo_ntfs_volume_url(i)) out.push_back(url);
     }
