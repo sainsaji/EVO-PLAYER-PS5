@@ -30,7 +30,8 @@ Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47N
 
 ### ![](https://img.shields.io/badge/INTERFACE-7c4dff?style=flat-square) Interface
 
-- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Settings rows are never cut off.** While you are in the rows, the section list shrinks to its icons; Left brings it back.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Settings rows are never cut off.** While you are in the rows, the section list shrinks to its icons; Left brings it back. No setting's text ends in "..." any more.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **A long section says there is more:** "N MORE" below (or above, once you scroll), a scrollbar beside the rows and a fade at the hidden edge.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Picture previews** for the settings that only had text, from Upmix 4.0 and the cast settings to Volume boost, Audio delay and Network buffer.
 - ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **One icon per setting**, instead of the same few repeated; the Cast to EVO Player row had none.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **"Did you know" on Home**: one tip at a time about what EVO can do, with this console's address in the phone tips.
