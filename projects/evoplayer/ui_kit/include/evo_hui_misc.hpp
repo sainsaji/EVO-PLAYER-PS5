@@ -63,6 +63,8 @@ class ToastOverlay
     bool visible_ = false;
     int alpha_ = 0;
     int slide_ = 0;
+    bool busy_ = false;
+    float time_ = 0.0f;   /* spins the busy ring */
 };
 
 class AboutScreen

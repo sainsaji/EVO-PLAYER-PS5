@@ -180,6 +180,7 @@ void ToastOverlay::set(const evo_rmlui_toast_params_t &p)
     visible_ = p.visible != 0;
     alpha_ = p.alpha;
     slide_ = p.slide;
+    busy_ = p.busy != 0;
 }
 
 void ToastOverlay::enter()
@@ -188,6 +189,7 @@ void ToastOverlay::enter()
 
 void ToastOverlay::update(float dt)
 {
+    time_ = std::fmod(time_ + dt, 1000.0f);
 }
 
 void ToastOverlay::draw(DrawList &list, const Context &ctx) const
@@ -267,8 +269,10 @@ void ToastOverlay::draw(DrawList &list, const Context &ctx) const
         return;
     }
 
+    /* Busy: a spinner where the accent bar goes, the text moved past it. */
+    const float spin = busy_ ? 40.0f : 0.0f;
     float text_w = std::max(fonts.semibold.measure(title_, 20), fonts.regular.measure(message_, 18));
-    float w = std::min(620.0f, text_w + 70.0f);
+    float w = std::min(620.0f + spin, text_w + 70.0f + spin);
     float h = 64.0f;
     Rect card{1920.0f - w - 40.0f + slide_, 990.0f - h, w, h};
 
@@ -276,11 +280,17 @@ void ToastOverlay::draw(DrawList &list, const Context &ctx) const
     list.rounded_rect(card, 32, p.bg_top.with_alpha(0.95f));
     list.bordered_rect(card, 32, Color::rgb(0,0), 1.0f, kWhite.with_alpha(0.12f));
 
-    list.rounded_rect({card.x + 16, card.y + 16, 6, 32}, 3, acc);
-    
+    if (busy_) {
+        const float sx = card.x + 38.0f, sy = card.y + h / 2.0f;
+        list.arc(sx, sy, 14.0f, 4.0f, 0.0f, 6.2831853f, kWhite.with_alpha(0.15f));
+        list.arc(sx, sy, 14.0f, 4.0f, std::fmod(time_ * 5.5f, 6.2831853f), 1.6f, acc);
+    } else {
+        list.rounded_rect({card.x + 16, card.y + 16, 6, 32}, 3, acc);
+    }
+
     float cy = card.y + 24;
-    ui::text(list, fonts.semibold, fit(fonts.semibold, title_, 20, w - 60), card.x + 36, cy, 20, kWhite);
-    ui::text(list, fonts.regular, fit(fonts.regular, message_, 18, w - 60), card.x + 36, cy + 22, 18, p.text_muted);
+    ui::text(list, fonts.semibold, fit(fonts.semibold, title_, 20, w - 60 - spin), card.x + 36 + spin, cy, 20, kWhite);
+    ui::text(list, fonts.regular, fit(fonts.regular, message_, 18, w - 60 - spin), card.x + 36 + spin, cy + 22, 18, p.text_muted);
 
     list.pop_opacity();
 }

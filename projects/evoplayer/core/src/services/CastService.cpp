@@ -118,27 +118,39 @@ void CastService::finishResolve() {
     }
     if (m_resolveRc == 0) {
         const std::string& title = m_resolveTitle;
-        std::string msg = "Playing YouTube: " + (title.empty() ? videoId : title);
-        toast("Cast", msg.c_str());
-        double resumeSec = m_resolveTimeOffset.empty() ? 0.0 : std::atof(m_resolveTimeOffset.c_str());
-        evo_log("cast: Playing native YouTube %s: %s (resume %.1fs)",
-                videoId.c_str(), m_resolveUrl.c_str(), resumeSec);
-        if (start_video_playback_cast(m_resolveUrl.c_str(), title.c_str(), resumeSec)) {
-            if (auto sm = Application::getInstance().getScreenManager()) {
-                sm->navigateTo(ScreenId::Player);
-            }
-            if (evo_webui_session_active()) {
-                evo_webui_close();
-                m_webActive = false;
-            }
-            return;
-        }
-        evo_log("cast: start_video_playback_cast failed");
-        toast("Cast", "Playback start failed");
+        toast_busy(title.empty() ? "YouTube" : title.c_str(), "Opening the video...");
+        /* Two updates: the next frame renders this text, the one after opens. */
+        m_startPending = true;
+        m_startDelayFrames = 2;
     } else {
         evo_log("cast: Native resolve failed for %s", videoId.c_str());
         toast("Cast", "Failed to resolve YouTube stream");
     }
+}
+
+/* Main thread, a frame after finishResolve() put up "Opening the video...".
+ * start_video_playback_cast() opens the stream on this thread (~4 s for a
+ * YouTube HLS manifest, #215), so the toast must already be on screen. */
+void CastService::startResolvedPlayback() {
+    m_startPending = false;
+    const std::string& videoId = m_resolveVideoId;
+    const std::string& title = m_resolveTitle;
+    double resumeSec = m_resolveTimeOffset.empty() ? 0.0 : std::atof(m_resolveTimeOffset.c_str());
+    evo_log("cast: Playing native YouTube %s: %s (resume %.1fs)",
+            videoId.c_str(), m_resolveUrl.c_str(), resumeSec);
+    if (start_video_playback_cast(m_resolveUrl.c_str(), title.c_str(), resumeSec)) {
+        toast_dismiss();
+        if (auto sm = Application::getInstance().getScreenManager()) {
+            sm->navigateTo(ScreenId::Player);
+        }
+        if (evo_webui_session_active()) {
+            evo_webui_close();
+            m_webActive = false;
+        }
+        return;
+    }
+    evo_log("cast: start_video_playback_cast failed");
+    toast("Cast", "Playback start failed");
 }
 
 bool CastService::isRunning() const {
@@ -208,10 +220,13 @@ void CastService::update(double deltaMs) {
     std::string launchData;
     bool doStop = false;
 
+    if (m_startPending && --m_startDelayFrames <= 0) {
+        startResolvedPlayback();
+    }
     if (m_resolveThreadValid && m_resolveDone.load()) {
         finishResolve();
     }
-    const bool resolving = m_resolveThreadValid;
+    const bool resolving = m_resolveThreadValid || m_startPending;
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -229,6 +244,7 @@ void CastService::update(double deltaMs) {
 
     if (doStop) {
         if (m_resolveThreadValid) m_resolveCancelled = true;
+        m_startPending = false;
         toast("Cast", "Phone disconnected");
         evo_cast_receiver_set_app_running(0);
         evo_webui_close();
@@ -258,7 +274,7 @@ void CastService::update(double deltaMs) {
         if (full[0] == '1' && videoId[0]) {
             /* A link posted to /cast/url (or pasted): EVO's own player, full
              * length, whatever the native-player setting says. */
-            toast("YouTube", "Resolving the link...");
+            toast_busy("YouTube", "Getting the video...");
             startResolve(videoId, timeOffset, true);
         } else if (directUrl[0]) {
             toast("Cast", "Playing cast stream...");
@@ -278,7 +294,7 @@ void CastService::update(double deltaMs) {
                 if (videoId[0]) {
                     /* Full length (web_embedded HLS, up to 1080p60) first; the
                      * ANDROID route it falls back to stops at about 60 s. */
-                    toast("Cast", "Resolving YouTube stream...");
+                    toast_busy("YouTube", "Getting the video...");
                     startResolve(videoId, timeOffset, true);
                 } else {
                     toast("Cast", "YouTube connected from phone");

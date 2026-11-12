@@ -27,6 +27,11 @@ void toast(const char *title, const char *msg);
  * toast() replaces it; the caller re-posts it if it is still wanted. */
 void toast_sticky(const char *title, const char *msg);
 void toast_dismiss(void);
+
+/* A sticky toast with a spinner: something is loading (a cast resolving).
+ * Calling it again while one is up changes the text in place. Ends with
+ * toast_dismiss(), or any toast() (an error or a result) replaces it. */
+void toast_busy(const char *title, const char *msg);
 int  toast_is_sticky(void);
 
 /* Draw the current toast into the framebuffer. Call every frame. */

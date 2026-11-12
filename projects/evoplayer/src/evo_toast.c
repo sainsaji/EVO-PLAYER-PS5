@@ -39,6 +39,7 @@ static long long prospero_toast_started_ms  = 0;
 static int       prospero_toast_active      = 0;
 static int       prospero_toast_kind        = 0;  /* 0=info 1=technical 2=error */
 static int       prospero_toast_sticky      = 0;  /* stays until toast_dismiss() (#120) */
+static int       prospero_toast_busy        = 0;  /* sticky + a spinner: something is loading */
 
 /* --------------------------------------------------------------------------
  * Classification helpers
@@ -137,6 +138,7 @@ void toast(const char *title, const char *msg)
     prospero_toast_active     = 1;
     prospero_toast_kind       = error ? 2 : technical ? 1 : 0;
     prospero_toast_sticky     = 0;
+    prospero_toast_busy       = 0;
 
     /*
      * EVO: the console's own notification banner is deliberately not used.
@@ -158,12 +160,23 @@ void toast_sticky(const char *title, const char *msg)
     prospero_toast_active     = 1;
     prospero_toast_kind       = 0;
     prospero_toast_sticky     = 1;
+    prospero_toast_busy       = 0;
+}
+
+void toast_busy(const char *title, const char *msg)
+{
+    const int keep_slide = prospero_toast_active && prospero_toast_busy;
+    toast_sticky(title, msg);
+    prospero_toast_busy = 1;
+    /* A new step of the same load changes the text, not the card: no slide-in. */
+    if (keep_slide) prospero_toast_started_ms = now_ms() - 1000;
 }
 
 void toast_dismiss(void)
 {
     prospero_toast_active = 0;
     prospero_toast_sticky = 0;
+    prospero_toast_busy   = 0;
 }
 
 int toast_is_sticky(void)
@@ -211,6 +224,7 @@ void draw_prospero_toast(uint32_t *fb)
     p.message = prospero_toast_message;
     p.kind    = prospero_toast_kind;   /* 0=info 1=tech 2=error - evo_rmlui_toast_params_t matches */
     p.visible = 1;
+    p.busy    = prospero_toast_busy;
 
     p.alpha = (!prospero_toast_sticky && elapsed > hold_ms)
         ? 255 - (int)((elapsed - hold_ms) * 255 / fade_ms)

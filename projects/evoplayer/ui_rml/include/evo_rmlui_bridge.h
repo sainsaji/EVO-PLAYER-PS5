@@ -160,6 +160,7 @@ typedef struct {
     int visible;
     int alpha;
     int slide;
+    int busy;      /* 1: a spinner in the card - something is loading (kit only) */
 } evo_rmlui_toast_params_t;
 
 /* How a settings row presents itself. macOS-style: booleans are switches you

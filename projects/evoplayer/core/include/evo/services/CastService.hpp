@@ -78,6 +78,11 @@ private:
     int m_resolveRc = -1;
     bool m_resolveFull = false;        // a pasted/posted link: full-length route first
     bool m_resolveCancelled = false;   // phone sent stop while resolving
+    /* Resolved: the stream is opened a frame later, so the "Opening the
+     * video..." toast is drawn before the open blocks the frame loop (~4 s). */
+    bool m_startPending = false;
+    int m_startDelayFrames = 0;
+    void startResolvedPlayback();
 };
 
 } // namespace evo
