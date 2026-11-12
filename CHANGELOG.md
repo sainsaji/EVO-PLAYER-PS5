@@ -9,7 +9,7 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ![](https://img.shields.io/badge/Release-v0.13.7-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-13.60%20and%20below-blue?style=flat-square)
 
-**Whole YouTube videos, your phone as a remote, and a clearer Settings screen.** Paste a YouTube link, or cast from the YouTube app, and EVO now plays the whole video in its own player (up to 1080p60) instead of stopping after about a minute. Your phone can drive playback from a web page, Settings shows every setting in full with a picture of what it does, and Home now shows a short tip about something EVO can do. 0.13.6 was not released on its own, so this release also contains everything listed under 0.13.6 below.
+**YouTube casting, your phone as a remote, smoother playback and a clearer Settings screen.** Cast from the YouTube app on your phone, or paste a YouTube link, and EVO plays the whole video in its own player (up to 1080p60). Your phone can drive playback from a web page, the regular stutter during local and USB playback is gone, music shows its album art, Settings shows every setting in full with a picture of what it does, and Home shows a short tip about something EVO can do. An experimental built-in web browser is in Settings → Experimental (off by default).
 
 Download **`PPSA99039.ffpfsc`** and deploy it with ShadowMountPlus, or the folder-title **`.zip`**, then launch EVO from the Games row. Or install it straight from the console with **[ProsperoStore](https://github.com/blackbearreloaded/ProsperoStore)**. Runs on any jailbroken PS5 on firmware 13.60 and below. PS5 Pro owners can use the `-pro` package for the larger memory mode.
 
@@ -17,10 +17,10 @@ Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47N
 
 ### ![](https://img.shields.io/badge/YOUTUBE-ff0000?style=flat-square) YouTube in EVO's player
 
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Cast from the YouTube app.** EVO shows up as a cast target on Android and iOS, with no sign-in. The video plays in EVO's own player with hardware decode and surround audio. Turn it on or off in Settings → Network → **Cast to EVO Player**.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Play a YouTube link, whole video.** Settings → Interface & Storage → **Play a YouTube link**, the **Play a YouTube link** box on the phone page (`<console>:9780/input`), or a POST to the cast port. Up to 1080p60. EVO solves YouTube's playback check with yt-dlp's challenge solver running in an embedded QuickJS engine.
-- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Casts from the YouTube app play in full.** A cast used to stop after about a minute; it now takes the same full-length route (up to 1080p60), keeping the phone's start time.
-- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Seeking in a cast** jumps straight to the right place instead of decoding from the start.
-- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **DASH casts play** past the first segment (the stream address lost its signature inside the manifest).
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Casts play in full**, up to 1080p60, starting where the phone was. Live streams play too.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Seeking in a cast** jumps straight to the right place.
 - ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **A cast in the browser closes itself** when the phone stops or disconnects, or the video ends, with a hint on screen.
 
 ### ![](https://img.shields.io/badge/PHONE-3ddc84?style=flat-square) Phone
@@ -38,6 +38,13 @@ Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47N
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Library filters (#220):** Years, Rating and Watched-only in the Jellyfin/Emby Sort & filter panel. Thanks @Andrea17982.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Subtitle style (#231):** size, colour, position and background for the main subtitle line in Settings → Subtitles. Thanks @Andrea17982.
 - ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **In-provider options,** an L1 jump to the library, R2 for sort, and a dual-subtitle preview with real dialogue.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Plex is hidden for now (#222).** It fails after sign-in, so it is left out of Providers until it works. Saved Plex sign-ins are kept.
+
+### ![](https://img.shields.io/badge/EXPERIMENTAL-ff9800?style=flat-square) Built-in web browser (#237)
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **A web browser inside EVO,** with speed dial, address bar, history and bookmarks. Pages are drawn on the PS5 GPU and stay sharp on a 4K TV.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Off by default.** Turn on Settings → Experimental → **Web browser** to add a Web section to the side menu. While it is off, the browser does not run at all.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Options or Triangle closes the system browser** and goes back to EVO.
 
 ### ![](https://img.shields.io/badge/AUDIO-e91e63?style=flat-square) Audio & playback
 
@@ -45,6 +52,9 @@ Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47N
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Controller phone audio** (Settings → Audio): phone calls in a film play on the DualSense speaker, found from the subtitles.
 - ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Both subtitle lines in Settings.** Settings → Subtitles groups the rows into Primary and Secondary, each with size, colour, position and background. The second line's size is now saved (it was per session in the player), and it gets its own background.
 - ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Subtitle picker buttons match their hints (#243):** Triangle changes the size, Square sets the secondary track, R2 sizes the secondary. Thanks Casaca87.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **No more regular stutter in local and USB playback.** EVO no longer reads or writes the disk on the frame loop, no longer flushes the USB drive while a video plays, and only looks for USB drives when you open a file browser.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **FLAC files with album art no longer freeze at 0:00 (#232).** EVO took the cover image for a video track.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Album art on the player card (#232)** for FLAC and MP3 files.
 - ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Resume keeps your audio track.**
 - ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) Subtitle samples reset on a new file or track.
 
@@ -52,47 +62,6 @@ Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47N
 
 - ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Live log, What happened:** a video's log lines stay open while new lines arrive, and each video can **copy its lines**.
 - ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Live log, Now:** the memory line says what each number is (app memory, video buffers, UI GPU pool) instead of calling app memory "video memory".
-
----
-
-## 0.13.6
-
-![](https://img.shields.io/badge/Release-v0.13.6-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-below%2013.60-blue?style=flat-square)
-
-**Playback stutter fixes, album art on music, and an experimental built-in browser.** 0.13.6 eliminates periodic frame stalls during local and USB playback by moving all USB remote commands and DOM status I/O to a background thread, preventing blocking disk syncs during playback, and removing background drive polling. Music files with embedded album art now display their cover on the player card and no longer freeze at 0:00. It also introduces the initial ProsperoWeb browser engine composited via EVO's GPU broker, gated under Settings → Experimental (off by default) to keep the navigation rail clean until enabled.
-
-Download **`PPSA99039.ffpfsc`** and deploy it with ShadowMountPlus, or the folder-title **`.zip`**, then launch EVO from the Games row. Or install it straight from the console with **[ProsperoStore](https://github.com/blackbearreloaded/ProsperoStore)**. Runs on any jailbroken PS5 on firmware 13.60 and below. PS5 Pro owners can use the `-pro` package for the larger memory mode.
-
-Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47Nc8WtXh)**.
-
-### ![](https://img.shields.io/badge/CASTING-00bcd4?style=flat-square) YouTube Cast & DIAL Receiver
-
-- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **YouTube DIAL & Lounge Casting:** Cast YouTube videos directly from your mobile phone (Android or iOS) to EVO Player without signing in. Supports SSDP discovery on UDP 1900 and the YouTube Lounge companion protocol over TLS.
-- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Native Player YouTube Playback:** Stream YouTube videos cast from your phone straight in EVO's native player with hardware AGC decode and surround audio, configurable via **Settings → Network → CAST TO EVO PLAYER**.
-- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Bot-check bypass & format resolution:** Multi-client Innertube stream resolution tries `ANDROID_VR` for DASH 4K/1080p MPD manifests, with automated fallback to `ANDROID` mobile client (`21.26.364`) to bypass YouTube bot challenges, plus HLS live stream manifest support.
-- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Browser dismissal shortcut:** Pressing **Options** or **Triangle** while the WebKit browser dialog is displayed immediately dismisses it and returns to the EVO Player UI.
-
-### ![](https://img.shields.io/badge/PLAYBACK-e91e63?style=flat-square) Playback & Performance
-
-- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Periodic ~850 ms frame drops eliminated during playback.** File polling and UI state serialization for `evo-remote` now execute entirely on a dedicated background pthread (`usb_remote_worker`), leaving the 60/120 Hz render loop with 0 disk I/O.
-- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **No periodic `fsync` during playback.** Removed periodic USB flash drive syncs while media is streaming, eliminating flash block erase stalls. Throttled remote status updates on USB to 15 seconds during active video.
-- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **On-demand USB drive detection.** Replaced continuous background filesystem polling of `/mnt/usb*` in the main loop with on-demand enumeration in file browsers.
-- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **FLAC files with embedded cover art no longer freeze at 0:00 (#232).** The audio fallback no longer mistakes an embedded cover image for a video track, allowing audio-only FLACs at 44.1k to 192k/24 to play uninterrupted to completion.
-- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Embedded album art on the Now Playing card (#232).** FLAC and MP3 files display their embedded cover art on the player card, box-scaled and cached per track.
-
-### ![](https://img.shields.io/badge/EXPERIMENTAL-ff9800?style=flat-square) Experimental Features & Browser (#237)
-
-- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Built-in Web Browser (ProsperoWeb).** Composites web pages through EVO's out-of-process GPU broker with Mesa on PS5. Includes speed dial, address bar, history, and bookmarks.
-- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Gated in Settings → Experimental.** The `WEB BROWSER` toggle defaults to **OFF**. The browser process does not start in the background unless enabled.
-- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Dynamic navigation rail.** The "Web" section appears on the sidebar only when enabled; turning it off immediately hides the rail item and redirects any active web view back to the home screen.
-- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Sharp 2x rendering on 4K.** Web pages render with a 2x scale (3584x1888) with crisp text, while retaining 1792 CSS px layout and smooth navigation.
-- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **4-texture ring buffer with dirty rect damage tracking.** Minimizes memory footprint and eliminates GPU texture contention during page updates.
-- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Remote control CLI support.** Control the browser or toggle the setting with `./tools/evo-remote.sh set web-browser on|off`, `pointer <x> <y>`, and `weburl <url>`.
-
-### ![](https://img.shields.io/badge/TOOLING-007acc?style=flat-square) Tooling & System Stability
-
-- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **ShadowMount launch reliability.** Automated restarts of ShadowMount prior to coldboot launches prevent `0x80940033` launch hook expiration.
-- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Internal SSD fallback paths.** `evo-remote.sh` and `sweep_run.py` now support `/data/evoplayer/` paths for command and status tracking alongside USB.
 
 ---
 
