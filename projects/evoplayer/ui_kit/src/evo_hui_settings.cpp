@@ -33,6 +33,24 @@ std::string fit(const ui::FontRef &font, const std::string &text, float size, fl
     return font.font->fit(text, size, width, tracking);
 }
 
+/* The row's value pill without its explanation in brackets: "AUTO (MATCH
+ * CONTENT)" shows as AUTO, "OFF (TV DECIDES)" as OFF. The preview card's
+ * choices keep the full names; the row needs the room for its own text. */
+std::string short_badge(const std::string &badge)
+{
+    const size_t cut = badge.find(" (");
+    return cut == std::string::npos || cut == 0 ? badge : badge.substr(0, cut);
+}
+
+/* The largest size from `size` down to `min_size` at which text fits `width`;
+ * min_size when nothing fits (fit() then cuts it, which should not happen). */
+float fit_size(const ui::FontRef &font, const std::string &text, float size, float min_size, float width)
+{
+    while (size > min_size && font.measure(text, size) > width)
+        size -= 0.5f;
+    return size;
+}
+
 struct SectionDef
 {
     const char *label;
@@ -284,12 +302,16 @@ void SettingsScreen::draw_row(DrawList &list, const Context &ctx, const RowData 
     if (row.kind == EVO_RMLUI_ROW_TOGGLE)
         reserve += 64.0f;
     else if (row.kind == EVO_RMLUI_ROW_VALUE && !row.badge.empty())
-        reserve += fonts.semibold.measure(fit(fonts.semibold, row.badge, 20, kBadgeMax), 20) + 24.0f;
+        reserve += fonts.semibold.measure(fit(fonts.semibold, short_badge(row.badge), 20, kBadgeMax), 20) + 24.0f;
     const float text_w = std::max(0.0f, r.x + r.w - reserve - x);
-    ui::text(list, fonts.regular, fit(fonts.regular, row.title, 24, text_w), x, text_y, 24, kWhite);
+    /* A line a little too long gets a little smaller, not an ellipsis. */
+    const float title_size = fit_size(fonts.regular, row.title, 24, 20, text_w);
+    ui::text(list, fonts.regular, fit(fonts.regular, row.title, title_size, text_w), x, text_y, title_size, kWhite);
     if (!row.detail.empty())
     {
-        ui::text(list, fonts.regular, fit(fonts.regular, row.detail, 18, text_w), x, r.cy() + 20, 18, p.text_faint);
+        const float detail_size = fit_size(fonts.regular, row.detail, 18, 15, text_w);
+        ui::text(list, fonts.regular, fit(fonts.regular, row.detail, detail_size, text_w), x, r.cy() + 20, detail_size,
+                 p.text_faint);
     }
 
     float right = r.x + r.w - 24.0f;
@@ -314,7 +336,7 @@ void SettingsScreen::draw_row(DrawList &list, const Context &ctx, const RowData 
     }
     else if (row.kind == EVO_RMLUI_ROW_VALUE && !row.badge.empty())
     {
-        const std::string badge = fit(fonts.semibold, row.badge, 20, kBadgeMax);
+        const std::string badge = fit(fonts.semibold, short_badge(row.badge), 20, kBadgeMax);
         float bw = fonts.semibold.measure(badge, 20) + 24.0f;
         Rect pill{right - bw, r.cy() - 16, bw, 32};
         list.rounded_rect(pill, 16, kWhite.with_alpha(0.12f));

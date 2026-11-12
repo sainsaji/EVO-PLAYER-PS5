@@ -46,7 +46,11 @@ Area begin_card(DrawList &list, const Context &ctx, const Rect &box, const Setti
     list.bordered_rect(box, 24, Color::rgb(0x000000, 0.0f), 1.0f, p.border);
     Area a{box, box.x + 24.0f, box.w - 48.0f, box.y + 112.0f};
     ui::text(list, fonts.semibold, "PREVIEW", a.x, box.y + 40, 16, p.text_muted, Align::left, 2.0f);
-    ui::text(list, fonts.display, fonts.display.font->fit(pv.title, 32, a.w), a.x, box.y + 84, 32, kWhite);
+    /* A long title ("SECONDARY SUBTITLE POSITION") steps down instead of being cut. */
+    float ts = 32.0f;
+    while (ts > 22.0f && fonts.display.measure(pv.title, ts) > a.w)
+        ts -= 1.0f;
+    ui::text(list, fonts.display, fonts.display.font->fit(pv.title, ts, a.w), a.x, box.y + 84, ts, kWhite);
     return a;
 }
 
@@ -142,10 +146,13 @@ float chips(DrawList &list, const Context &ctx, const Area &a, float y, const st
     return y + 36.0f;
 }
 
-/* Wrapped benefit text under the content. */
+/* Wrapped benefit text under the content, down to the card's foot. */
 void benefit(DrawList &list, const Context &ctx, const Area &a, float y, const std::string &text)
 {
-    ui::paragraph(list, ctx.fonts.regular, text, a.x, y, 20, a.w, 28, ctx.palette.text_faint, 5);
+    const float limit = a.box.y + a.box.h - 24.0f;
+    const int lines = static_cast<int>((limit - y) / 28.0f) + 1;
+    if (lines > 0)
+        ui::paragraph(list, ctx.fonts.regular, text, a.x, y, 20, a.w, 28, ctx.palette.text_faint, std::min(lines, 12));
 }
 
 /* The labels the chips show: the setting's own choices, or OFF / ON for a toggle. */
@@ -2026,14 +2033,10 @@ void draw_debug_overlay(DrawList &list, const Context &ctx, const Rect &box, con
 
 } // namespace
 
-/* The benefit text, but never into the DETAILS block at the card's foot
- * (its divider sits 134 px above the bottom): as many lines as fit. */
+/* Same as benefit(); kept so the newer drawers read the same. */
 void benefit_fit(DrawList &list, const Context &ctx, const Area &a, float y, const std::string &text)
 {
-    const float limit = a.box.y + a.box.h - 150.0f;
-    const int lines = static_cast<int>((limit - y) / 28.0f) + 1;
-    if (lines > 0)
-        ui::paragraph(list, ctx.fonts.regular, text, a.x, y, 20, a.w, 28, ctx.palette.text_faint, std::min(lines, 5));
+    benefit(list, ctx, a, y, text);
 }
 
 /* A one-line caption centred under a picture. */
@@ -3006,16 +3009,9 @@ void draw_settings_preview(DrawList &list, const Context &ctx, const Rect &box, 
         break;
     }
 
-    /* The row's own subtext, in full: the narrower row list cuts it short. Pinned to the
-     * card's foot, below every drawing above. */
-    if (!pv.detail.empty())
-    {
-        const Palette &p = ctx.palette;
-        const float x = box.x + 24.0f, w = box.w - 48.0f, y = box.y + box.h - 104.0f;
-        list.rounded_rect({x, y - 30.0f, w, 1.0f}, 0, p.border);
-        ui::text(list, ctx.fonts.semibold, "DETAILS", x, y, 14, p.text_muted, Align::left, 2.0f);
-        ui::paragraph(list, ctx.fonts.regular, pv.detail, x, y + 28.0f, 18, w, 25, p.text_faint, 3);
-    }
+    /* No DETAILS block: it repeated the row's subtext, which the row now shows in
+     * full (the section list folds to icons), and it took the room the
+     * explanation above needs to be shown without being cut. */
 }
 
 } // namespace evo::kit
