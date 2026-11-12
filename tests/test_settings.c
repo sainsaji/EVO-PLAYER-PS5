@@ -57,6 +57,8 @@ extern "C" {
 extern "C" {
     int prospero_secondary_position = 0;
     int prospero_secondary_color = 0;
+    int prospero_secondary_face = 2;
+    int prospero_secondary_background = 0;
     int prospero_subtitle_style = 0;
     int prospero_subtitle_face = 2;        /* #231 */
     int prospero_subtitle_color = 0;
@@ -124,6 +126,8 @@ extern "C" void test_settings_save_load_roundtrip(void)
     TEST_ASSERT(svc1.getSubtitleColor() == 0, "Initial SubtitleColor default must be WHITE");
     TEST_ASSERT(svc1.getSubtitleLift() == 0, "Initial SubtitleLift default must be BOTTOM");
     TEST_ASSERT(svc1.getSubtitleBackground() == 0, "Initial SubtitleBackground default must be BOX");
+    TEST_ASSERT(svc1.getSecondarySubtitleSize() == 1, "Initial SecondarySubtitleSize default must be MEDIUM");
+    TEST_ASSERT(svc1.getSecondarySubtitleBackground() == 0, "Initial SecondarySubtitleBackground default must be BOX");
     TEST_ASSERT(svc1.getThemeName() == "EVO Dark", "Initial ThemeName default mismatch");
     TEST_ASSERT(evo_log_server_saved_port() == EVO_LOG_SERVER_PORT, "Initial LogServerPort default mismatch");
 
@@ -164,6 +168,10 @@ extern "C" void test_settings_save_load_roundtrip(void)
     svc1.setSubtitleLift(1);
     svc1.setSubtitleBackground(2);
     svc1.setSubtitleColor(9);   /* out of range: refused, CYAN stays */
+    svc1.setSecondarySubtitleSize(2);
+    svc1.setSecondarySubtitleBackground(1);
+    svc1.setSecondarySubtitleSize(9);   /* out of range: refused, 2 stays */
+    svc1.setSecondarySubtitleBackground(9); /* out of range: refused, 1 stays */
     svc1.setThemeName("CARBON");
     svc1.setCastNativePlayerEnabled(false);
     evo_log_server_set_port(9812);
@@ -217,6 +225,10 @@ extern "C" void test_settings_save_load_roundtrip(void)
     TEST_ASSERT(svc2.getSubtitleColor() == 2, "SubtitleColor round-trip mismatch");
     TEST_ASSERT(svc2.getSubtitleLift() == 1, "SubtitleLift round-trip mismatch");
     TEST_ASSERT(svc2.getSubtitleBackground() == 2, "SubtitleBackground round-trip mismatch");
+    TEST_ASSERT(svc2.getSecondarySubtitleSize() == 2, "SecondarySubtitleSize round-trip mismatch");
+    TEST_ASSERT(prospero_secondary_face == 3, "SecondarySubtitleSize must push face 3 (large)");
+    TEST_ASSERT(svc2.getSecondarySubtitleBackground() == 1, "SecondarySubtitleBackground round-trip mismatch");
+    TEST_ASSERT(prospero_secondary_background == 1, "SecondarySubtitleBackground must push 1 (shadow)");
     TEST_ASSERT(svc2.getThemeName() == "CARBON", "ThemeName round-trip mismatch");
     TEST_ASSERT(svc2.isCastNativePlayerEnabled() == false, "CastNativePlayerEnabled round-trip mismatch");
     TEST_ASSERT(evo_log_server_saved_port() == 9812, "Log server saved port round-trip mismatch");
@@ -294,7 +306,8 @@ extern "C" void test_settings_legacy_compat(void)
     TEST_ASSERT(svc.isAddonAutoPickEnabled() == true, "Missing AddonAutoPick must default to on");
     TEST_ASSERT(svc.getSkipSegments() == evo::SkipSegments::Ask, "Missing SkipSegments must default to Ask");
     TEST_ASSERT(svc.getSubtitleSize() == 1 && svc.getSubtitleColor() == 0 &&
-                svc.getSubtitleLift() == 0 && svc.getSubtitleBackground() == 0,
+                svc.getSubtitleLift() == 0 && svc.getSubtitleBackground() == 0 &&
+                svc.getSecondarySubtitleSize() == 1 && svc.getSecondarySubtitleBackground() == 0,
                 "Missing #231 subtitle lines must keep the old look");
 
     /* All 26 preceding settings must be restored correctly */
@@ -387,8 +400,74 @@ extern "C" void test_settings_legacy_compat(void)
     TEST_ASSERT(svc34.getSkipSegments() == evo::SkipSegments::Ask, "Missing 35th line must default to Ask");
     TEST_ASSERT(svc34.isWebBrowserEnabled() == false, "Missing 36th line must default to false");
     TEST_ASSERT(svc34.getSubtitleSize() == 1 && svc34.getSubtitleColor() == 0 &&
-                svc34.getSubtitleLift() == 0 && svc34.getSubtitleBackground() == 0,
+                svc34.getSubtitleLift() == 0 && svc34.getSubtitleBackground() == 0 &&
+                svc34.getSecondarySubtitleSize() == 1 && svc34.getSecondarySubtitleBackground() == 0,
                 "Missing subtitle lines must keep defaults");
+
+    /*
+     * Test legacy 45-line file (pre-secondary customisation).
+     * Verify that line 45 (castNativePlayer) loads, and omitted lines 46 and 47
+     * retain default size (1) and background (0).
+     */
+    FILE *f45 = std::fopen(cfg_path, "w");
+    TEST_ASSERT(f45 != nullptr, "Failed to create 45-line legacy cfg file");
+    std::fprintf(f45,
+        "0\n"       /* 1: legacy dummy profile */
+        "0\n"       /* 2: resumePlaybackEnabled = false */
+        "1\n"       /* 3: defaultViewMode = Fill (1) */
+        "0\n"       /* 4: autoSubtitlesEnabled = false */
+        "1\n"       /* 5: debugOverlayEnabled = true */
+        "0\n"       /* 6: sortFoldersFirst = false */
+        "CARBON\n"  /* 7: activeTheme = CARBON */
+        "0\n"       /* 8: soundFeedbackEnabled = false */
+        "0\n"       /* 9: lightbarFeedbackEnabled = false */
+        "2\n"       /* 10: subtitleFontFace = 2 */
+        "0\n"       /* 11: keyboardType = 0 */
+        "1\n"       /* 12: decoderPreference = NativeHardware (1) */
+        "2\n"       /* 13: marker = 2 */
+        "1\n"       /* 14: upscaler = Sharp (1) */
+        "1\n"       /* 15: aiNetwork = Standard (1) */
+        "1\n"       /* 16: refreshRateMode = Always (1) */
+        "1\n"       /* 17: hdrOutputMode = Off (1) */
+        "1\n"       /* 18: secondarySubtitlePosition = 1 */
+        "1\n"       /* 19: secondarySubtitleColor = 1 */
+        "0\n"       /* 20: askStream = false */
+        "1\n"       /* 21: audioOutputChannels = Stereo (1) */
+        "1\n"       /* 22: motionSmoothing = Low (1) */
+        "1\n"       /* 23: deepBlacks = Low (1) */
+        "1\n"       /* 24: audioPassthroughEnabled = true */
+        "1\n"       /* 25: matchVideoRate = true */
+        "2\n"       /* 26: volumeBoost = Plus100 (2) */
+        "1\n"       /* 27: networkBuffer = Min1 (1) */
+        "150\n"     /* 28: audioDelayMs = 150 */
+        "9780\n"    /* 29: phone & log port */
+        "2\n"       /* 30: schema = 2 */
+        "3\n"       /* 31: hdrPeak = Nits1500 (3) */
+        "1\n"       /* 32: audioLanguage = Italian (1) */
+        "2\n"       /* 33: subtitleLanguage = English (2) */
+        "0\n"       /* 34: addonAutoPick = false (0) */
+        "2\n"       /* 35: skipSegments = Auto (2) */
+        "1\n"       /* 36: webBrowser = true (1) */
+        "3\n"       /* 37: subtitleSize = Extra Large (3) */
+        "2\n"       /* 38: subtitleColor = Cyan (2) */
+        "1\n"       /* 39: subtitleLift = Raised (1) */
+        "2\n"       /* 40: subtitleBackground = Outline (2) */
+        "1\n"       /* 41: stereoUpmix = true (1) */
+        "1\n"       /* 42: phoneSpeaker = true (1) */
+        "1\n"       /* 43: castEnabled = true (1) */
+        "8765\n"    /* 44: castPort = 8765 */
+        "0\n"       /* 45: castNativePlayer = false (0) */
+        /* Lines 46 & 47 (secondarySubtitleSize and secondarySubtitleBackground) omitted */
+    );
+    std::fclose(f45);
+
+    evo::SettingsService svc45;
+    TEST_ASSERT(svc45.getSecondarySubtitleSize() == 1, "Default SecondarySubtitleSize must be MEDIUM (1)");
+    TEST_ASSERT(svc45.getSecondarySubtitleBackground() == 0, "Default SecondarySubtitleBackground must be BOX (0)");
+    TEST_ASSERT(svc45.loadSettings(), "loadSettings failed on 45-line legacy configuration");
+    TEST_ASSERT(svc45.isCastNativePlayerEnabled() == false, "45-line legacy castNativePlayer mismatch");
+    TEST_ASSERT(svc45.getSecondarySubtitleSize() == 1, "Missing 46th line must keep default MEDIUM (1)");
+    TEST_ASSERT(svc45.getSecondarySubtitleBackground() == 0, "Missing 47th line must keep default BOX (0)");
 
     TEST_PASS();
 }

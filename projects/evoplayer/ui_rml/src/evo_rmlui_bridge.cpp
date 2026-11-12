@@ -462,6 +462,7 @@ void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* p) {
     state.subtitle2_position = p->subtitle2_position;
     state.subtitle2_color = p->subtitle2_color;
     state.subtitle2_face = p->subtitle2_face;
+    state.subtitle2_background = p->subtitle2_background;
     state.subtitle_style = p->subtitle_style;
     state.chrome_hidden = (p->chrome_hidden != 0);
     state.fps = p->fps;

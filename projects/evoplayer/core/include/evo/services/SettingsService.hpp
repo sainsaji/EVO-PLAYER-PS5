@@ -48,6 +48,10 @@ public:
     void setSecondarySubtitlePosition(int position) override;
     int getSecondarySubtitleColor() const override { return m_secondarySubtitleColor; }
     void setSecondarySubtitleColor(int color) override;
+    int getSecondarySubtitleSize() const override { return m_secondarySubtitleSize; }
+    void setSecondarySubtitleSize(int size) override;
+    int getSecondarySubtitleBackground() const override { return m_secondarySubtitleBackground; }
+    void setSecondarySubtitleBackground(int background) override;
     int getSubtitleSize() const override { return m_subtitleSize; }
     void setSubtitleSize(int size) override;
     int getSubtitleColor() const override { return m_subtitleColor; }
@@ -158,6 +162,8 @@ private:
     bool m_askStream = true;    // Live TV: pick the stream yourself
     int m_secondarySubtitlePosition = 0; // #110: stacked above the primary
     int m_secondarySubtitleColor = 0;    // #110: yellow
+    int m_secondarySubtitleSize = 1;     // MEDIUM (prospero_secondary_face - 1)
+    int m_secondarySubtitleBackground = 0; // BOX
     /* EVO_KEYBOARD_TYPE_NATIVE (1) - the enum has VIRTUAL = 0, and this
      * used to be 0 under a "Native IME" comment, so a fresh install saved
      * (and kept) the virtual keyboard nobody picked. */

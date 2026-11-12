@@ -215,6 +215,18 @@ void SettingsService::setSecondarySubtitleColor(int color) {
     prospero_secondary_color = color;
 }
 
+void SettingsService::setSecondarySubtitleSize(int size) {
+    if (size < 0 || size >= PROSPERO_SUBTITLE_SIZES) return;
+    m_secondarySubtitleSize = size;
+    prospero_secondary_face = size + 1;
+}
+
+void SettingsService::setSecondarySubtitleBackground(int background) {
+    if (background < 0 || background >= PROSPERO_SUBTITLE_BACKGROUNDS) return;
+    m_secondarySubtitleBackground = background;
+    prospero_secondary_background = background;
+}
+
 void SettingsService::setSubtitleFontFace(int face) {
     if (face < 0 || face >= PROSPERO_SUBTITLE_STYLES) return;
     m_subtitleFontFace = face;
@@ -309,7 +321,7 @@ bool SettingsService::saveSettings() {
     }
 
     std::fprintf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
         0, // legacy dummy profile
         m_resumePlaybackEnabled ? 1 : 0,
         static_cast<int>(m_defaultViewMode),
@@ -354,7 +366,9 @@ bool SettingsService::saveSettings() {
         m_phoneSpeakerEnabled ? 1 : 0,       // line 42 (controller phone audio)
         m_castReceiverEnabled ? 1 : 0,       // line 43 (DIAL phone cast receiver)
         m_castPort,                          // line 44 (DIAL port)
-        m_castNativePlayerEnabled ? 1 : 0    // line 45 (play cast in EVO player instead of WebKit)
+        m_castNativePlayerEnabled ? 1 : 0,   // line 45 (play cast in EVO player instead of WebKit)
+        m_secondarySubtitleSize,             // line 46 (secondary subtitle size: 0 small .. 3 extra large)
+        m_secondarySubtitleBackground        // line 47 (secondary subtitle background: 0 box .. 3 none)
     );
 
     if (std::fclose(file) != 0)
@@ -415,9 +429,11 @@ bool SettingsService::loadSettings() {
     int rawCastEnabled = 1;
     int rawCastPort = EVO_CAST_DEFAULT_PORT;
     int rawCastNativePlayer = 1;
+    int rawSecondarySize = 1;
+    int rawSecondaryBackground = 0;
 
     int readCount = std::fscanf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
         &rawProfile,
         &rawResume,
         &rawViewMode,
@@ -462,7 +478,9 @@ bool SettingsService::loadSettings() {
         &rawPhoneSpeaker,
         &rawCastEnabled,
         &rawCastPort,
-        &rawCastNativePlayer
+        &rawCastNativePlayer,
+        &rawSecondarySize,
+        &rawSecondaryBackground
     );
 
     std::fclose(file);
@@ -573,6 +591,8 @@ bool SettingsService::loadSettings() {
     if (readCount >= 43) m_castReceiverEnabled = (rawCastEnabled != 0);
     if (readCount >= 44 && rawCastPort >= 1024 && rawCastPort <= 65535) m_castPort = rawCastPort;
     if (readCount >= 45) m_castNativePlayerEnabled = (rawCastNativePlayer != 0);
+    if (readCount >= 46 && rawSecondarySize >= 0 && rawSecondarySize <= 3) setSecondarySubtitleSize(rawSecondarySize);
+    if (readCount >= 47 && rawSecondaryBackground >= 0 && rawSecondaryBackground <= 3) setSecondarySubtitleBackground(rawSecondaryBackground);
 
     /* #233: Deep Blacks, Motion Smoothing and Match Video Rate moved to
      * Experimental, where everything starts off. A file from before that

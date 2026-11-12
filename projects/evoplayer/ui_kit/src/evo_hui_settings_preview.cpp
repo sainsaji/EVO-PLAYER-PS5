@@ -944,8 +944,9 @@ void draw_sub_font(DrawList &list, const Context &ctx, const Rect &box, const Se
 }
 
 /* ---- #231: SUBTITLE SIZE / COLOUR / POSITION / BACKGROUND. One sample line
- * on the mock scene; only the row's own choice changes, the rest is the
- * default look. ---- */
+ * on the mock scene (or two for secondary size / background); only the row's
+ * own choice changes, the rest is the default look. ---- */
+
 void draw_sub_look(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
 {
     Area a = begin_card(list, ctx, box, pv);
@@ -964,41 +965,65 @@ void draw_sub_look(DrawList &list, const Context &ctx, const Rect &box, const Se
     static const unsigned kInk[4] = {0xffffff, 0xffe14d, 0x66e3ff, 0x7dff8a};
     static const float kLift[3] = {0.0f, 17.0f, 34.0f};
     const int i = std::max(0, pv.index);
-    float fsize = kSize[1];
-    Color ink = kWhite;
-    float lift = 0.0f;
-    int bg = 0;
-    if (pv.kind == EVO_RMLUI_PREVIEW_SUB_SIZE) fsize = kSize[std::min(i, 3)];
-    else if (pv.kind == EVO_RMLUI_PREVIEW_SUB_TEXT_COLOUR) ink = Color::rgb(kInk[std::min(i, 3)]);
-    else if (pv.kind == EVO_RMLUI_PREVIEW_SUB_LIFT) lift = kLift[std::min(i, 2)];
-    else bg = std::min(i, 3);
 
     const ui::FontRef &face = fonts.semibold;
-    const char *line = "You were right about the lighthouse.";
-    const float max_w = frame.w - 36.0f;
-    std::vector<std::string> lines = face.font->wrap(line, fsize, max_w);
-    if (lines.empty())
-        lines.push_back(line);
-    const float line_h = fsize * 1.25f;
     const float cx = frame.cx();
-    float y = frame.y + frame.h - 20.0f - lift - static_cast<float>(lines.size() - 1) * line_h;
-    for (const std::string &l : lines)
-    {
-        const float w = face.measure(l, fsize);
-        if (bg == 0)
-            list.rounded_rect({cx - w * 0.5f - 8, y - fsize * 0.95f, w + 16, fsize * 1.25f}, 5,
+
+    auto draw_line_bg = [&](const std::string &l, float y, float sz, Color ink_color, int bg_mode) {
+        const float w = face.measure(l, sz);
+        if (bg_mode == 0)
+            list.rounded_rect({cx - w * 0.5f - 8, y - sz * 0.95f, w + 16, sz * 1.25f}, 5,
                               Color::rgb(0x000000, 0.55f));
-        else if (bg == 1)
-            ui::text(list, face, l, cx + 1.5f, y + 1.5f, fsize, Color::rgb(0x000000, 0.85f), Align::center);
-        else if (bg == 2)
+        else if (bg_mode == 1)
+            ui::text(list, face, l, cx + 1.5f, y + 1.5f, sz, Color::rgb(0x000000, 0.85f), Align::center);
+        else if (bg_mode == 2)
         {
             static const float kDir[8][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1},
                                              {-0.7f, -0.7f}, {0.7f, -0.7f}, {-0.7f, 0.7f}, {0.7f, 0.7f}};
             for (const auto &d : kDir)
-                ui::text(list, face, l, cx + d[0], y + d[1], fsize, Color::rgb(0x000000, 0.9f), Align::center);
+                ui::text(list, face, l, cx + d[0], y + d[1], sz, Color::rgb(0x000000, 0.9f), Align::center);
         }
-        ui::text(list, face, l, cx, y, fsize, ink, Align::center);
-        y += line_h;
+        ui::text(list, face, l, cx, y, sz, ink_color, Align::center);
+    };
+
+    if (pv.kind == EVO_RMLUI_PREVIEW_SUB2_SIZE || pv.kind == EVO_RMLUI_PREVIEW_SUB2_BACKGROUND)
+    {
+        /* The second line in its default yellow, 0.85x like the OSD draws it. */
+        const Color sec_ink = Color::rgb(0xffe14d);
+        const float sz2_base = (pv.kind == EVO_RMLUI_PREVIEW_SUB2_SIZE) ? kSize[std::min(i, 3)] : kSize[1];
+        const float sz2 = sz2_base * 0.85f;
+        const int bg2 = (pv.kind == EVO_RMLUI_PREVIEW_SUB2_BACKGROUND) ? std::min(i, 3) : 0;
+
+        const float l1_y = frame.y + frame.h - 20.0f;
+        /* Clear of the main line's box whatever size the second line is. */
+        const float l2_y = l1_y - kSize[1] * 0.95f - sz2 * 0.30f - 6.0f;
+
+        draw_line_bg("Tu avais raison pour le phare.", l2_y, sz2, sec_ink, bg2);
+        draw_line_bg("You were right about the lighthouse.", l1_y, kSize[1], kWhite, 0);
+    }
+    else
+    {
+        float fsize = kSize[1];
+        Color ink = kWhite;
+        float lift = 0.0f;
+        int bg = 0;
+        if (pv.kind == EVO_RMLUI_PREVIEW_SUB_SIZE) fsize = kSize[std::min(i, 3)];
+        else if (pv.kind == EVO_RMLUI_PREVIEW_SUB_TEXT_COLOUR) ink = Color::rgb(kInk[std::min(i, 3)]);
+        else if (pv.kind == EVO_RMLUI_PREVIEW_SUB_LIFT) lift = kLift[std::min(i, 2)];
+        else bg = std::min(i, 3);
+
+        const char *line = "You were right about the lighthouse.";
+        const float max_w = frame.w - 36.0f;
+        std::vector<std::string> lines = face.font->wrap(line, fsize, max_w);
+        if (lines.empty())
+            lines.push_back(line);
+        const float line_h = fsize * 1.25f;
+        float y = frame.y + frame.h - 20.0f - lift - static_cast<float>(lines.size() - 1) * line_h;
+        for (const std::string &l : lines)
+        {
+            draw_line_bg(l, y, fsize, ink, bg);
+            y += line_h;
+        }
     }
 
     const float yc = chips(list, ctx, a, frame.y + frame.h + 24.0f, labels, pv.index);
@@ -2906,6 +2931,8 @@ void draw_settings_preview(DrawList &list, const Context &ctx, const Rect &box, 
     case EVO_RMLUI_PREVIEW_SUB_TEXT_COLOUR:
     case EVO_RMLUI_PREVIEW_SUB_LIFT:
     case EVO_RMLUI_PREVIEW_SUB_BACKGROUND:
+    case EVO_RMLUI_PREVIEW_SUB2_SIZE:
+    case EVO_RMLUI_PREVIEW_SUB2_BACKGROUND:
         draw_sub_look(list, ctx, box, pv);
         break;
     case EVO_RMLUI_PREVIEW_THEME:

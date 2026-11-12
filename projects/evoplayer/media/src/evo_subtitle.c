@@ -2675,6 +2675,7 @@ int prospero_secondary_delay_ms = 0;
 int prospero_secondary_position = PROSPERO_SECONDARY_POS_STACKED;
 int prospero_secondary_color = 0;
 int prospero_secondary_face = 2;             /* 1 small, 2 medium, 3 large, 4 extra large */
+int prospero_secondary_background = 0;       /* 0 box, 1 shadow, 2 outline, 3 none */
 int prospero_subtitle_style = 0;
 int prospero_subtitle_color = 0;       /* #231: white */
 int prospero_subtitle_lift = 0;        /* #231: at the bottom */

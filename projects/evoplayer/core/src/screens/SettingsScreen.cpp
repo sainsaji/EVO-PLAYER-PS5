@@ -68,8 +68,10 @@ enum class SettingKey : int {
     SubtitleColour,
     SubtitlePosition,
     SubtitleBackground,
-    SecondaryPosition,
+    SecondarySize,
     SecondaryColour,
+    SecondaryPosition,
+    SecondaryBackground,
     /* INTERFACE & STORAGE */
     Theme,
     Lightbar,
@@ -169,16 +171,20 @@ const PreviewSpec kPreviews[] = {
     {SettingKey::AutoSubtitles, EVO_RMLUI_PREVIEW_SUB_AUTO, "Loads subtitles on its own when a file has them."},
     {SettingKey::SubtitleFont, EVO_RMLUI_PREVIEW_SUB_FONT, "Picks the typeface for on-screen subtitles."},
     {SettingKey::SubtitleSize, EVO_RMLUI_PREVIEW_SUB_SIZE,
-     "How big subtitles are. The size button in the player's subtitle menu changes it for one session."},
+     "How big the main subtitle line is. The size button in the player's subtitle menu changes it for one session."},
     {SettingKey::SubtitleColour, EVO_RMLUI_PREVIEW_SUB_TEXT_COLOUR,
      "The colour of the main subtitle line. Picture subtitles (Blu-ray, DVD) keep their own colours."},
     {SettingKey::SubtitlePosition, EVO_RMLUI_PREVIEW_SUB_LIFT,
      "Raises subtitles from the bottom, for TVs that cut the edge or films with text low in the frame."},
     {SettingKey::SubtitleBackground, EVO_RMLUI_PREVIEW_SUB_BACKGROUND,
      "What sits behind the text so it stays readable on bright scenes. Subtitles burned into a server transcode are part of the picture and cannot change."},
+    {SettingKey::SecondarySize, EVO_RMLUI_PREVIEW_SUB2_SIZE,
+     "How big the second subtitle line is. Triangle on the second track in the player's subtitle menu changes it for one session."},
+    {SettingKey::SecondaryColour, EVO_RMLUI_PREVIEW_SUB_COLOUR, "A different colour keeps the two lines apart."},
     {SettingKey::SecondaryPosition, EVO_RMLUI_PREVIEW_SUB_POS,
      "Where the second line of dialogue goes when two tracks are shown."},
-    {SettingKey::SecondaryColour, EVO_RMLUI_PREVIEW_SUB_COLOUR, "A different colour keeps the two lines apart."},
+    {SettingKey::SecondaryBackground, EVO_RMLUI_PREVIEW_SUB2_BACKGROUND,
+     "What sits behind the text so it stays readable on bright scenes. Subtitles burned into a server transcode are part of the picture and cannot change."},
     {SettingKey::Theme, EVO_RMLUI_PREVIEW_THEME, "Changes the colours of the whole app."},
     {SettingKey::Lightbar, EVO_RMLUI_PREVIEW_LIGHTBAR, "The DualSense light follows the theme accent."},
     {SettingKey::FoldersFirst, EVO_RMLUI_PREVIEW_FOLDERS_FIRST, "Lists folders above files in the USB browser."},
@@ -227,7 +233,9 @@ const SettingKey kAudioKeys[] = {
 const SettingKey kSubtitleKeys[] = {
     SettingKey::AutoSubtitles, SettingKey::SubtitleLanguage, SettingKey::SubtitleFont,
     SettingKey::SubtitleSize, SettingKey::SubtitleColour, SettingKey::SubtitlePosition,
-    SettingKey::SubtitleBackground, SettingKey::SecondaryPosition, SettingKey::SecondaryColour,
+    SettingKey::SubtitleBackground,
+    SettingKey::SecondarySize, SettingKey::SecondaryColour, SettingKey::SecondaryPosition,
+    SettingKey::SecondaryBackground,
 };
 const SettingKey kInterfaceKeys[] = {
     SettingKey::Theme, SettingKey::Lightbar, SettingKey::FoldersFirst,
@@ -542,7 +550,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         static const char* kSizes[] = {"SMALL", "MEDIUM", "LARGE", "EXTRA LARGE"};
         int v = settings->getSubtitleSize();
         if (v < 0 || v >= 4) v = 1;
-        d = valueDef(key, "SUBTITLE SIZE", "HOW BIG SUBTITLES ARE",
+        d = valueDef(key, "PRIMARY SIZE", "HOW BIG THE MAIN LINE IS",
                      "../icons/icon_a_large_small.png", 4, v);
         for (int i = 0; i < 4; ++i) d.opt_label[i] = kSizes[i];
         break;
@@ -552,7 +560,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         static const char* kColours[] = {"WHITE", "YELLOW", "CYAN", "GREEN"};
         int v = settings->getSubtitleColor();
         if (v < 0 || v >= 4) v = 0;
-        d = valueDef(key, "SUBTITLE COLOUR", "THE MAIN LINE OF DIALOGUE",
+        d = valueDef(key, "PRIMARY COLOUR", "THE MAIN LINE OF DIALOGUE",
                      "../icons/icon_paintbrush.png", 4, v);
         for (int i = 0; i < 4; ++i) d.opt_label[i] = kColours[i];
         break;
@@ -562,7 +570,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         static const char* kLifts[] = {"BOTTOM", "RAISED", "HIGHER"};
         int v = settings->getSubtitleLift();
         if (v < 0 || v >= 3) v = 0;
-        d = valueDef(key, "SUBTITLE POSITION", "RAISE SUBTITLES FROM THE BOTTOM",
+        d = valueDef(key, "PRIMARY POSITION", "RAISE SUBTITLES FROM THE BOTTOM",
                      "../icons/icon_move_vertical.png", 3, v);
         for (int i = 0; i < 3; ++i) d.opt_label[i] = kLifts[i];
         break;
@@ -572,7 +580,7 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         static const char* kBackgrounds[] = {"BOX", "SHADOW", "OUTLINE", "NONE"};
         int v = settings->getSubtitleBackground();
         if (v < 0 || v >= 4) v = 0;
-        d = valueDef(key, "SUBTITLE BACKGROUND", "KEEPS TEXT READABLE ON BRIGHT SCENES",
+        d = valueDef(key, "PRIMARY BACKGROUND", "KEEPS TEXT READABLE ON BRIGHT SCENES",
                      "../icons/icon_square.png", 4, v);
         for (int i = 0; i < 4; ++i) d.opt_label[i] = kBackgrounds[i];
         break;
@@ -580,13 +588,13 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
 
     /* #110: the second line of dialogue, drawn with the first when a
      * secondary track is chosen in the subtitle picker. */
-    case SettingKey::SecondaryPosition: {
-        static const char* kSecondaryPos[] = {"STACKED ABOVE", "TOP OF SCREEN"};
-        int secPos = settings->getSecondarySubtitlePosition();
-        if (secPos < 0 || secPos >= 2) secPos = 0;
-        d = valueDef(key, "SECONDARY SUBTITLE POSITION", "WHERE THE SECOND LINE OF DIALOGUE GOES",
-                     "../icons/icon_rows_2.png", 2, secPos);
-        for (int i = 0; i < 2; ++i) d.opt_label[i] = kSecondaryPos[i];
+    case SettingKey::SecondarySize: {
+        static const char* kSizes[] = {"SMALL", "MEDIUM", "LARGE", "EXTRA LARGE"};
+        int secSize = settings->getSecondarySubtitleSize();
+        if (secSize < 0 || secSize >= 4) secSize = 1;
+        d = valueDef(key, "SECONDARY SIZE", "HOW BIG THE SECOND LINE IS",
+                     "../icons/icon_a_large_small.png", 4, secSize);
+        for (int i = 0; i < 4; ++i) d.opt_label[i] = kSizes[i];
         break;
     }
 
@@ -594,9 +602,29 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         static const char* kSecondaryColor[] = {"YELLOW", "CYAN", "WHITE"};
         int secColor = settings->getSecondarySubtitleColor();
         if (secColor < 0 || secColor >= 3) secColor = 0;
-        d = valueDef(key, "SECONDARY SUBTITLE COLOUR", "KEEPS THE TWO LINES APART",
+        d = valueDef(key, "SECONDARY COLOUR", "KEEPS THE TWO LINES APART",
                      "../icons/icon_paint_bucket.png", 3, secColor);
         for (int i = 0; i < 3; ++i) d.opt_label[i] = kSecondaryColor[i];
+        break;
+    }
+
+    case SettingKey::SecondaryPosition: {
+        static const char* kSecondaryPos[] = {"STACKED ABOVE", "TOP OF SCREEN"};
+        int secPos = settings->getSecondarySubtitlePosition();
+        if (secPos < 0 || secPos >= 2) secPos = 0;
+        d = valueDef(key, "SECONDARY POSITION", "WHERE THE SECOND LINE OF DIALOGUE GOES",
+                     "../icons/icon_rows_2.png", 2, secPos);
+        for (int i = 0; i < 2; ++i) d.opt_label[i] = kSecondaryPos[i];
+        break;
+    }
+
+    case SettingKey::SecondaryBackground: {
+        static const char* kBackgrounds[] = {"BOX", "SHADOW", "OUTLINE", "NONE"};
+        int secBg = settings->getSecondarySubtitleBackground();
+        if (secBg < 0 || secBg >= 4) secBg = 0;
+        d = valueDef(key, "SECONDARY BACKGROUND", "KEEPS THE SECOND LINE READABLE",
+                     "../icons/icon_square.png", 4, secBg);
+        for (int i = 0; i < 4; ++i) d.opt_label[i] = kBackgrounds[i];
         break;
     }
 
@@ -987,8 +1015,10 @@ void applyOption(SettingKey key, int opt) {
     case SettingKey::SubtitleColour: st->setSubtitleColor(opt); break;
     case SettingKey::SubtitlePosition: st->setSubtitleLift(opt); break;
     case SettingKey::SubtitleBackground: st->setSubtitleBackground(opt); break;
-    case SettingKey::SecondaryPosition: st->setSecondarySubtitlePosition(opt); break;
-    case SettingKey::SecondaryColour:   st->setSecondarySubtitleColor(opt); break;
+    case SettingKey::SecondarySize:       st->setSecondarySubtitleSize(opt); break;
+    case SettingKey::SecondaryColour:     st->setSecondarySubtitleColor(opt); break;
+    case SettingKey::SecondaryPosition:   st->setSecondarySubtitlePosition(opt); break;
+    case SettingKey::SecondaryBackground: st->setSecondarySubtitleBackground(opt); break;
     case SettingKey::KeyboardInput:  st->setKeyboardType(opt); break;
     case SettingKey::RefreshRate:
         st->setRefreshRateMode(static_cast<RefreshRateMode>(opt));

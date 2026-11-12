@@ -46,6 +46,7 @@ struct EvoPlaybackState {
     int subtitle2_position = 0;  // 0 stacked above the primary, 1 top of screen
     int subtitle2_color = 0;     // 0 yellow, 1 cyan, 2 white
     int subtitle2_face = 2;      // 1 small, 2 medium, 3 large, 4 extra large
+    int subtitle2_background = 0; // 0 box, 1 shadow, 2 outline, 3 none
     int subtitle_style = 0;      // 0 standard, 1 light, 2 rounded, 3 bold
     bool chrome_hidden = false;  // render only the caption, hide the OSD chrome
     int fps = 0;                 // #81: dev FPS pill
@@ -73,6 +74,7 @@ struct EvoPlaybackState {
                subtitle2_position == o.subtitle2_position &&
                subtitle2_color == o.subtitle2_color &&
                subtitle2_face == o.subtitle2_face &&
+               subtitle2_background == o.subtitle2_background &&
                subtitle_style == o.subtitle_style &&
                fps == o.fps && debug_overlay == o.debug_overlay &&
                music_mode == o.music_mode && music_codec == o.music_codec;

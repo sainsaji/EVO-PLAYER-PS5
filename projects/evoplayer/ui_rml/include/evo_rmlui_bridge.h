@@ -71,6 +71,7 @@ typedef struct {
     int subtitle2_position;
     int subtitle2_color;
     int subtitle2_face;
+    int subtitle2_background;
     /* Settings -> DEFAULT FONT STYLE for both captions:
      * 0 standard, 1 light, 2 rounded, 3 bold (prospero_subtitle_style). */
     int subtitle_style;
@@ -227,7 +228,9 @@ enum {
     EVO_RMLUI_PREVIEW_MEMORY,
     EVO_RMLUI_PREVIEW_UPDATE,
     EVO_RMLUI_PREVIEW_QUIT,
-    EVO_RMLUI_PREVIEW_WEB
+    EVO_RMLUI_PREVIEW_WEB,
+    EVO_RMLUI_PREVIEW_SUB2_SIZE,
+    EVO_RMLUI_PREVIEW_SUB2_BACKGROUND
 };
 
 #define EVO_RMLUI_PREVIEW_CHOICES 12  /* EVO_THEME_MAX, the longest list */

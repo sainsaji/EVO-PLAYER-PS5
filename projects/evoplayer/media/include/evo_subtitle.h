@@ -76,6 +76,7 @@ extern int prospero_secondary_delay_ms;           /* its own sync, like the prim
 extern int prospero_secondary_position;           /* PROSPERO_SECONDARY_POS_*   */
 extern int prospero_secondary_color;              /* 0 yellow, 1 cyan, 2 white  */
 extern int prospero_secondary_face;               /* 1 small, 2 medium, 3 large, 4 extra large */
+extern int prospero_secondary_background;         /* 0 box, 1 shadow, 2 outline, 3 none */
 /* Settings -> DEFAULT FONT STYLE, for both captions. */
 #define PROSPERO_SUBTITLE_STYLES 4                 /* 0 standard, 1 light, 2 rounded, 3 bold */
 extern int prospero_subtitle_style;

@@ -488,8 +488,8 @@ void OsdScreen::draw_captions(DrawList &list, const Context &ctx, float chrome) 
 
     const ui::FontRef &font = caption_font(fonts, raw_.subtitle_style);
     const bool heavy = raw_.subtitle_style == 3;
-    const int bg = std::clamp(raw_.subtitle_background, 0, 3); /* 0 box, 1 shadow, 2 outline, 3 none */
-    auto block = [&](const std::vector<std::string> &lines, float last_baseline, float sz, Color ink) {
+    auto block = [&](const std::vector<std::string> &lines, float last_baseline, float sz, Color ink, int background_mode) {
+        const int bg = std::clamp(background_mode, 0, 3); /* 0 box, 1 shadow, 2 outline, 3 none */
         float y = last_baseline - static_cast<float>(lines.size() - 1) * (sz * 1.25f);
         for (const std::string &l : lines)
         {
@@ -541,16 +541,16 @@ void OsdScreen::draw_captions(DrawList &list, const Context &ctx, float chrome) 
         }
     }
     if (!sub_lines_.empty())
-        top = block(sub_lines_, bottom, size, kSub1[std::clamp(raw_.subtitle_color, 0, 3)]);
+        top = block(sub_lines_, bottom, size, kSub1[std::clamp(raw_.subtitle_color, 0, 3)], raw_.subtitle_background);
     if (!sub2_lines_.empty())
     {
         const Color ink = kSub2[std::clamp(raw_.subtitle2_color, 0, 2)];
         const float sz2_base = caption_size(raw_.subtitle2_face > 0 ? raw_.subtitle2_face : raw_.subtitle_face);
         const float sz2 = sz2_base * 0.85f;
         if (raw_.subtitle2_position == 1)
-            block(sub2_lines_, 120.0f + static_cast<float>(sub2_lines_.size()) * sz2 * 1.25f, sz2, ink);
+            block(sub2_lines_, 120.0f + static_cast<float>(sub2_lines_.size()) * sz2 * 1.25f, sz2, ink, raw_.subtitle2_background);
         else
-            block(sub2_lines_, top - 12.0f, sz2, ink);
+            block(sub2_lines_, top - 12.0f, sz2, ink, raw_.subtitle2_background);
     }
     (void)line_h;
 }
