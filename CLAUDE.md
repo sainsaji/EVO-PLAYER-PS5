@@ -203,3 +203,20 @@ git. Never trust its report unverified. Full procedure: [agy.md](docs/build/agy.
 - **`evo-remote.sh launch` waits for ShadowMount to go idle** (log quiet 15 s)
   first. Launching mid-scan after a deploy gives "Can't start game or app";
   only an X press on the pad clears it.
+
+## graphify (code graph)
+
+`graphify-out/graph.json` is a call/include graph of EVO's own code (tree-sitter,
+local, no LLM; `.graphifyignore` keeps out third_party/, vendored QuickJS/cJSON/stb
+and generated shader blobs). It is not committed: build it with
+`graphify extract . --code-only` (~40 s). Setup: [graph.md](docs/build/graph.md).
+
+- **evo_search answers "why" and "where is the doc/issue"; graphify answers
+  "who calls this" and "what breaks if I change it".** Use `graphify explain
+  "<symbol>"` (callers + callees with `file:line`), `graphify affected "<symbol>"`
+  before changing a shared function, `graphify path "<A>" "<B>"` for how two
+  pieces connect, `graphify query "<question>"` for a scoped subgraph. Then Read
+  only the lines it names.
+- **After changing code, run `graphify update .`** (~15 s, AST only). Skip the
+  `/graphify` skill's doc/image pass: it spends model tokens and evo_search
+  already covers the docs.

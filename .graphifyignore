@@ -1,0 +1,39 @@
+# graphify: map EVO's own code only (docs/graph.md).
+# .gitignore applies too; this file can only exclude more.
+third_party/
+build/
+dist/
+output/
+proprietary/
+samples/
+scratch/
+themes/
+youtube_assets/
+emby_config/
+emby_media/
+jellyfin_cache/
+jellyfin_config/
+nuvio_web/
+node_modules/
+graphify-out/
+compile_commands.json
+*.o
+*.a
+/*.ts
+/*.mkv
+/*.mp4
+*.pptx
+# old monolith, not compiled
+projects/evoplayer/main.c.legacy
+# generated embedded asset bundle (huge byte arrays)
+projects/evoplayer/**/evo_rmlui_bundle_data.cpp
+# vendored libraries
+projects/evoplayer/addons/src/quickjs-amalgam.c
+projects/evoplayer/addons/include/quickjs.h
+projects/evoplayer/addons/src/cJSON.c
+projects/evoplayer/addons/include/cJSON.h
+projects/evoplayer/stb_*.h
+# generated: shader blobs, embedded JS, tile tables
+projects/evoplayer/shaders/agc/*_pipe.h
+projects/evoplayer/addons/src/evo_ytjs_blob.c
+projects/evoplayer/SDL_ps5tilemap.inc

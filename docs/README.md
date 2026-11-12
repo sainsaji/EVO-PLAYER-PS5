@@ -27,6 +27,7 @@ ones expensive to relearn on real hardware) are in the root [CLAUDE.md](../CLAUD
 | [tooling.md](build/tooling.md) | Every script and tool, with a pointer to the page that explains it |
 | [validation.md](build/validation.md) | Unit tests, host harnesses, hardware checks, the codec sweep |
 | [agy.md](build/agy.md) | Delegating mechanical work to a worker agent |
+| [graph.md](build/graph.md) | The graphify code graph: who calls what, what a change affects |
 
 ## [console/](console/): working with the dev console
 

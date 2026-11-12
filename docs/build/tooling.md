@@ -68,6 +68,7 @@ Logs, screenshots, the dashboard and the debug switches:
 | `*_host.sh` / `*_host.c` (`subsync`, `dualsub`, `dns`, `streamopts`, `hls`, `netconnect`, `iptv_epg`) | Host harnesses for single source files ([validation.md](validation.md#host-harnesses)) |
 | `host-ffmpeg-probe.sh` | Probe a media file with a host build of the same FFmpeg and flags, **before** spending a console cycle on a file that crashes the app. Needs `MSYS_NO_PATHCONV=1` |
 | `rag/` | `evo_search`: search code, docs, issues, memory notes and the `third_party/` repos and their commit messages. Reindex after changing docs (`python tools/rag/evo_rag.py index`) |
+| `graphify` (host CLI, not in `tools/`) | Call/include graph of EVO's code: `explain`, `affected`, `path`, `query`. [graph.md](graph.md) |
 | `agy-run.sh`, `oc-run.sh`, `agy-prune.sh`, `agy-task.md` | Delegating mechanical work to a worker agent ([agy.md](agy.md)) |
 | `check_raw_connect.sh` | Run by `build-evoplayer.sh` and `package-app.sh`: fails on a raw `connect()` in EVO's code (it blocks ~75 s on a dead host on the PS5; use `evo_net_connect_addr`). A connect that cannot hang carries `connect-ok: <why>` |
 | `stage_hunks.py` | Stage only the hunks of a file that match a regex, to split one file between two commits |
