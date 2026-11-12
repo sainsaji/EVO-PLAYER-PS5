@@ -43,6 +43,8 @@ Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47N
 
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Upmix stereo to 4.0** (Settings → Audio): stereo tracks fill the surround and rear speakers with their ambience; voices stay in front.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Controller phone audio** (Settings → Audio): phone calls in a film play on the DualSense speaker, found from the subtitles.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Both subtitle lines in Settings.** Settings → Subtitles groups the rows into Primary and Secondary, each with size, colour, position and background. The second line's size is now saved (it was per session in the player), and it gets its own background.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Subtitle picker buttons match their hints (#243):** Triangle changes the size, Square sets the secondary track, R2 sizes the secondary. Thanks Casaca87.
 - ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Resume keeps your audio track.**
 - ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) Subtitle samples reset on a new file or track.
 
