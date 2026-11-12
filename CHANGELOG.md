@@ -21,6 +21,7 @@ Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47N
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Play a YouTube link, whole video.** Settings → Interface & Storage → **Play a YouTube link**, the **Play a YouTube link** box on the phone page (`<console>:9780/input`), or a POST to the cast port. Up to 1080p60. EVO solves YouTube's playback check with yt-dlp's challenge solver running in an embedded QuickJS engine.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Casts play in full**, up to 1080p60, starting where the phone was. Live streams play too.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Seeking in a cast** jumps straight to the right place.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **A loading toast while a cast starts:** a spinner with "Getting the video", then "Opening the video", instead of 10 seconds of nothing.
 - ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **A cast in the browser closes itself** when the phone stops or disconnects, or the video ends, with a hint on screen.
 
 ### ![](https://img.shields.io/badge/PHONE-3ddc84?style=flat-square) Phone
@@ -30,6 +31,7 @@ Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47N
 
 ### ![](https://img.shields.io/badge/INTERFACE-7c4dff?style=flat-square) Interface
 
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Opening a file list no longer freezes for a few seconds** after a USB drive is plugged in (#215). The NTFS drive check now runs in the background.
 - ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Settings rows are never cut off.** While you are in the rows, the section list shrinks to its icons; Left brings it back. No setting's text ends in "..." any more.
 - ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **A long section says there is more:** "N MORE" below (or above, once you scroll), a scrollbar beside the rows and a fade at the hidden edge.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Picture previews** for the settings that only had text, from Upmix 4.0 and the cast settings to Volume boost, Audio delay and Network buffer.

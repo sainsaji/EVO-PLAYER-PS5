@@ -16,23 +16,15 @@ Plays video from USB drives (exFAT, FAT32 and read-only NTFS), internal storage,
 
 ## What's New in v0.13.7
 
-- **Play a YouTube link, whole video:** paste a link in Settings → Interface & Storage → **Play a YouTube link**, or on the phone page, and EVO plays the full video in its own player, up to 1080p60.
-- **YouTube casts play in full:** casting from the YouTube app no longer stops after about a minute.
+- **Cast from the YouTube app:** EVO shows up as a cast target on Android and iOS, no sign-in. The whole video plays in EVO's own player, up to 1080p60, with a loading toast while it starts. Settings → Network → **Cast to EVO Player**.
+- **Play a YouTube link, whole video:** paste a link in Settings → Interface & Storage → **Play a YouTube link**, or on the phone page.
 - **Your phone as a remote (#238):** open `<console>:9780/remote` for play/pause, seeking, chapters, subtitles, audio tracks and a D-pad for EVO's menus.
+- **Smoother playback and browsing:** no more regular stutter in local and USB playback, and opening a file list no longer freezes for a few seconds when a USB drive is plugged in.
+- **Album art (#232):** FLAC and MP3 files show their cover on the player card, and FLAC files with art no longer freeze at 0:00.
 - **Clearer Settings:** rows are never cut off, every setting has a picture preview and its own icon.
 - **"Did you know" on Home**, **Upmix stereo to 4.0**, **controller phone audio**, **subtitle style** and **library filters** (thanks @Andrea17982).
-
-0.13.6 was not released on its own; its changes ship in 0.13.7 too.
-
-### Highlights from v0.13.6
-
-- **YouTube Cast Receiver (DIAL & Lounge):** Cast YouTube videos straight from your phone (Android or iOS) to EVO Player without signing in. Supports SSDP discovery, DIAL launch, and direct pairing via YouTube Lounge companion screen protocol.
-- **Native Player Casting:** Stream YouTube videos directly in EVO's native hardware player with full controller support, or fall back to the system browser. Configurable via **Settings → Network → CAST TO EVO PLAYER**.
-- **Playback stutter eliminated:** periodic ~850 ms frame drops during USB and local playback have been resolved. Remote command polling and DOM UI status serialization now execute on a dedicated background worker thread, removing all blocking filesystem I/O from the 60/120 Hz render loop.
-- **Flash drive friendly:** eliminated periodic `fsync` calls during media streaming to avoid flash block erase stalls, and throttled USB status writes to 15s during active playback.
-- **On-demand USB detection:** replaced periodic background filesystem polling with on-demand enumeration in file browsers.
-- **Embedded album art & FLAC playback (#232):** FLAC files with embedded cover art no longer freeze at 0:00, and audio tracks (FLAC, MP3) now render their embedded album art directly on the Now Playing player card.
-- **Experimental Web Browser (ProsperoWeb):** out-of-process browser composited via EVO's GPU broker, gated under **Settings → Experimental → WEB BROWSER** (defaults to **OFF**). The navigation rail updates dynamically to show or hide the Web section. Crisp 2x rendering on 4K displays.
+- **Experimental web browser:** Settings → Experimental → **Web browser** (off by default).
+- **Plex is hidden for now (#222)** until it works after sign-in.
 
 Full notes: [CHANGELOG.md](CHANGELOG.md).
 
