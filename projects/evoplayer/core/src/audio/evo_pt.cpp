@@ -267,6 +267,7 @@ void evo_pt_reset(void)
     g_pt_stream_buf.clear();
     g_pt_grain_queue.clear();
     g_pt_pending.clear();
+    g_pt_packer.reset();
     pthread_mutex_unlock(&g_pt_mutex);
     evo_boot_log("[PT] Queues flushed (seek)");
 }

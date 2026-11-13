@@ -85,18 +85,43 @@ class Packer
     {
     }
 
-    void set_codec(Codec codec) { codec_ = codec; }
+    void set_codec(Codec codec)
+    {
+        codec_ = codec;
+        reset();
+        truehd_samples_per_unit_ = 0;
+    }
     Codec codec() const { return codec_; }
+
+    // Drops a half-built TrueHD MAT frame (after a seek): the next access unit
+    // starts a new frame.
+    void reset()
+    {
+        mat_filled_ = 0;
+        truehd_prev_size_ = 0;
+        truehd_prev_time_ = 0;
+    }
 
     // Appends the next burst built from `data` starting at *cursor to `out`
     // and advances *cursor. Returns false at the end of data or on an incomplete/
     // uncarriable frame (then *error says why if fatal).
+    // TrueHD: takes access units until one completes a MAT frame; units left
+    // over at the end of `data` are kept for the next frame, so it can return
+    // true with nothing appended.
     bool next_burst(Span<std::uint8_t> data, std::size_t *cursor,
                     std::vector<std::uint8_t> *out, const char **error,
                     bool flush = false);
 
   private:
+    bool add_truehd_unit(const std::uint8_t *unit, std::size_t size, std::vector<std::uint8_t> *out);
+
     Codec codec_;
+    // The MAT frame being filled, and FFmpeg's state for placing the next access unit.
+    std::vector<std::uint8_t> mat_;
+    std::size_t mat_filled_ = 0;
+    std::size_t truehd_prev_size_ = 0;
+    std::uint16_t truehd_prev_time_ = 0;
+    int truehd_samples_per_unit_ = 0;
 };
 
 // Writes one burst: header words Pa Pb Pc Pd, the payload as big-endian
