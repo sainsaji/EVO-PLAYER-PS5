@@ -5,6 +5,7 @@
 #include <libavcodec/defs.h>
 #include <algorithm>
 #include <cstring>
+#include <string>
 
 namespace pt
 {
@@ -16,6 +17,7 @@ constexpr std::uint16_t kPa = 0xF872;
 constexpr std::uint16_t kPb = 0x4E1F;
 constexpr std::size_t kBurstHeaderBytes = 8; // Pa Pb Pc Pd
 constexpr std::size_t kPortFrameBytes = 4;   // one S16 stereo frame
+constexpr std::size_t kDtsSyncBytes = 4;     // a DTS core or extension substream sync word
 // IEC 61937 data types
 constexpr std::uint16_t kTypeAc3  = 0x01;
 constexpr std::uint16_t kTypeDts1 = 0x0B; // 512 samples per frame
@@ -91,7 +93,7 @@ bool is_dts_sync(Span<std::uint8_t> d, std::size_t at)
 
 bool is_dts_exss_sync(Span<std::uint8_t> d, std::size_t at)
 {
-    return at + 4 <= d.size() && d[at] == 0x64 && d[at + 1] == 0x58 && d[at + 2] == 0x20 &&
+    return at + kDtsSyncBytes <= d.size() && d[at] == 0x64 && d[at + 1] == 0x58 && d[at + 2] == 0x20 &&
            d[at + 3] == 0x25;
 }
 
@@ -157,6 +159,11 @@ int dtshd_subtype(int sample_rate, int samples)
         if (period == (kDtshdShortestPeriod << subtype))
             return subtype;
     return -1;
+}
+
+bool packet_ends_frame(Codec codec)
+{
+    return codec == Codec::dtshd;
 }
 
 Codec dts_route(int profile, int sample_rate, bool sink_lists_dtshd)
@@ -482,7 +489,7 @@ bool Packer::next_burst(Span<std::uint8_t> d, std::size_t *cursor,
     }
 
     if (codec_ == Codec::dtshd)
-        return next_dtshd_burst(d, first, cursor, out, error, flush);
+        return next_dtshd_burst(d, first, cursor, out, flush);
 
     if (codec_ == Codec::dts)
     {
@@ -518,46 +525,29 @@ bool Packer::next_burst(Span<std::uint8_t> d, std::size_t *cursor,
     return false;
 }
 
-bool Packer::push_packet(Span<std::uint8_t> packet, std::vector<std::uint8_t> *out,
-                         const char **error)
+// A DTS-HD frame that cannot go out is dropped, with one log line per reason and stream:
+// holding it would stall the stream behind it.
+void Packer::drop_dtshd_frame(DtshdDrop why)
 {
-    *error = nullptr;
-    stream_.insert(stream_.end(), packet.data(), packet.data() + packet.size());
-    // FFmpeg's demuxers hand over a DTS-HD frame whole, core and extension substreams in
-    // one packet (its DTS parser joins them, and its spdif muxer counts on it), so the end
-    // of a packet ends the frame. Waiting for the next sync word instead held every frame
-    // back by one, and the last frame of a file never went out. The other codecs keep
-    // waiting: their flush makes a short burst.
-    const bool flush = codec_ == Codec::dtshd;
-    std::size_t cursor = 0;
-    while (stream_.size() - cursor >= 8) // fewer bytes hold no frame header
-    {
-        const Span<std::uint8_t> rest(stream_.data() + cursor, stream_.size() - cursor);
-        std::size_t consumed = 0;
-        if (!next_burst(rest, &consumed, out, error, flush))
-            break;
-        cursor += consumed;
-    }
-    stream_.erase(stream_.begin(), stream_.begin() + static_cast<std::ptrdiff_t>(cursor));
-    return *error == nullptr;
+    if (dtshd_drops_logged_ & why)
+        return;
+    dtshd_drops_logged_ |= why;
+    add_notice(why == kDropNoPeriod
+                   ? "DTS-HD: dropping frames whose core rate gives no Type IV period"
+                   : "DTS-HD: dropping frames whose core is too big for the Type IV burst");
+}
+
+// Notices given before take_notice joins one log line.
+void Packer::add_notice(const std::string &notice)
+{
+    notice_ += (notice_.empty() ? "" : "; ") + notice;
 }
 
 // One whole DTS frame (the core plus the extension substreams after it) as a Type IV
 // burst, as FFmpeg's spdif_header_dts4 builds it.
 bool Packer::next_dtshd_burst(Span<std::uint8_t> d, const Frame &core, std::size_t *cursor,
-                              std::vector<std::uint8_t> *out, const char **error, bool flush)
+                              std::vector<std::uint8_t> *out, bool flush)
 {
-    const int subtype = dtshd_subtype(core.sample_rate, core.samples);
-    if (subtype < 0)
-    {
-        // FFmpeg's muxer stops here. Stopping would leave the frame queued and the audio
-        // would end, so the rest of this stream goes out as DTS core bursts, as on the dts
-        // path. The port stays the 192 kHz one opened for DTS-HD.
-        codec_ = Codec::dts;
-        notice_ = "DTS-HD: the core's rate gives no Type IV period, sending the DTS core only";
-        return next_burst(d, cursor, out, error, flush);
-    }
-
     std::size_t end = *cursor + core.size;
     while (is_dts_exss_sync(d, end))
     {
@@ -567,21 +557,33 @@ bool Packer::next_dtshd_burst(Span<std::uint8_t> d, const Frame &core, std::size
         end += substream_bytes;
     }
     // Another extension substream may still come: the frame is whole once the next sync
-    // word shows, or at `flush` (the end of its packet, see push_packet).
-    if (end + 4 > d.size() && !flush)
+    // word shows, or at `flush` (the end of its packet, see packet_ends_frame).
+    if (end + kDtsSyncBytes > d.size() && !flush)
         return false;
+
+    const int subtype = dtshd_subtype(core.sample_rate, core.samples);
+    if (subtype < 0)
+    {
+        // dts_route only picks DTS-HD for a stream rate with a Type IV period, so this is a
+        // core whose own rate differs mid-stream. FFmpeg's muxer stops here. Its core as
+        // Type I would play at the wrong rate on the 192 kHz port, so the frame is dropped.
+        drop_dtshd_frame(kDropNoPeriod);
+        *cursor = end;
+        return true;
+    }
 
     const std::size_t burst_bytes = (static_cast<std::size_t>(kDtshdShortestPeriod) << subtype) * kPortFrameBytes;
     const std::size_t max_frame_bytes = burst_bytes - kBurstHeaderBytes - kDtshdFrameAt;
     std::size_t frame_bytes = end - *cursor;
     // A frame too big for the burst sends its core, and so do the frames after it for
-    // 60 s: a decoder may drop a stream whose HD part keeps breaking off (FFmpeg's
-    // dtshd_fallback_time, default 60).
+    // kDtshdFallbackSeconds: a decoder may drop a stream whose HD part keeps breaking off
+    // (FFmpeg's dtshd_fallback_time, default 60).
     if (frame_bytes > max_frame_bytes)
     {
         if (dtshd_core_only_ == 0)
-            notice_ = "DTS-HD frame too big for the Type IV burst, sending the DTS core only for 60 s";
-        dtshd_core_only_ =static_cast<long>(core.sample_rate) * kDtshdFallbackSeconds / core.samples;
+            add_notice("DTS-HD frame too big for the Type IV burst, sending the DTS core only for " +
+                       std::to_string(kDtshdFallbackSeconds) + " s");
+        dtshd_core_only_ = static_cast<long>(core.sample_rate) * kDtshdFallbackSeconds / core.samples;
     }
     if (dtshd_core_only_ > 0)
     {
@@ -589,8 +591,10 @@ bool Packer::next_dtshd_burst(Span<std::uint8_t> d, const Frame &core, std::size
         --dtshd_core_only_;
         if (frame_bytes > max_frame_bytes)
         {
-            *error = "DTS-HD: even the core does not fit the Type IV burst";
-            return false;
+            // FFmpeg's muxer fails this packet ("bitrate is too high").
+            drop_dtshd_frame(kDropCoreTooBig);
+            *cursor = end;
+            return true;
         }
     }
     const std::size_t payload_bytes = kDtshdFrameAt + frame_bytes;

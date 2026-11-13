@@ -115,7 +115,8 @@ def main():
         # its core, and the cores only of what follows for 60 s (dtshd_fallback_time).
         make(tmp, "dtshd-big", [[(1500, False)], [(7800, True)], [(1200, False)]], core_ref=False)
         # A 44.1 kHz core: 512 samples give no Type IV period on the 192 kHz port, and
-        # FFmpeg stops ("impossible repetition period"). The packer sends its core bursts.
+        # FFmpeg stops ("impossible repetition period"). dts_route keeps such a stream on the
+        # DTS core path, and the packer drops such frames met mid-stream on the DTS-HD path.
         make(tmp, "dtshd-44k", [[(1500, False)], [(3000, True)], [(1201, False)]], t4_ref=False,
              rate=44100)
 

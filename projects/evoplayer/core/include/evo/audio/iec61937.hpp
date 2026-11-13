@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace pt
@@ -88,6 +89,13 @@ int dtshd_subtype(int sample_rate, int samples);
 // 48 kHz-family rate on such a sink, else the DTS core.
 Codec dts_route(int profile, int sample_rate, bool sink_lists_dtshd);
 
+// Whether the end of a demuxed packet ends the frame in it, so next_burst can flush there
+// instead of waiting for the next sync word. Only for DTS-HD: FFmpeg's demuxers hand over
+// each DTS-HD frame whole, core and extension substreams in one packet (its DTS parser
+// joins them, and its spdif muxer counts on it). Waiting held every frame back by one, and
+// the last frame of a file never went out.
+bool packet_ends_frame(Codec codec);
+
 // Splits an elementary stream into bursts, each exactly as long as the
 // audio it holds, as little-endian S16 stereo samples ready for the port.
 class Packer
@@ -101,26 +109,20 @@ class Packer
     void set_codec(Codec codec)
     {
         codec_ = codec;
-        stream_.clear();
         dtshd_core_only_ = 0;
-        notice_ = nullptr;
+        dtshd_drops_logged_ = 0;
+        notice_.clear();
     }
     Codec codec() const { return codec_; }
 
-    // A change worth one log line (DTS-HD falling back to its core), once, or nullptr.
-    const char *take_notice()
+    // A change worth one log line (DTS-HD falling back to its core or dropping frames),
+    // once, or "".
+    std::string take_notice()
     {
-        const char *notice = notice_;
-        notice_ = nullptr;
+        std::string notice;
+        notice.swap(notice_);
         return notice;
     }
-
-    // Takes one demuxed packet: adds it to the stream and appends every burst it completes
-    // to `out`. Returns false with *error set when a frame cannot be carried; the stream
-    // then waits there.
-    bool push_packet(Span<std::uint8_t> packet, std::vector<std::uint8_t> *out, const char **error);
-    // Drops the stream data not packed yet (a seek).
-    void clear_stream() { stream_.clear(); }
 
     // Appends the next burst built from `data` starting at *cursor to `out`
     // and advances *cursor. Returns false at the end of data or on an incomplete/
@@ -131,12 +133,16 @@ class Packer
 
   private:
     bool next_dtshd_burst(Span<std::uint8_t> data, const Frame &core, std::size_t *cursor,
-                          std::vector<std::uint8_t> *out, const char **error, bool flush);
+                          std::vector<std::uint8_t> *out, bool flush);
+    // Why a DTS-HD frame is dropped; each reason is logged once per stream.
+    enum DtshdDrop : unsigned { kDropNoPeriod = 1, kDropCoreTooBig = 2 };
+    void drop_dtshd_frame(DtshdDrop why);
+    void add_notice(const std::string &notice);
 
     Codec codec_;
-    std::vector<std::uint8_t> stream_; // packet data not packed yet
     long dtshd_core_only_ = 0; // DTS-HD frames left to send as core only, after one too big
-    const char *notice_ = nullptr;
+    unsigned dtshd_drops_logged_ = 0; // DtshdDrop reasons already logged for this stream
+    std::string notice_;
 };
 
 // Writes one burst: header words Pa Pb Pc Pd, the payload as big-endian
