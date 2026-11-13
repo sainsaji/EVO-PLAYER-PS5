@@ -4,6 +4,7 @@
 #include "evo/audio/iec61937.hpp"
 #include <algorithm>
 #include <cstring>
+#include <iterator>
 
 namespace pt
 {
@@ -22,12 +23,26 @@ constexpr std::uint16_t kTypeEac3 = 0x15;
 constexpr std::uint16_t kTypeAac  = 0x07; // MPEG-2/4 AAC, 1024 samples per frame
 constexpr std::uint16_t kTypeTruehd = 0x16; // Dolby TrueHD, as MAT
 
-// One MAT frame holds 24 TrueHD time slots (1/1200 s each, so 20 ms) and goes
-// out in a 61440-byte burst on the 768 kHz port.
+// A TrueHD access unit is 1/1200 s of audio: 40 samples at 48 kHz, twice that
+// for each doubling of the rate. A major sync (sync word at byte 4, then a
+// format byte) gives the rate bits; FFmpeg's muxer needs at least the bytes
+// up to the second rate byte in every unit.
+constexpr std::uint8_t kTruehdMajorSync[3] = {0xF8, 0x72, 0x6F};
+constexpr std::size_t kMajorSyncPos = 4;
+constexpr std::size_t kMajorSyncFormatPos = kMajorSyncPos + sizeof(kTruehdMajorSync);
+constexpr std::uint8_t kMajorSyncTruehd = 0xBA;
+constexpr std::uint8_t kMajorSyncMlp = 0xBB;
+constexpr std::size_t kTruehdRatePos = 8; // rate bits: high nibble, low 2 bits used
+constexpr std::size_t kMlpRatePos = 9;
+constexpr std::size_t kMajorSyncHeaderBytes = kMlpRatePos + 1;
+constexpr int kTruehdBaseSamples = 40;
+
+// One MAT frame holds 24 TrueHD time slots (so 20 ms) and goes out in one
+// kMatBurstBytes burst on the 768 kHz port.
 constexpr std::size_t kMatFrameSize = 61424;
-constexpr std::size_t kMatBurstBytes = 61440;
 constexpr std::size_t kMatMiddleCodePos = 30708;
-constexpr long kMatSlotBytes = 2560; // one 1/1200 s slot: 61440 / 24
+constexpr std::size_t kMatSlots = 24;
+constexpr std::size_t kMatSlotBytes = kMatBurstBytes / kMatSlots; // one 1/1200 s slot
 constexpr std::uint8_t kMatStartCode[20] = {
     0x07, 0x9E, 0x00, 0x03, 0x84, 0x01, 0x01, 0x01, 0x80, 0x00,
     0x56, 0xA5, 0x3B, 0xF4, 0x81, 0x83, 0x49, 0x80, 0x77, 0xE0,
@@ -202,7 +217,30 @@ Frame parse_frame(Codec codec, Span<std::uint8_t> d, std::size_t at)
         if (at + 2 > d.size())
             return f;
         f.size = ((static_cast<std::size_t>(d[at] & 0x0F) << 8) | d[at + 1]) * 2;
-        f.samples = 40;
+        if (at + f.size > d.size())
+        {
+            f.size = 0; // the rest of the unit has not arrived
+            return f;
+        }
+        if (f.size < kMajorSyncHeaderBytes)
+        {
+            f.invalid = true;
+        }
+        else if (std::equal(std::begin(kTruehdMajorSync), std::end(kTruehdMajorSync),
+                            d.data() + at + kMajorSyncPos))
+        {
+            const std::uint8_t format = d[at + kMajorSyncFormatPos];
+            if (format == kMajorSyncTruehd || format == kMajorSyncMlp)
+            {
+                const std::uint8_t rate = d[at + (format == kMajorSyncTruehd ? kTruehdRatePos : kMlpRatePos)];
+                f.major_sync = true;
+                f.samples = kTruehdBaseSamples << ((rate >> 4) & 3);
+            }
+            else
+            {
+                f.invalid = true;
+            }
+        }
     }
     if (at + f.size > d.size())
         f.size = 0;
@@ -236,7 +274,7 @@ void write_burst(std::uint16_t data_type, std::uint16_t length_code,
 
 // Places one TrueHD access unit in the MAT frame the way FFmpeg's spdif muxer
 // does (libavformat/spdifenc.c, spdif_header_truehd): each unit starts at its
-// time slot from input_timing, 2560 bytes per 1/1200 s of the 768 kHz port,
+// time slot from input_timing, kMatSlotBytes per slot of the 768 kHz port,
 // zero padding fills the slot, and a unit that reaches a MAT code continues
 // after it, into the next frame if it was the end code. The codes and the gap
 // between frames count as padding. Returns true once a frame is complete and
@@ -255,73 +293,74 @@ bool Packer::add_truehd_unit(const std::uint8_t *unit, std::size_t size,
         {kMatMiddleCodePos, kMatMiddleCode, sizeof(kMatMiddleCode)},
         {kMatFrameSize - sizeof(kMatEndCode), kMatEndCode, sizeof(kMatEndCode)},
     };
-    constexpr int kCodeCount = 3;
+    constexpr std::size_t kCodeCount = std::size(kCodes);
 
-    if (mat_.size() != kMatFrameSize)
-        mat_.assign(kMatFrameSize, 0);
+    Truehd &t = truehd_;
+    if (t.mat.size() != kMatFrameSize)
+        t.mat.assign(kMatFrameSize, 0);
 
     const std::uint16_t input_timing = static_cast<std::uint16_t>((unit[2] << 8) | unit[3]);
     std::size_t padding = 0;
-    if (truehd_prev_size_ != 0)
+    if (t.prev_size != 0)
     {
-        const std::uint16_t delta_samples = static_cast<std::uint16_t>(input_timing - truehd_prev_time_);
-        const long delta_bytes = static_cast<long>(delta_samples) * kMatSlotBytes / truehd_samples_per_unit_;
-        const long pad = delta_bytes - static_cast<long>(truehd_prev_size_);
+        const std::uint16_t delta_samples = static_cast<std::uint16_t>(input_timing - t.prev_time);
+        const std::size_t delta_bytes =
+            delta_samples * kMatSlotBytes / static_cast<std::size_t>(t.samples_per_unit);
         // Timing that would go backwards or skip half a frame is ignored, as FFmpeg does.
-        if (pad > 0 && pad < static_cast<long>(kMatFrameSize / 2))
-            padding = static_cast<std::size_t>(pad);
+        if (delta_bytes > t.prev_size && delta_bytes - t.prev_size < kMatFrameSize / 2)
+            padding = delta_bytes - t.prev_size;
     }
 
-    int next = 0;
-    while (next < kCodeCount && mat_filled_ > kCodes[next].pos)
+    std::size_t next = 0;
+    while (next < kCodeCount && t.mat_filled > kCodes[next].pos)
         ++next;
 
     std::size_t total = size; // bytes this unit takes on the port, codes it does not pad included
     const std::uint8_t *data = unit;
     std::size_t remaining = size;
     bool complete = false;
-    while (padding > 0 || remaining > 0 || kCodes[next].pos == mat_filled_)
+    while (padding > 0 || remaining > 0 || kCodes[next].pos == t.mat_filled)
     {
-        if (kCodes[next].pos == mat_filled_)
+        if (kCodes[next].pos == t.mat_filled)
         {
-            std::memcpy(mat_.data() + mat_filled_, kCodes[next].code, kCodes[next].len);
-            mat_filled_ += kCodes[next].len;
+            std::memcpy(t.mat.data() + t.mat_filled, kCodes[next].code, kCodes[next].len);
+            t.mat_filled += kCodes[next].len;
             std::size_t code_left = kCodes[next].len;
             if (++next == kCodeCount)
             {
                 write_burst(kTypeTruehd, static_cast<std::uint16_t>(kMatFrameSize),
-                            Span<std::uint8_t>(mat_), kMatBurstBytes, out);
+                            Span<std::uint8_t>(t.mat), kMatBurstBytes, out);
                 complete = true;
                 next = 0;
-                mat_filled_ = 0;
+                t.mat_filled = 0;
                 code_left += kMatBurstBytes - kMatFrameSize; // the gap before the next frame
             }
             const std::size_t as_padding = std::min(padding, code_left);
             padding -= as_padding;
             total += code_left - as_padding;
         }
-        const std::size_t room = kCodes[next].pos - mat_filled_;
+        const std::size_t room = kCodes[next].pos - t.mat_filled;
         if (padding > 0)
         {
             const std::size_t n = std::min(room, padding);
-            std::memset(mat_.data() + mat_filled_, 0, n);
-            mat_filled_ += n;
+            std::memset(t.mat.data() + t.mat_filled, 0, n);
+            t.mat_filled += n;
             padding -= n;
             if (padding > 0)
                 continue; // a code comes first
         }
         if (remaining > 0)
         {
-            const std::size_t n = std::min(kCodes[next].pos - mat_filled_, remaining);
-            std::memcpy(mat_.data() + mat_filled_, data, n);
-            mat_filled_ += n;
+            const std::size_t n = std::min(kCodes[next].pos - t.mat_filled, remaining);
+            std::memcpy(t.mat.data() + t.mat_filled, data, n);
+            t.mat_filled += n;
             data += n;
             remaining -= n;
         }
     }
 
-    truehd_prev_size_ = total;
-    truehd_prev_time_ = input_timing;
+    t.prev_size = total;
+    t.prev_time = input_timing;
     return complete;
 }
 
@@ -438,19 +477,13 @@ bool Packer::next_burst(Span<std::uint8_t> d, std::size_t *cursor,
                 break;
             const std::uint8_t *unit = d.data() + cur;
             cur += f.size;
-            if (f.size >= 10 && unit[4] == 0xF8 && unit[5] == 0x72 && unit[6] == 0x6F)
-            {
-                // A major sync gives the sample rate: 40 samples per unit at
-                // 48 kHz, 80 at 96 kHz, 160 at 192 kHz (always 1/1200 s).
-                if (unit[7] == 0xBA)
-                    truehd_samples_per_unit_ = 40 << ((unit[8] >> 4) & 3);
-                else if (unit[7] == 0xBB)
-                    truehd_samples_per_unit_ = 40 << ((unit[9] >> 4) & 3);
-                else
-                    continue;
-            }
-            // Units before the first major sync cannot be timed: drop them, as FFmpeg does.
-            if (f.size < 10 || truehd_samples_per_unit_ == 0)
+            if (f.major_sync)
+                truehd_.samples_per_unit = f.samples;
+            // FFmpeg's muxer rejects a unit it cannot place (shorter than kMajorSyncHeaderBytes, a
+            // major sync of unknown format, or before the first major sync, so
+            // without a sample rate) with AVERROR_INVALIDDATA; here it is skipped
+            // and the stream goes on.
+            if (f.invalid || truehd_.samples_per_unit == 0)
                 continue;
             emitted = add_truehd_unit(unit, f.size, out);
         }

@@ -25,6 +25,7 @@ extern "C" {
 
 typedef std::vector<std::uint8_t> Bytes;
 
+
 static std::string data_path(const char *name)
 {
     std::string dir = __FILE__;
@@ -103,7 +104,7 @@ static std::string compare(const Bytes &got, const Bytes &want)
         if (got[i] != want[i])
         {
             std::snprintf(msg, sizeof msg, "byte %zu (burst offset %zu): got %02x, FFmpeg %02x",
-                          i, i % 61440, got[i], want[i]);
+                          i, i % pt::kMatBurstBytes, got[i], want[i]);
             return msg;
         }
     }
@@ -159,8 +160,59 @@ static void test_truehd_restarts_after_reset(void)
     TEST_PASS();
 }
 
+// The samples per access unit a TrueHD stream's first unit (a major sync) gives.
+static void expect_truehd_unit_samples(const char *title, const char *name, int want)
+{
+    TEST_START(title);
+    const Bytes es = read_file(data_path(name));
+    TEST_ASSERT(!es.empty(), "test vector missing");
+    const pt::Frame f = pt::parse_frame(pt::Codec::truehd, es, 0);
+    TEST_ASSERT(f.size != 0, "first access unit not found");
+    TEST_ASSERT(f.major_sync, "first access unit is not a major sync");
+    TEST_ASSERT(f.samples == want, "wrong samples per access unit");
+    TEST_PASS();
+}
+
+// A 12-byte access unit: length word (6 words), input timing, then a major sync
+// of the given format and the two bytes that may hold the rate bits.
+static Bytes truehd_major_sync_unit(std::uint8_t format, std::uint8_t byte8, std::uint8_t byte9)
+{
+    return Bytes{0x00, 0x06, 0x12, 0x34, 0xF8, 0x72, 0x6F, format, byte8, byte9, 0x00, 0x00};
+}
+
+static void test_truehd_mlp_major_sync_rate(void)
+{
+    TEST_START("IEC 61937: MLP major sync (0xBB) rate comes from byte 9");
+    // FFmpeg's spdifenc reads the rate bits from byte 9 for 0xBB (byte 8 for 0xBA).
+    const Bytes mlp = truehd_major_sync_unit(0xBB, 0x20, 0x10);
+    const pt::Frame f = pt::parse_frame(pt::Codec::truehd, mlp, 0);
+    TEST_ASSERT(f.size == 12 && f.major_sync && !f.invalid, "MLP major sync not recognized");
+    TEST_ASSERT(f.samples == 80, "rate bits not taken from byte 9");
+    TEST_PASS();
+}
+
+static void test_truehd_units_ffmpeg_rejects(void)
+{
+    TEST_START("IEC 61937: TrueHD units FFmpeg rejects are marked");
+    const Bytes unknown = truehd_major_sync_unit(0xBC, 0x00, 0x00);
+    const pt::Frame u = pt::parse_frame(pt::Codec::truehd, unknown, 0);
+    TEST_ASSERT(u.size == 12 && u.invalid, "major sync of unknown format not marked invalid");
+    const Bytes tiny{0x00, 0x04, 0x12, 0x34, 0xF8, 0x72, 0x6F, 0xBA};
+    const pt::Frame t = pt::parse_frame(pt::Codec::truehd, tiny, 0);
+    TEST_ASSERT(t.size == 8 && t.invalid, "unit under 10 bytes not marked invalid");
+    const Bytes plain{0x00, 0x06, 0x12, 0x34, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    const pt::Frame p = pt::parse_frame(pt::Codec::truehd, plain, 0);
+    TEST_ASSERT(p.size == 12 && !p.invalid && !p.major_sync && p.samples == 0,
+                "unit without a major sync should carry no rate");
+    TEST_PASS();
+}
+
 extern "C" void run_iec61937_tests(void)
 {
+    expect_truehd_unit_samples("IEC 61937: TrueHD 48 kHz unit is 40 samples", "truehd48.es", 40);
+    expect_truehd_unit_samples("IEC 61937: TrueHD 96 kHz unit is 80 samples", "truehd96.es", 80);
+    test_truehd_mlp_major_sync_rate();
+    test_truehd_units_ffmpeg_rejects();
     expect_ffmpeg_bursts("IEC 61937: TrueHD 48 kHz MAT matches FFmpeg", pt::Codec::truehd, "truehd48");
     expect_ffmpeg_bursts("IEC 61937: TrueHD 96 kHz MAT matches FFmpeg", pt::Codec::truehd, "truehd96");
     test_truehd_restarts_after_reset();
