@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "evo/audio/iec61937.hpp"
+#include <libavcodec/defs.h>
 #include <algorithm>
 #include <cstring>
+#include <string>
 
 namespace pt
 {
@@ -13,6 +15,9 @@ namespace
 
 constexpr std::uint16_t kPa = 0xF872;
 constexpr std::uint16_t kPb = 0x4E1F;
+constexpr std::size_t kBurstHeaderBytes = 8; // Pa Pb Pc Pd
+constexpr std::size_t kPortFrameBytes = 4;   // one S16 stereo frame
+constexpr std::size_t kDtsSyncBytes = 4;     // a DTS core or extension substream sync word
 // IEC 61937 data types
 constexpr std::uint16_t kTypeAc3  = 0x01;
 constexpr std::uint16_t kTypeDts1 = 0x0B; // 512 samples per frame
@@ -21,6 +26,26 @@ constexpr std::uint16_t kTypeDts3 = 0x0D; // 2048
 constexpr std::uint16_t kTypeEac3 = 0x15;
 constexpr std::uint16_t kTypeAac  = 0x07; // MPEG-2/4 AAC, 1024 samples per frame
 constexpr std::uint16_t kTypeTruehd = 0x16; // Dolby TrueHD, as MAT
+constexpr std::uint16_t kTypeDtshd = 0x11;  // DTS-HD, IEC 61937-9 Type IV
+
+// DTS-HD goes out the way FFmpeg's spdif muxer sends it with -dtshd_rate 192000: each
+// whole frame after this start code and a 16-bit size, on the 192 kHz port.
+constexpr int kDtshdRate = 192000;
+constexpr int kDtshdFallbackSeconds = 60;
+constexpr std::uint8_t kDtshdStartCode[10] = {0x01, 0x00, 0x00, 0x00, 0x00,
+                                              0x00, 0x00, 0x00, 0xFE, 0xFE};
+constexpr std::size_t kDtshdSizeAt = sizeof(kDtshdStartCode); // the 16-bit frame size
+constexpr std::size_t kDtshdFrameAt = kDtshdSizeAt + 2;      // the frame itself
+constexpr long kDtshdShortestPeriod = 512; // port frames in a subtype 0 burst
+constexpr int kDtshdSubtypes = 6;          // 512 << 0 .. 512 << 5
+// Pd is rounded up so that Pd % 16 == 8; some receivers reportedly need it (FFmpeg).
+constexpr std::size_t kDtshdPdAlign = 16;
+constexpr std::size_t kDtshdPdRemainder = 8;
+// A DTS-HD stream's core frame: 512 samples, the length a 48 kHz-family core uses.
+constexpr int kDtshdCoreSamples = 512;
+// DTS core sample rates by the frame header's SFREQ field (ETSI TS 102 114 table 5-5).
+constexpr int kDtsSampleRates[16] = {0,     8000,  16000, 32000, 0,     0,     11025, 22050,
+                                     44100, 0,     0,     12000, 24000, 48000, 96000, 192000};
 
 // One MAT frame holds up to 24 TrueHD access units (40 samples each, so 20 ms)
 // and goes out in a 61440-byte burst on the 768 kHz port.
@@ -66,6 +91,36 @@ bool is_dts_sync(Span<std::uint8_t> d, std::size_t at)
            d[at + 3] == 0x01;
 }
 
+bool is_dts_exss_sync(Span<std::uint8_t> d, std::size_t at)
+{
+    return at + kDtsSyncBytes <= d.size() && d[at] == 0x64 && d[at + 1] == 0x58 && d[at + 2] == 0x20 &&
+           d[at + 3] == 0x25;
+}
+
+// `count` bits (at most 24) of `d` from bit `bit` after byte `at`, most significant first.
+std::uint32_t read_bits(Span<std::uint8_t> d, std::size_t at, std::size_t bit, int count)
+{
+    std::uint32_t value = 0;
+    for (int i = 0; i < count; ++i, ++bit)
+        value = (value << 1) | ((d[at + bit / 8] >> (7 - bit % 8)) & 1);
+    return value;
+}
+
+// Bytes in the DTS-HD extension substream at `at`, or 0 if its header is not all in `d`
+// yet. ETSI TS 102 114 7.5.1: after the 32-bit sync come 8 user bits, a 2-bit index and
+// the header size type, then the header size and FSIZE in 8 and 16 bits (type 0) or 12
+// and 20 bits (type 1), each stored minus one.
+std::size_t dts_exss_size(Span<std::uint8_t> d, std::size_t at)
+{
+    constexpr std::size_t kSizeTypeBit = 32 + 8 + 2;
+    constexpr std::size_t kHeaderBytes = 10; // through the end of a 20-bit FSIZE
+    if (at + kHeaderBytes > d.size())
+        return 0;
+    const bool wide = read_bits(d, at, kSizeTypeBit, 1) != 0;
+    const std::size_t fsize_bit = kSizeTypeBit + 1 + (wide ? 12 : 8);
+    return static_cast<std::size_t>(read_bits(d, at, fsize_bit, wide ? 20 : 16)) + 1;
+}
+
 bool is_adts_sync(Span<std::uint8_t> d, std::size_t at)
 {
     return at + 7 <= d.size() && d[at] == 0xFF && (d[at + 1] & 0xF6) == 0xF0;
@@ -79,6 +134,7 @@ bool is_sync_any(Codec codec, Span<std::uint8_t> d, std::size_t at)
     case Codec::eac3:
         return is_ac3_sync(d, at);
     case Codec::dts:
+    case Codec::dtshd:
         return is_dts_sync(d, at);
     case Codec::aac:
         return is_adts_sync(d, at);
@@ -90,6 +146,35 @@ bool is_sync_any(Codec codec, Span<std::uint8_t> d, std::size_t at)
 }
 
 } // namespace
+
+int dtshd_subtype(int sample_rate, int samples)
+{
+    if (sample_rate <= 0 || samples <= 0)
+        return -1;
+    const long long scaled = static_cast<long long>(kDtshdRate) * samples;
+    if (scaled % sample_rate != 0)
+        return -1;
+    const long long period = scaled / sample_rate;
+    for (int subtype = 0; subtype < kDtshdSubtypes; ++subtype)
+        if (period == (kDtshdShortestPeriod << subtype))
+            return subtype;
+    return -1;
+}
+
+bool packet_ends_frame(Codec codec)
+{
+    return codec == Codec::dtshd;
+}
+
+Codec dts_route(int profile, int sample_rate, bool sink_lists_dtshd)
+{
+    // HRA, MA, MA X and MA X IMAX carry a core to fall back to; DTS Express (70) has none.
+    const bool hd = profile >= AV_PROFILE_DTS_HD_HRA && profile <= AV_PROFILE_DTS_HD_MA_X_IMAX;
+    // FFmpeg gives the HD rate (96 kHz over a 48 kHz core, say), which is in its core's
+    // family: a 44.1 kHz-family stream has no Type IV period, so it keeps the core path.
+    const bool fits = dtshd_subtype(sample_rate, kDtshdCoreSamples) >= 0;
+    return hd && fits && sink_lists_dtshd ? Codec::dtshd : Codec::dts;
+}
 
 const char *codec_name(Codec codec)
 {
@@ -105,6 +190,8 @@ const char *codec_name(Codec codec)
         return "AAC (ADTS)";
     case Codec::truehd:
         return "Dolby TrueHD";
+    case Codec::dtshd:
+        return "DTS-HD";
     case Codec::unknown:
         break;
     }
@@ -139,6 +226,10 @@ Carrier carrier_for(Codec codec)
         // sceAudioOutSysOpen mode 5: a 768 kHz port of 1024 S16 8-channel
         // frames; SysConfigureOutput mode 5 is MAT (the Blu-ray player's route).
         return {5, 1024, 768000, true, 16};
+    case Codec::dtshd:
+        // Ex mode 4 (the console logs it as BITSTREAM DTS_HD_HR): a 192 kHz S16 stereo
+        // port of 1024-frame grains, like E-AC-3's mode 3.
+        return {4, 1024, 192000};
     case Codec::unknown:
         break;
     }
@@ -177,7 +268,7 @@ Frame parse_frame(Codec codec, Span<std::uint8_t> d, std::size_t at)
             f.dependent = strmtyp == 1;
         }
     }
-    else if (codec == Codec::dts)
+    else if (codec == Codec::dts || codec == Codec::dtshd)
     {
         if (!is_dts_sync(d, at))
             return f;
@@ -185,6 +276,7 @@ Frame parse_frame(Codec codec, Span<std::uint8_t> d, std::size_t at)
         const int fsize = (((d[at + 5] & 3) << 12) | (d[at + 6] << 4) | (d[at + 7] >> 4)) + 1;
         f.samples = (nblks + 1) * 32;
         f.size = static_cast<std::size_t>(fsize);
+        f.sample_rate = kDtsSampleRates[(d[at + 8] >> 2) & 0x0F];
     }
     else if (codec == Codec::aac)
     {
@@ -396,6 +488,9 @@ bool Packer::next_burst(Span<std::uint8_t> d, std::size_t *cursor,
         return true;
     }
 
+    if (codec_ == Codec::dtshd)
+        return next_dtshd_burst(d, first, cursor, out, flush);
+
     if (codec_ == Codec::dts)
     {
         std::uint16_t type = 0;
@@ -428,6 +523,94 @@ bool Packer::next_burst(Span<std::uint8_t> d, std::size_t *cursor,
 
     *error = "unsupported codec";
     return false;
+}
+
+// A DTS-HD frame that cannot go out is dropped, with one log line per reason and stream:
+// holding it would stall the stream behind it.
+void Packer::drop_dtshd_frame(DtshdDrop why)
+{
+    if (dtshd_drops_logged_ & why)
+        return;
+    dtshd_drops_logged_ |= why;
+    add_notice(why == kDropNoPeriod
+                   ? "DTS-HD: dropping frames whose core rate gives no Type IV period"
+                   : "DTS-HD: dropping frames whose core is too big for the Type IV burst");
+}
+
+// Notices given before take_notice joins one log line.
+void Packer::add_notice(const std::string &notice)
+{
+    notice_ += (notice_.empty() ? "" : "; ") + notice;
+}
+
+// One whole DTS frame (the core plus the extension substreams after it) as a Type IV
+// burst, as FFmpeg's spdif_header_dts4 builds it.
+bool Packer::next_dtshd_burst(Span<std::uint8_t> d, const Frame &core, std::size_t *cursor,
+                              std::vector<std::uint8_t> *out, bool flush)
+{
+    std::size_t end = *cursor + core.size;
+    while (is_dts_exss_sync(d, end))
+    {
+        const std::size_t substream_bytes = dts_exss_size(d, end);
+        if (substream_bytes == 0 || end + substream_bytes > d.size())
+            return false; // the extension is not all here yet
+        end += substream_bytes;
+    }
+    // Another extension substream may still come: the frame is whole once the next sync
+    // word shows, or at `flush` (the end of its packet, see packet_ends_frame).
+    if (end + kDtsSyncBytes > d.size() && !flush)
+        return false;
+
+    const int subtype = dtshd_subtype(core.sample_rate, core.samples);
+    if (subtype < 0)
+    {
+        // dts_route only picks DTS-HD for a stream rate with a Type IV period, so this is a
+        // core whose own rate differs mid-stream. FFmpeg's muxer stops here. Its core as
+        // Type I would play at the wrong rate on the 192 kHz port, so the frame is dropped.
+        drop_dtshd_frame(kDropNoPeriod);
+        *cursor = end;
+        return true;
+    }
+
+    const std::size_t burst_bytes = (static_cast<std::size_t>(kDtshdShortestPeriod) << subtype) * kPortFrameBytes;
+    const std::size_t max_frame_bytes = burst_bytes - kBurstHeaderBytes - kDtshdFrameAt;
+    std::size_t frame_bytes = end - *cursor;
+    // A frame too big for the burst sends its core, and so do the frames after it for
+    // kDtshdFallbackSeconds: a decoder may drop a stream whose HD part keeps breaking off
+    // (FFmpeg's dtshd_fallback_time, default 60).
+    if (frame_bytes > max_frame_bytes)
+    {
+        if (dtshd_core_only_ == 0)
+            add_notice("DTS-HD frame too big for the Type IV burst, sending the DTS core only for " +
+                       std::to_string(kDtshdFallbackSeconds) + " s");
+        dtshd_core_only_ = static_cast<long>(core.sample_rate) * kDtshdFallbackSeconds / core.samples;
+    }
+    if (dtshd_core_only_ > 0)
+    {
+        frame_bytes = core.size;
+        --dtshd_core_only_;
+        if (frame_bytes > max_frame_bytes)
+        {
+            // FFmpeg's muxer fails this packet ("bitrate is too high").
+            drop_dtshd_frame(kDropCoreTooBig);
+            *cursor = end;
+            return true;
+        }
+    }
+    const std::size_t payload_bytes = kDtshdFrameAt + frame_bytes;
+
+    std::vector<std::uint8_t> payload(payload_bytes);
+    std::memcpy(payload.data(), kDtshdStartCode, sizeof(kDtshdStartCode));
+    payload[kDtshdSizeAt] = static_cast<std::uint8_t>(frame_bytes >> 8);
+    payload[kDtshdSizeAt + 1] = static_cast<std::uint8_t>(frame_bytes & 0xFF);
+    std::memcpy(payload.data() + kDtshdFrameAt, d.data() + *cursor, frame_bytes);
+    // Pd counts bytes.
+    const std::size_t aligned = (payload_bytes + kDtshdPdRemainder + kDtshdPdAlign - 1) / kDtshdPdAlign * kDtshdPdAlign;
+    const std::uint16_t pd = static_cast<std::uint16_t>(aligned - kDtshdPdRemainder);
+    write_burst(static_cast<std::uint16_t>(kTypeDtshd | (subtype << 8)), pd,
+                Span<std::uint8_t>(payload), burst_bytes, out);
+    *cursor = end;
+    return true;
 }
 
 } // namespace pt

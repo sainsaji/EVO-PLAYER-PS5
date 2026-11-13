@@ -13,6 +13,7 @@
 #include <cstring>
 #include <deque>
 #include <pthread.h>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -107,6 +108,38 @@ pt::Codec codec_from_av(int av_codec_id)
     }
 }
 
+// What the HDMI sink's EDID says about one CEA-861 coding type.
+struct SinkAnswer
+{
+    bool has_list = false; // a basic splitter or capture card lists no formats
+    bool lists_coding = false;
+};
+
+SinkAnswer ask_sink(int coding)
+{
+    const pt::Sink sink = pt::query_sink();
+    evo_boot_log("[PT] Query sink: ok=%d rc=0x%08x name='%s' formats=%zu",
+                 sink.ok, static_cast<unsigned>(sink.rc), sink.name.c_str(), sink.formats.size());
+    SinkAnswer answer;
+    answer.has_list = sink.ok && !sink.formats.empty();
+    answer.lists_coding = answer.has_list && sink.supports(coding);
+    return answer;
+}
+
+// pt::dts_route picks DTS-HD whole frames or the DTS core; this asks the sink for it.
+pt::Codec dts_codec_for(int profile, int sample_rate)
+{
+    const int coding = pt::coding_for(pt::Codec::dtshd);
+    // A sink with no list gets the core: every DTS decoder plays the core, while DTS-HD
+    // needs both the decoder and the 192 kHz HDMI link, which nothing says it has.
+    const bool sink_lists_dtshd = ask_sink(coding).lists_coding;
+    const pt::Codec codec = pt::dts_route(profile, sample_rate, sink_lists_dtshd);
+    evo_boot_log("[PT] DTS stream (profile %d, %d Hz); sink lists DTS-HD (coding %d): %s -> %s",
+                 profile, sample_rate, coding, sink_lists_dtshd ? "YES" : "NO",
+                 codec == pt::Codec::dtshd ? "whole frames" : "DTS core");
+    return codec;
+}
+
 void make_adts_header(uint8_t *header, int sample_rate, int channels, size_t aac_frame_len)
 {
     int srate_idx = 4; // default 44100
@@ -147,16 +180,12 @@ int evo_pt_probe_sink_support(int av_codec_id)
     if (coding == 0)
         return 0;
 
-    const pt::Sink sink = pt::query_sink();
-    evo_boot_log("[PT] Query sink: ok=%d rc=0x%08x name='%s' formats=%zu",
-                 sink.ok, static_cast<unsigned>(sink.rc), sink.name.c_str(), sink.formats.size());
-
-    if (sink.ok && !sink.formats.empty())
+    const SinkAnswer answer = ask_sink(coding);
+    if (answer.has_list)
     {
-        const bool sup = sink.supports(coding);
         evo_boot_log("[PT] Sink format support for %s (coding %d): %s",
-                     pt::codec_name(codec), coding, sup ? "YES" : "NO");
-        return sup ? 1 : 0;
+                     pt::codec_name(codec), coding, answer.lists_coding ? "YES" : "NO");
+        return answer.lists_coding ? 1 : 0;
     }
 
     // If HDMI monitor info returned no short audio descriptors (e.g. basic splitter or capture card),
@@ -165,9 +194,11 @@ int evo_pt_probe_sink_support(int av_codec_id)
     return 1;
 }
 
-int evo_pt_open(int av_codec_id)
+int evo_pt_open(int av_codec_id, int profile, int sample_rate)
 {
-    const pt::Codec codec = codec_from_av(av_codec_id);
+    pt::Codec codec = codec_from_av(av_codec_id);
+    if (codec == pt::Codec::dts)
+        codec = dts_codec_for(profile, sample_rate);
     if (codec == pt::Codec::unknown)
     {
         evo_boot_log("[PT] evo_pt_open: unknown/unsupported codec %d", av_codec_id);
@@ -303,7 +334,7 @@ int evo_pt_push_packet(const uint8_t *data, size_t size, int sample_rate, int ch
         size_t consumed = 0;
         burst.clear();
 
-        if (!g_pt_packer.next_burst(span, &consumed, &burst, &error, false))
+        if (!g_pt_packer.next_burst(span, &consumed, &burst, &error, pt::packet_ends_frame(g_pt_codec)))
         {
             break;
         }
@@ -330,6 +361,10 @@ int evo_pt_push_packet(const uint8_t *data, size_t size, int sample_rate, int ch
     {
         g_pt_stream_buf.erase(g_pt_stream_buf.begin(), g_pt_stream_buf.begin() + cursor);
     }
+
+    const std::string notice = g_pt_packer.take_notice();
+    if (!notice.empty())
+        evo_boot_log("[PT] %s", notice.c_str());
 
     pthread_mutex_unlock(&g_pt_mutex);
     return 1;

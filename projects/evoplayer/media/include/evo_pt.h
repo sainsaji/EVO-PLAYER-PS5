@@ -29,8 +29,12 @@ extern "C" {
 int evo_pt_probe_sink_support(int av_codec_id);
 
 /* Open the bitstream port for the given codec and switch HDMI audio mode.
+ * profile and sample_rate are the stream's codecpar values. A DTS-HD stream (HRA, MA,
+ * MA X) with a 48 kHz-family rate goes out whole when the sink lists DTS-HD; any
+ * other DTS stream, or a sink that lists no DTS-HD or no formats at all, sends the
+ * DTS core.
  * Returns port handle (>= 1) on success, or < 0 on failure. */
-int evo_pt_open(int av_codec_id);
+int evo_pt_open(int av_codec_id, int profile, int sample_rate);
 
 /* Close the bitstream port, drain hardware queue, and restore normal HDMI PCM mode. */
 void evo_pt_close(int handle);
