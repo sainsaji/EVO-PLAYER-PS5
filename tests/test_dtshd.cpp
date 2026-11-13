@@ -1,7 +1,8 @@
 /*
  * tests/test_dtshd.cpp - DTS-HD passthrough bursts are byte for byte what FFmpeg's spdif
  * muxer makes with -dtshd_rate 192000 (whole frames as IEC 61937-9 Type IV), and a
- * DTS-HD stream on the core path still gives FFmpeg's plain DTS core bursts.
+ * DTS-HD stream on the core path still gives FFmpeg's plain DTS core bursts. Also the core
+ * fallbacks and their log line, whole packets, and the choice of DTS-HD or the core.
  * The vectors in tests/data/dtshd/ come from make_vectors.py there.
  */
 
@@ -69,9 +70,9 @@ static Bytes read_reference(const std::string &name)
     return out;
 }
 
-// Feeds the stream `chunk` bytes at a time the way evo_pt_push_packet does: append to a
-// buffer, take bursts while next_burst succeeds, drop what it consumed. At the end it
-// flushes, so the last frame (held back until the next sync shows it is whole) goes out too.
+// Feeds the stream `chunk` bytes at a time with no packet boundaries: append to a buffer,
+// take bursts while next_burst succeeds, drop what it consumed. A frame then waits for the
+// next sync word; at the end it flushes, so the last frame goes out too.
 static Bytes pack(pt::Packer &packer, const Bytes &es, size_t chunk, const char **error)
 {
     Bytes buf, out;
@@ -164,6 +165,95 @@ static void test_core_fallback_ends_with_the_stream(void)
     TEST_PASS();
 }
 
+// Packs the whole stream burst by burst and counts the notices the packer gives for the log.
+static int count_notices(pt::Codec codec, const Bytes &es)
+{
+    pt::Packer packer(codec);
+    std::vector<std::uint8_t> out;
+    const char *error = nullptr;
+    int notices = 0;
+    size_t cursor = 0;
+    while (packer.next_burst(es, &cursor, &out, &error, true))
+        notices += packer.take_notice() != nullptr;
+    return notices;
+}
+
+static void test_core_fallback_logs_once(void)
+{
+    TEST_START("DTS-HD: a core fallback gives one log line");
+    const Bytes big = read_file(data_path("dtshd-big.es"));
+    const Bytes rate44k = read_file(data_path("dtshd-44k.es"));
+    const Bytes es = read_file(data_path("dtshd.es"));
+    TEST_ASSERT(!big.empty() && !rate44k.empty() && !es.empty(), "test vector missing");
+    // FFmpeg warns once for dtshd-big ("DTS-HD bitrate too high, temporarily sending core only").
+    TEST_ASSERT(count_notices(pt::Codec::dtshd, big) == 1, "frame too big: not one notice");
+    TEST_ASSERT(count_notices(pt::Codec::dtshd, rate44k) == 1, "no Type IV period: not one notice");
+    TEST_ASSERT(count_notices(pt::Codec::dtshd, es) == 0, "a notice without a fallback");
+    TEST_PASS();
+}
+
+// The stream as FFmpeg's demuxer hands it over: one packet per whole frame, the core plus
+// its extension substreams. A frame starts at each core sync word (the filler holds none).
+static std::vector<Bytes> packets_of(const Bytes &es)
+{
+    std::vector<size_t> starts;
+    for (size_t i = 0; i + 4 <= es.size(); ++i)
+        if (es[i] == 0x7F && es[i + 1] == 0xFE && es[i + 2] == 0x80 && es[i + 3] == 0x01)
+            starts.push_back(i);
+    starts.push_back(es.size());
+    std::vector<Bytes> packets;
+    for (size_t k = 0; k + 1 < starts.size(); ++k)
+        packets.emplace_back(es.begin() + starts[k], es.begin() + starts[k + 1]);
+    return packets;
+}
+
+static void test_packets_send_every_frame(void)
+{
+    TEST_START("DTS-HD: packets send every frame, the last too");
+    const Bytes es = read_file(data_path("dtshd.es"));
+    const Bytes ref = read_reference("dtshd-t4.ref");
+    TEST_ASSERT(!es.empty() && !ref.empty(), "test vector missing");
+    const std::vector<Bytes> packets = packets_of(es);
+    TEST_ASSERT(packets.size() == 6, "the stream did not split into its 6 frames");
+
+    pt::Packer packer(pt::Codec::dtshd);
+    Bytes got;
+    const char *error = nullptr;
+    for (const Bytes &packet : packets)
+        TEST_ASSERT(packer.push_packet(packet, &got, &error), error);
+    const std::string diff = compare(got, ref, 8192);
+    if (!diff.empty())
+    {
+        printf("\n       %s\n      ", diff.c_str());
+        TEST_FAIL("bursts differ from FFmpeg's");
+        return;
+    }
+    TEST_PASS();
+}
+
+// FFmpeg's profile numbers (libavcodec/defs.h AV_PROFILE_DTS_*).
+enum { kDts = 20, kDtsEs = 30, kDts9624 = 40, kHra = 50, kMa = 60, kMaX = 61, kMaXImax = 62, kExpress = 70 };
+
+static void test_dts_route(void)
+{
+    TEST_START("DTS route: whole frames only for HD at 48k family");
+    const pt::Codec hd = pt::Codec::dtshd, core = pt::Codec::dts;
+    TEST_ASSERT(pt::dts_route(kMa, 48000, true) == hd, "MA 48 kHz, sink lists DTS-HD");
+    TEST_ASSERT(pt::dts_route(kHra, 96000, true) == hd, "HRA 96 kHz");
+    TEST_ASSERT(pt::dts_route(kMaX, 48000, true) == hd, "MA X 48 kHz");
+    TEST_ASSERT(pt::dts_route(kMaXImax, 192000, true) == hd, "MA X IMAX 192 kHz");
+    TEST_ASSERT(pt::dts_route(kMa, 48000, false) == core, "sink without DTS-HD");
+    TEST_ASSERT(pt::dts_route(kMa, 44100, true) == core, "MA 44.1 kHz has no Type IV period");
+    TEST_ASSERT(pt::dts_route(kMa, 88200, true) == core, "MA 88.2 kHz has no Type IV period");
+    TEST_ASSERT(pt::dts_route(kMa, 0, true) == core, "unknown rate");
+    TEST_ASSERT(pt::dts_route(kDts, 48000, true) == core, "plain DTS");
+    TEST_ASSERT(pt::dts_route(kDtsEs, 48000, true) == core, "DTS-ES");
+    TEST_ASSERT(pt::dts_route(kDts9624, 96000, true) == core, "DTS 96/24");
+    TEST_ASSERT(pt::dts_route(kExpress, 48000, true) == core, "DTS Express has no core");
+    TEST_ASSERT(pt::dts_route(-99, 48000, true) == core, "unknown profile");
+    TEST_PASS();
+}
+
 extern "C" void run_dtshd_tests(void)
 {
     expect_ffmpeg_bursts("DTS-HD: whole frames as Type IV match FFmpeg", pt::Codec::dtshd,
@@ -175,6 +265,13 @@ extern "C" void run_dtshd_tests(void)
     // A sink without DTS-HD keeps today's path: the core of each frame, Type I.
     expect_ffmpeg_bursts("DTS-HD: on the DTS path only cores go out", pt::Codec::dts,
                          "dtshd", "dtshd-core", 2048);
+    // A 44.1 kHz core has no Type IV period at 192 kHz (FFmpeg stops there): the stream
+    // goes on as core bursts instead of stalling.
+    expect_ffmpeg_bursts("DTS-HD: a core with no Type IV period sends cores",
+                         pt::Codec::dtshd, "dtshd-44k", "dtshd-44k-core", 2048);
+    test_core_fallback_logs_once();
+    test_dts_route();
+    test_packets_send_every_frame();
 }
 
 __attribute__((constructor)) static void auto_run_dtshd_tests(void)

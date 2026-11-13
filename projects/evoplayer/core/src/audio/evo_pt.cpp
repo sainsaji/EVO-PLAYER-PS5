@@ -7,7 +7,6 @@
 #include "evo_boot_log.h"
 
 #include <libavcodec/codec_id.h>
-#include <libavcodec/defs.h>
 
 #include <algorithm>
 #include <chrono>
@@ -81,7 +80,6 @@ volatile int            g_pt_active = 0;
 pt::Codec               g_pt_codec = pt::Codec::unknown;
 pt::Carrier             g_pt_carrier{};
 pt::Packer              g_pt_packer(pt::Codec::unknown);
-std::vector<uint8_t>    g_pt_stream_buf;
 std::vector<uint8_t>    g_pt_pending;   // burst bytes not yet a whole port grain
 std::deque<std::vector<uint8_t>> g_pt_grain_queue;
 pthread_mutex_t         g_pt_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -108,25 +106,36 @@ pt::Codec codec_from_av(int av_codec_id)
     }
 }
 
-// A DTS stream goes out whole as DTS-HD when it has extension substreams (FFmpeg's
-// HRA/MA/MA X profiles; DTS Express has no core to fall back to), it runs at 48 kHz or
-// a multiple (a 44.1 kHz-family core gives no Type IV period on the 192 kHz port, and
-// the packer would stop), and the sink lists DTS-HD. Otherwise its core goes out, as
-// before.
+// What the HDMI sink's EDID says about one CEA-861 coding type.
+struct SinkAnswer
+{
+    bool has_list = false; // a basic splitter or capture card lists no formats
+    bool lists = false;
+};
+
+SinkAnswer ask_sink(int coding)
+{
+    const pt::Sink sink = pt::query_sink();
+    evo_boot_log("[PT] Query sink: ok=%d rc=0x%08x name='%s' formats=%zu",
+                 sink.ok, static_cast<unsigned>(sink.rc), sink.name.c_str(), sink.formats.size());
+    SinkAnswer answer;
+    answer.has_list = sink.ok && !sink.formats.empty();
+    answer.lists = answer.has_list && sink.supports(coding);
+    return answer;
+}
+
+// pt::dts_route picks DTS-HD whole frames or the DTS core; this asks the sink for it.
 pt::Codec dts_codec_for(int profile, int sample_rate)
 {
-    const bool hd = profile >= AV_PROFILE_DTS_HD_HRA && profile <= AV_PROFILE_DTS_HD_MA_X_IMAX;
-    if (!hd || sample_rate <= 0 || sample_rate % 48000 != 0)
-    {
-        evo_boot_log("[PT] DTS profile %d, %d Hz: DTS core", profile, sample_rate);
-        return pt::Codec::dts;
-    }
-    const pt::Sink sink = pt::query_sink();
     const int coding = pt::coding_for(pt::Codec::dtshd);
-    const bool sup = sink.ok && sink.supports(coding);
-    evo_boot_log("[PT] DTS-HD stream (profile %d, %d Hz); sink lists DTS-HD (coding %d): %s -> %s",
-                 profile, sample_rate, coding, sup ? "YES" : "NO", sup ? "whole frames" : "DTS core");
-    return sup ? pt::Codec::dtshd : pt::Codec::dts;
+    // A sink with no list gets the core: every DTS decoder plays the core, while DTS-HD
+    // needs both the decoder and the 192 kHz HDMI link, which nothing says it has.
+    const bool lists = ask_sink(coding).lists;
+    const pt::Codec codec = pt::dts_route(profile, sample_rate, lists);
+    evo_boot_log("[PT] DTS stream (profile %d, %d Hz); sink lists DTS-HD (coding %d): %s -> %s",
+                 profile, sample_rate, coding, lists ? "YES" : "NO",
+                 codec == pt::Codec::dtshd ? "whole frames" : "DTS core");
+    return codec;
 }
 
 void make_adts_header(uint8_t *header, int sample_rate, int channels, size_t aac_frame_len)
@@ -169,16 +178,12 @@ int evo_pt_probe_sink_support(int av_codec_id)
     if (coding == 0)
         return 0;
 
-    const pt::Sink sink = pt::query_sink();
-    evo_boot_log("[PT] Query sink: ok=%d rc=0x%08x name='%s' formats=%zu",
-                 sink.ok, static_cast<unsigned>(sink.rc), sink.name.c_str(), sink.formats.size());
-
-    if (sink.ok && !sink.formats.empty())
+    const SinkAnswer answer = ask_sink(coding);
+    if (answer.has_list)
     {
-        const bool sup = sink.supports(coding);
         evo_boot_log("[PT] Sink format support for %s (coding %d): %s",
-                     pt::codec_name(codec), coding, sup ? "YES" : "NO");
-        return sup ? 1 : 0;
+                     pt::codec_name(codec), coding, answer.lists ? "YES" : "NO");
+        return answer.lists ? 1 : 0;
     }
 
     // If HDMI monitor info returned no short audio descriptors (e.g. basic splitter or capture card),
@@ -243,7 +248,6 @@ int evo_pt_open(int av_codec_id, int profile, int sample_rate)
     g_pt_codec = codec;
     g_pt_carrier = carrier;
     g_pt_packer.set_codec(codec);
-    g_pt_stream_buf.clear();
     g_pt_grain_queue.clear();
     g_pt_pending.clear();
     g_pt_active = 1;
@@ -279,7 +283,7 @@ void evo_pt_close(int handle)
     g_pt_active = 0;
     g_pt_codec = pt::Codec::unknown;
     g_pt_carrier = pt::Carrier{};
-    g_pt_stream_buf.clear();
+    g_pt_packer.clear_stream();
     g_pt_grain_queue.clear();
     g_pt_pending.clear();
     pthread_mutex_unlock(&g_pt_mutex);
@@ -288,7 +292,7 @@ void evo_pt_close(int handle)
 void evo_pt_reset(void)
 {
     pthread_mutex_lock(&g_pt_mutex);
-    g_pt_stream_buf.clear();
+    g_pt_packer.clear_stream();
     g_pt_grain_queue.clear();
     g_pt_pending.clear();
     pthread_mutex_unlock(&g_pt_mutex);
@@ -303,57 +307,41 @@ int evo_pt_push_packet(const uint8_t *data, size_t size, int sample_rate, int ch
     pthread_mutex_lock(&g_pt_mutex);
 
     // If AAC, check if frame has ADTS header; if not, wrap it
+    std::vector<uint8_t> wrapped;
+    pt::Span<uint8_t> packet(data, size);
     if (g_pt_codec == pt::Codec::aac)
     {
         const bool has_adts = (size >= 7 && data[0] == 0xFF && (data[1] & 0xF6) == 0xF0);
         if (!has_adts)
         {
-            uint8_t adts[7];
-            make_adts_header(adts, sample_rate, channels, size);
-            g_pt_stream_buf.insert(g_pt_stream_buf.end(), adts, adts + 7);
+            wrapped.resize(7);
+            make_adts_header(wrapped.data(), sample_rate, channels, size);
+            wrapped.insert(wrapped.end(), data, data + size);
+            packet = pt::Span<uint8_t>(wrapped);
         }
     }
-
-    g_pt_stream_buf.insert(g_pt_stream_buf.end(), data, data + size);
 
     const size_t grain_bytes = static_cast<size_t>(g_pt_carrier.grain_frames) * static_cast<size_t>(g_pt_carrier.frame_bytes);
-    size_t cursor = 0;
     const char *error = nullptr;
-    std::vector<uint8_t> burst;
+    std::vector<uint8_t> bursts;
+    g_pt_packer.push_packet(packet, &bursts, &error);
+    if (const char *notice = g_pt_packer.take_notice())
+        evo_boot_log("[PT] %s", notice);
 
-    while (g_pt_stream_buf.size() - cursor >= 8)
+    // Split the generated IEC 61937 bursts into port grains. A burst that
+    // is not a whole number of grains (a 61440-byte MAT burst is 3.75
+    // grains of the 768 kHz port) carries its tail into the next one:
+    // padding it would stretch every burst and break the stream.
+    g_pt_pending.insert(g_pt_pending.end(), bursts.begin(), bursts.end());
+    size_t used = 0;
+    while (g_pt_pending.size() - used >= grain_bytes)
     {
-        pt::Span<uint8_t> span(g_pt_stream_buf.data() + cursor, g_pt_stream_buf.size() - cursor);
-        size_t consumed = 0;
-        burst.clear();
-
-        if (!g_pt_packer.next_burst(span, &consumed, &burst, &error, false))
-        {
-            break;
-        }
-
-        cursor += consumed;
-
-        // Split the generated IEC 61937 burst into port grains. A burst that
-        // is not a whole number of grains (a 61440-byte MAT burst is 3.75
-        // grains of the 768 kHz port) carries its tail into the next one:
-        // padding it would stretch every burst and break the stream.
-        g_pt_pending.insert(g_pt_pending.end(), burst.begin(), burst.end());
-        size_t used = 0;
-        while (g_pt_pending.size() - used >= grain_bytes)
-        {
-            g_pt_grain_queue.emplace_back(g_pt_pending.begin() + used,
-                                          g_pt_pending.begin() + used + grain_bytes);
-            used += grain_bytes;
-        }
-        if (used > 0)
-            g_pt_pending.erase(g_pt_pending.begin(), g_pt_pending.begin() + used);
+        g_pt_grain_queue.emplace_back(g_pt_pending.begin() + used,
+                                      g_pt_pending.begin() + used + grain_bytes);
+        used += grain_bytes;
     }
-
-    if (cursor > 0)
-    {
-        g_pt_stream_buf.erase(g_pt_stream_buf.begin(), g_pt_stream_buf.begin() + cursor);
-    }
+    if (used > 0)
+        g_pt_pending.erase(g_pt_pending.begin(), g_pt_pending.begin() + used);
 
     pthread_mutex_unlock(&g_pt_mutex);
     return 1;

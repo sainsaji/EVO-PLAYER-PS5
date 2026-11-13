@@ -72,10 +72,21 @@ struct Frame
     int blocks = 0;         // E-AC-3: audio blocks (6 make one burst)
     bool dependent = false; // E-AC-3 dependent substream (7.1 extension)
     int bsmod = 0;          // AC-3 bitstream mode, goes into the burst header
+    int sample_rate = 0;    // DTS: the core's rate from its header, 0 for a reserved code
 };
 
 // Size and kind of the frame at `at`, or size 0 if there is no valid frame.
 Frame parse_frame(Codec codec, Span<std::uint8_t> data, std::size_t at);
+
+// The IEC 61937-9 Type IV subtype of a DTS frame of `samples` at `sample_rate` on the
+// 192 kHz port (its burst lasts 512 << subtype port frames), or -1 if none fits. Only a
+// 48 kHz-family rate has one: 44.1 kHz and its multiples never do.
+int dtshd_subtype(int sample_rate, int samples);
+
+// How a DTS stream goes out, from its FFmpeg profile and rate and whether the sink lists
+// DTS-HD (CEA-861 coding 11): whole frames as DTS-HD for an HRA, MA or MA X stream at a
+// 48 kHz-family rate on such a sink, else the DTS core.
+Codec dts_route(int profile, int sample_rate, bool sink_lists_dtshd);
 
 // Splits an elementary stream into bursts, each exactly as long as the
 // audio it holds, as little-endian S16 stereo samples ready for the port.
@@ -90,9 +101,26 @@ class Packer
     void set_codec(Codec codec)
     {
         codec_ = codec;
+        stream_.clear();
         dtshd_core_only_ = 0;
+        notice_ = nullptr;
     }
     Codec codec() const { return codec_; }
+
+    // A change worth one log line (DTS-HD falling back to its core), once, or nullptr.
+    const char *take_notice()
+    {
+        const char *notice = notice_;
+        notice_ = nullptr;
+        return notice;
+    }
+
+    // Takes one demuxed packet: adds it to the stream and appends every burst it completes
+    // to `out`. Returns false with *error set when a frame cannot be carried; the stream
+    // then waits there.
+    bool push_packet(Span<std::uint8_t> packet, std::vector<std::uint8_t> *out, const char **error);
+    // Drops the stream data not packed yet (a seek).
+    void clear_stream() { stream_.clear(); }
 
     // Appends the next burst built from `data` starting at *cursor to `out`
     // and advances *cursor. Returns false at the end of data or on an incomplete/
@@ -106,7 +134,9 @@ class Packer
                           std::vector<std::uint8_t> *out, const char **error, bool flush);
 
     Codec codec_;
+    std::vector<std::uint8_t> stream_; // packet data not packed yet
     long dtshd_core_only_ = 0; // DTS-HD frames left to send as core only, after one too big
+    const char *notice_ = nullptr;
 };
 
 // Writes one burst: header words Pa Pb Pc Pd, the payload as big-endian
