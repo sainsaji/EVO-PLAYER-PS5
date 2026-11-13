@@ -33,6 +33,9 @@ struct Span
     }
 };
 
+// One TrueHD MAT frame goes out in a burst this long on the 768 kHz port.
+inline constexpr std::size_t kMatBurstBytes = 61440;
+
 enum class Codec : std::uint8_t
 {
     ac3,
@@ -67,10 +70,14 @@ struct Frame
 {
     std::size_t offset = 0;
     std::size_t size = 0;
-    int samples = 0;        // PCM samples per channel it decodes to (DTS, AC-3)
+    int samples = 0;        // PCM samples per channel it decodes to (DTS, AC-3);
+                            // TrueHD: per access unit, read from a major sync, 0 on other units
     int blocks = 0;         // E-AC-3: audio blocks (6 make one burst)
     bool dependent = false; // E-AC-3 dependent substream (7.1 extension)
     int bsmod = 0;          // AC-3 bitstream mode, goes into the burst header
+    bool major_sync = false; // TrueHD: the access unit starts with a major sync
+    bool invalid = false;   // TrueHD: FFmpeg's spdif muxer rejects the unit (too short
+                            // for a major sync header, or a major sync of unknown format)
 };
 
 // Size and kind of the frame at `at`, or size 0 if there is no valid frame.
@@ -85,18 +92,59 @@ class Packer
     {
     }
 
-    void set_codec(Codec codec) { codec_ = codec; }
+    void set_codec(Codec codec)
+    {
+        codec_ = codec;
+        truehd_.new_stream();
+    }
     Codec codec() const { return codec_; }
+
+    // Drops a half-built TrueHD MAT frame (after a seek): the next access unit
+    // starts a new frame.
+    void reset() { truehd_.drop_frame(); }
 
     // Appends the next burst built from `data` starting at *cursor to `out`
     // and advances *cursor. Returns false at the end of data or on an incomplete/
     // uncarriable frame (then *error says why if fatal).
+    // `flush` sends a short E-AC-3 burst from the frames left at the end of
+    // `data` instead of waiting for more; the other codecs ignore it.
+    // TrueHD: takes access units until one completes a MAT frame; units left
+    // over at the end of `data` are kept for the next frame, so it can return
+    // true with nothing appended. A MAT frame still half built when the stream
+    // ends is never sent, as with FFmpeg's spdif muxer.
     bool next_burst(Span<std::uint8_t> data, std::size_t *cursor,
                     std::vector<std::uint8_t> *out, const char **error,
                     bool flush = false);
 
   private:
+    // The MAT frame being filled, and FFmpeg's state for placing the next access unit.
+    struct Truehd
+    {
+        std::vector<std::uint8_t> mat;
+        std::size_t mat_filled = 0;
+        std::size_t prev_size = 0; // bytes the last unit took on the port, 0 = no last unit
+        std::uint16_t prev_time = 0;
+        int samples_per_unit = 0; // from the last major sync, 0 = none seen yet
+
+        // A seek: the next unit starts a new frame and is not timed against the last one.
+        void drop_frame()
+        {
+            mat_filled = 0;
+            prev_size = 0;
+            prev_time = 0;
+        }
+        // A new stream: also forget its sample rate.
+        void new_stream()
+        {
+            drop_frame();
+            samples_per_unit = 0;
+        }
+    };
+
+    bool add_truehd_unit(const std::uint8_t *unit, std::size_t size, std::vector<std::uint8_t> *out);
+
     Codec codec_;
+    Truehd truehd_;
 };
 
 // Writes one burst: header words Pa Pb Pc Pd, the payload as big-endian
