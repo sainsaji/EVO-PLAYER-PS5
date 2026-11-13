@@ -1473,7 +1473,8 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                     evo_av_set_audio_delay_ms(audioDelayMs);
 
                     if (passthroughEnabled && !forceStereo && evo_pt_probe_sink_support(aStream->codecpar->codec_id)) {
-                        handle = evo_pt_open(aStream->codecpar->codec_id);
+                        handle = evo_pt_open(aStream->codecpar->codec_id, aStream->codecpar->profile,
+                                             aStream->codecpar->sample_rate);
                         if (handle >= 1) {
                             evo_audio_channels = chCount;
                             prospero_audio_resampler_set_upmix(0);

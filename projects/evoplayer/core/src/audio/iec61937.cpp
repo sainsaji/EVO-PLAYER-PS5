@@ -21,6 +21,17 @@ constexpr std::uint16_t kTypeDts3 = 0x0D; // 2048
 constexpr std::uint16_t kTypeEac3 = 0x15;
 constexpr std::uint16_t kTypeAac  = 0x07; // MPEG-2/4 AAC, 1024 samples per frame
 constexpr std::uint16_t kTypeTruehd = 0x16; // Dolby TrueHD, as MAT
+constexpr std::uint16_t kTypeDtshd = 0x11;  // DTS-HD, IEC 61937-9 Type IV
+
+// DTS-HD goes out the way FFmpeg's spdif muxer sends it with -dtshd_rate 192000: each
+// whole frame after this start code and a 16-bit size, on the 192 kHz port.
+constexpr int kDtshdRate = 192000;
+constexpr int kDtshdFallbackSeconds = 60;
+constexpr std::uint8_t kDtshdStartCode[10] = {0x01, 0x00, 0x00, 0x00, 0x00,
+                                              0x00, 0x00, 0x00, 0xFE, 0xFE};
+// DTS core sample rates by the frame header's SFREQ field (ETSI TS 102 114 table 5-5).
+constexpr int kDtsSampleRates[16] = {0,     8000,  16000, 32000, 0,     0,     11025, 22050,
+                                     44100, 0,     0,     12000, 24000, 48000, 96000, 192000};
 
 // One MAT frame holds up to 24 TrueHD access units (40 samples each, so 20 ms)
 // and goes out in a 61440-byte burst on the 768 kHz port.
@@ -66,6 +77,25 @@ bool is_dts_sync(Span<std::uint8_t> d, std::size_t at)
            d[at + 3] == 0x01;
 }
 
+bool is_dts_exss_sync(Span<std::uint8_t> d, std::size_t at)
+{
+    return at + 4 <= d.size() && d[at] == 0x64 && d[at + 1] == 0x58 && d[at + 2] == 0x20 &&
+           d[at + 3] == 0x25;
+}
+
+// Bytes in the DTS-HD extension substream at `at`, or 0 if its header is not all in `d`
+// yet. ETSI TS 102 114 7.5.1: 8 user bits, a 2-bit index, the header size type, then the
+// header size and FSIZE in 8/16 or 12/20 bits, each stored minus one.
+std::size_t dts_exss_size(Span<std::uint8_t> d, std::size_t at)
+{
+    if (at + 10 > d.size())
+        return 0;
+    const std::uint32_t b5 = d[at + 5], b6 = d[at + 6], b7 = d[at + 7], b8 = d[at + 8], b9 = d[at + 9];
+    if ((b5 & 0x20) == 0)
+        return static_cast<std::size_t>((((b6 & 0x1F) << 11) | (b7 << 3) | (b8 >> 5)) + 1);
+    return static_cast<std::size_t>((((b6 & 0x01) << 19) | (b7 << 11) | (b8 << 3) | (b9 >> 5)) + 1);
+}
+
 bool is_adts_sync(Span<std::uint8_t> d, std::size_t at)
 {
     return at + 7 <= d.size() && d[at] == 0xFF && (d[at + 1] & 0xF6) == 0xF0;
@@ -79,6 +109,7 @@ bool is_sync_any(Codec codec, Span<std::uint8_t> d, std::size_t at)
     case Codec::eac3:
         return is_ac3_sync(d, at);
     case Codec::dts:
+    case Codec::dtshd:
         return is_dts_sync(d, at);
     case Codec::aac:
         return is_adts_sync(d, at);
@@ -105,6 +136,8 @@ const char *codec_name(Codec codec)
         return "AAC (ADTS)";
     case Codec::truehd:
         return "Dolby TrueHD";
+    case Codec::dtshd:
+        return "DTS-HD";
     case Codec::unknown:
         break;
     }
@@ -139,6 +172,10 @@ Carrier carrier_for(Codec codec)
         // sceAudioOutSysOpen mode 5: a 768 kHz port of 1024 S16 8-channel
         // frames; SysConfigureOutput mode 5 is MAT (the Blu-ray player's route).
         return {5, 1024, 768000, true, 16};
+    case Codec::dtshd:
+        // Ex mode 4 (the console logs it as BITSTREAM DTS_HD_HR): a 192 kHz S16 stereo
+        // port of 1024-frame grains, like E-AC-3's mode 3.
+        return {4, 1024, 192000};
     case Codec::unknown:
         break;
     }
@@ -177,7 +214,7 @@ Frame parse_frame(Codec codec, Span<std::uint8_t> d, std::size_t at)
             f.dependent = strmtyp == 1;
         }
     }
-    else if (codec == Codec::dts)
+    else if (codec == Codec::dts || codec == Codec::dtshd)
     {
         if (!is_dts_sync(d, at))
             return f;
@@ -396,6 +433,9 @@ bool Packer::next_burst(Span<std::uint8_t> d, std::size_t *cursor,
         return true;
     }
 
+    if (codec_ == Codec::dtshd)
+        return next_dtshd_burst(d, first, cursor, out, error, flush);
+
     if (codec_ == Codec::dts)
     {
         std::uint16_t type = 0;
@@ -428,6 +468,74 @@ bool Packer::next_burst(Span<std::uint8_t> d, std::size_t *cursor,
 
     *error = "unsupported codec";
     return false;
+}
+
+// One whole DTS frame (the core plus the extension substreams after it) as a Type IV
+// burst, as FFmpeg's spdif_header_dts4 builds it.
+bool Packer::next_dtshd_burst(Span<std::uint8_t> d, const Frame &core, std::size_t *cursor,
+                              std::vector<std::uint8_t> *out, const char **error, bool flush)
+{
+    std::size_t end = *cursor + core.size;
+    while (is_dts_exss_sync(d, end))
+    {
+        const std::size_t ext = dts_exss_size(d, end);
+        if (ext == 0 || end + ext > d.size())
+            return false; // the extension is not all here yet
+        end += ext;
+    }
+    // Another extension substream may come with the next packet: the frame is whole
+    // once the next sync word shows, or when the stream ends.
+    if (end + 4 > d.size() && !flush)
+        return false;
+
+    const int sample_rate = kDtsSampleRates[(d[*cursor + 8] >> 2) & 0x0F];
+    if (sample_rate == 0)
+    {
+        *error = "DTS-HD: unknown core sample rate";
+        return false;
+    }
+    // Port frames per DTS frame must be 512 << subtype (IEC 61937-9 Type IV).
+    const long period = static_cast<long>(kDtshdRate) * core.samples / sample_rate;
+    int subtype = -1;
+    for (int k = 0; k <= 5; ++k)
+        if (period == (512L << k))
+            subtype = k;
+    if (subtype < 0)
+    {
+        *error = "DTS-HD: the core's frame length and sample rate give no Type IV period";
+        return false;
+    }
+    const std::size_t burst = static_cast<std::size_t>(period) * 4;
+    const std::size_t room = burst - 8 - sizeof(kDtshdStartCode) - 2;
+    std::size_t pkt_size = end - *cursor;
+    // A frame too big for the burst sends its core, and so do the frames after it for
+    // 60 s: a decoder may drop a stream whose HD part keeps breaking off (FFmpeg's
+    // dtshd_fallback_time, default 60).
+    if (pkt_size > room)
+        dtshd_core_only_ = static_cast<long>(sample_rate) * kDtshdFallbackSeconds / core.samples;
+    if (dtshd_core_only_ > 0)
+    {
+        pkt_size = core.size;
+        --dtshd_core_only_;
+        if (pkt_size > room)
+        {
+            *error = "DTS-HD: even the core does not fit the Type IV burst";
+            return false;
+        }
+    }
+    const std::size_t out_bytes = sizeof(kDtshdStartCode) + 2 + pkt_size;
+
+    std::vector<std::uint8_t> payload(out_bytes);
+    std::memcpy(payload.data(), kDtshdStartCode, sizeof(kDtshdStartCode));
+    payload[sizeof(kDtshdStartCode)] = static_cast<std::uint8_t>(pkt_size >> 8);
+    payload[sizeof(kDtshdStartCode) + 1] = static_cast<std::uint8_t>(pkt_size & 0xFF);
+    std::memcpy(payload.data() + sizeof(kDtshdStartCode) + 2, d.data() + *cursor, pkt_size);
+    // Pd counts bytes, rounded up so that Pd & 0xF == 8, as FFmpeg does.
+    const std::uint16_t pd = static_cast<std::uint16_t>(((out_bytes + 8 + 15) & ~std::size_t{15}) - 8);
+    write_burst(static_cast<std::uint16_t>(kTypeDtshd | (subtype << 8)), pd,
+                Span<std::uint8_t>(payload), burst, out);
+    *cursor = end;
+    return true;
 }
 
 } // namespace pt

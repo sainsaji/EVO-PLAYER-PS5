@@ -7,6 +7,7 @@
 #include "evo_boot_log.h"
 
 #include <libavcodec/codec_id.h>
+#include <libavcodec/defs.h>
 
 #include <algorithm>
 #include <chrono>
@@ -107,6 +108,27 @@ pt::Codec codec_from_av(int av_codec_id)
     }
 }
 
+// A DTS stream goes out whole as DTS-HD when it has extension substreams (FFmpeg's
+// HRA/MA/MA X profiles; DTS Express has no core to fall back to), it runs at 48 kHz or
+// a multiple (a 44.1 kHz-family core gives no Type IV period on the 192 kHz port, and
+// the packer would stop), and the sink lists DTS-HD. Otherwise its core goes out, as
+// before.
+pt::Codec dts_codec_for(int profile, int sample_rate)
+{
+    const bool hd = profile >= AV_PROFILE_DTS_HD_HRA && profile <= AV_PROFILE_DTS_HD_MA_X_IMAX;
+    if (!hd || sample_rate <= 0 || sample_rate % 48000 != 0)
+    {
+        evo_boot_log("[PT] DTS profile %d, %d Hz: DTS core", profile, sample_rate);
+        return pt::Codec::dts;
+    }
+    const pt::Sink sink = pt::query_sink();
+    const int coding = pt::coding_for(pt::Codec::dtshd);
+    const bool sup = sink.ok && sink.supports(coding);
+    evo_boot_log("[PT] DTS-HD stream (profile %d, %d Hz); sink lists DTS-HD (coding %d): %s -> %s",
+                 profile, sample_rate, coding, sup ? "YES" : "NO", sup ? "whole frames" : "DTS core");
+    return sup ? pt::Codec::dtshd : pt::Codec::dts;
+}
+
 void make_adts_header(uint8_t *header, int sample_rate, int channels, size_t aac_frame_len)
 {
     int srate_idx = 4; // default 44100
@@ -165,9 +187,11 @@ int evo_pt_probe_sink_support(int av_codec_id)
     return 1;
 }
 
-int evo_pt_open(int av_codec_id)
+int evo_pt_open(int av_codec_id, int profile, int sample_rate)
 {
-    const pt::Codec codec = codec_from_av(av_codec_id);
+    pt::Codec codec = codec_from_av(av_codec_id);
+    if (codec == pt::Codec::dts)
+        codec = dts_codec_for(profile, sample_rate);
     if (codec == pt::Codec::unknown)
     {
         evo_boot_log("[PT] evo_pt_open: unknown/unsupported codec %d", av_codec_id);

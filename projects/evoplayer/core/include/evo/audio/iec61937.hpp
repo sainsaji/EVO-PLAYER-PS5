@@ -40,6 +40,7 @@ enum class Codec : std::uint8_t
     dts,
     aac, // ADTS (MPEG-2/4 AAC with a header on every frame)
     truehd, // Dolby TrueHD access units, carried as MAT
+    dtshd,  // DTS with extension substreams (HRA, MA), whole frames as Type IV
     unknown,
 };
 
@@ -85,7 +86,12 @@ class Packer
     {
     }
 
-    void set_codec(Codec codec) { codec_ = codec; }
+    // A new stream: also ends a DTS-HD core-only fallback.
+    void set_codec(Codec codec)
+    {
+        codec_ = codec;
+        dtshd_core_only_ = 0;
+    }
     Codec codec() const { return codec_; }
 
     // Appends the next burst built from `data` starting at *cursor to `out`
@@ -96,7 +102,11 @@ class Packer
                     bool flush = false);
 
   private:
+    bool next_dtshd_burst(Span<std::uint8_t> data, const Frame &core, std::size_t *cursor,
+                          std::vector<std::uint8_t> *out, const char **error, bool flush);
+
     Codec codec_;
+    long dtshd_core_only_ = 0; // DTS-HD frames left to send as core only, after one too big
 };
 
 // Writes one burst: header words Pa Pb Pc Pd, the payload as big-endian
