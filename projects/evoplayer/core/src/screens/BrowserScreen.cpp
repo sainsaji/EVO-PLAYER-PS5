@@ -278,6 +278,32 @@ void BrowserScreen::handleAddFtpHost(const std::string& hostStr) {
     toast("FTP ADDED", share.name.c_str());
 }
 
+/* The name a server gets when nobody named it. A name that differs was typed
+ * with Rename and survives an address edit. */
+static std::string autoShareName(const NetworkShare& s) {
+    if (s.protocol == NetworkProtocol::SMB) return s.host + (s.startPath != "/" ? s.startPath : "");
+    return s.host + (s.port != 21 ? (":" + std::to_string(s.port)) : "");
+}
+
+static void OnRenameShareSubmitted(const char* text, void* userdata) {
+    auto* self = static_cast<BrowserScreen*>(userdata);
+    if (!self || !text) return;
+    self->handleRenameShare(text);
+}
+
+void BrowserScreen::handleRenameShare(const std::string& nameStr) {
+    const auto* orig = NetworkStorageService::getInstance().getShare(m_editingShareId);
+    if (!orig) return;
+    const size_t start = nameStr.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) return;   // empty: keep the old name
+    NetworkShare share = *orig;
+    share.name = nameStr.substr(start, nameStr.find_last_not_of(" \t\r\n") - start + 1);
+    NetworkStorageService::getInstance().addShare(share);
+    resetSelection();
+    toast("RENAMED", share.name.c_str());
+    evo_feedback(EVO_FB_CONFIRM);
+}
+
 static void OnEditSmbSubmitted(const char* text, void* userdata) {
     auto* self = static_cast<BrowserScreen*>(userdata);
     if (!self || !text) return;
@@ -312,6 +338,7 @@ void BrowserScreen::handleEditSmbHost(const std::string& hostStr) {
         return;
     }
     share.id = orig->id;
+    if (orig->name != autoShareName(*orig)) share.name = orig->name;
     // The edit text hides the password: same user with none typed keeps the saved one.
     if (share.password.empty() && share.user == orig->user && share.domain == orig->domain)
         share.password = orig->password;
@@ -376,7 +403,8 @@ void BrowserScreen::handleEditFtpHost(const std::string& hostStr) {
     if (host.empty()) return;
 
     NetworkShare share = *orig;
-    share.name = host + (port != 21 ? (":" + std::to_string(port)) : "");
+    if (orig->name == autoShareName(*orig))
+        share.name = host + (port != 21 ? (":" + std::to_string(port)) : "");
     share.protocol = NetworkProtocol::FTP;
     share.host = host;
     share.port = port;
@@ -446,7 +474,15 @@ void BrowserScreen::performServerAction(int actionIndex) {
             openEditShareKeyboard(m_serverMenuShareId);
             break;
         }
-        case 2: { // Cover Art on/off: flips in place, the menu stays open
+        case 2: { // Rename
+            const auto* cur = NetworkStorageService::getInstance().getShare(m_serverMenuShareId);
+            if (!cur) break;
+            m_editingShareId = m_serverMenuShareId;
+            evo_feedback(EVO_FB_OPEN);
+            evo_keyboard_open_phone("Server name", cur->name.c_str(), 64, OnRenameShareSubmitted, this);
+            break;
+        }
+        case 3: { // Cover Art on/off: flips in place, the menu stays open
             const auto* cur = NetworkStorageService::getInstance().getShare(m_serverMenuShareId);
             if (cur) {
                 NetworkShare share = *cur;
@@ -458,7 +494,7 @@ void BrowserScreen::performServerAction(int actionIndex) {
             evo_feedback(EVO_FB_CONFIRM);
             break;
         }
-        case 3: { // Remove Server
+        case 4: { // Remove Server
             m_removeShareConfirmOpen = true;
             m_removeShareConfirmButton = 0; // Default to Cancel
             m_removeShareId = m_serverMenuShareId;
@@ -466,7 +502,7 @@ void BrowserScreen::performServerAction(int actionIndex) {
             evo_feedback(EVO_FB_CONFIRM);
             break;
         }
-        case 4: // Close
+        case 5: // Close
         default:
             evo_feedback(EVO_FB_CANCEL);
             break;
@@ -1893,12 +1929,12 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
     if (m_serverMenuOpen) {
         if (pressed & PadButtons::Up) {
             if (m_serverMenuFocused > 0) m_serverMenuFocused--;
-            else m_serverMenuFocused = 4;
+            else m_serverMenuFocused = 5;
             evo_feedback(EVO_FB_MOVE);
             return true;
         }
         if (pressed & PadButtons::Down) {
-            if (m_serverMenuFocused < 4) m_serverMenuFocused++;
+            if (m_serverMenuFocused < 5) m_serverMenuFocused++;
             else m_serverMenuFocused = 0;
             evo_feedback(EVO_FB_MOVE);
             return true;
@@ -2894,7 +2930,7 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         const bool isSmb = (share && share->protocol == NetworkProtocol::SMB);
         params.action_target_sub = isSmb ? "Windows Share (SMB)" : "FTP Server";
         params.action_menu_eyebrow = isSmb ? "OPTIONS  •  SMB SHARE" : "OPTIONS  •  FTP SERVER";
-        params.action_menu_count = 5;
+        params.action_menu_count = 6;
 
         params.action_menu_items[0].label = "Open";
         params.action_menu_items[0].desc = isSmb ? "Browse this Windows share" : "Browse this FTP server";
@@ -2906,22 +2942,27 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         params.action_menu_items[1].icon_path = "../icons/icon_keyboard.png";
         params.action_menu_items[1].danger = 0;
 
-        params.action_menu_items[2].label = "Cover Art";
-        params.action_menu_items[2].desc = (share && !share->art) ? "Off: plain icons, nothing downloaded"
-                                                                 : "Posters from poster.jpg and similar files";
-        params.action_menu_items[2].icon_path = "../icons/icon_palette.png";
+        params.action_menu_items[2].label = "Rename";
+        params.action_menu_items[2].desc = "The name shown on this server's card";
+        params.action_menu_items[2].icon_path = "../icons/icon_type.png";
         params.action_menu_items[2].danger = 0;
-        params.action_menu_items[2].toggle = (share && !share->art) ? 1 : 2;
 
-        params.action_menu_items[3].label = "Remove Server";
-        params.action_menu_items[3].desc = "Forget this server on this console";
-        params.action_menu_items[3].icon_path = "../icons/icon_trash.png";
-        params.action_menu_items[3].danger = 1;
+        params.action_menu_items[3].label = "Cover Art";
+        params.action_menu_items[3].desc = (share && !share->art) ? "Off: plain icons, nothing downloaded"
+                                                                 : "Posters from poster.jpg and similar files";
+        params.action_menu_items[3].icon_path = "../icons/icon_palette.png";
+        params.action_menu_items[3].danger = 0;
+        params.action_menu_items[3].toggle = (share && !share->art) ? 1 : 2;
 
-        params.action_menu_items[4].label = "Close";
-        params.action_menu_items[4].desc = "Dismiss menu";
-        params.action_menu_items[4].icon_path = "../icons/btn_circle.png";
-        params.action_menu_items[4].danger = 0;
+        params.action_menu_items[4].label = "Remove Server";
+        params.action_menu_items[4].desc = "Forget this server on this console";
+        params.action_menu_items[4].icon_path = "../icons/icon_trash.png";
+        params.action_menu_items[4].danger = 1;
+
+        params.action_menu_items[5].label = "Close";
+        params.action_menu_items[5].desc = "Dismiss menu";
+        params.action_menu_items[5].icon_path = "../icons/btn_circle.png";
+        params.action_menu_items[5].danger = 0;
 
         params.action_paste_enabled = 0;
         params.action_clipboard_info = nullptr;
