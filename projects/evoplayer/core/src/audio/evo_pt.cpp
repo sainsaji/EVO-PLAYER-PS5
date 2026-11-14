@@ -13,6 +13,7 @@
 #include <cstring>
 #include <deque>
 #include <pthread.h>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -84,6 +85,15 @@ std::vector<uint8_t>    g_pt_stream_buf;
 std::vector<uint8_t>    g_pt_pending;   // burst bytes not yet a whole port grain
 std::deque<std::vector<uint8_t>> g_pt_grain_queue;
 pthread_mutex_t         g_pt_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// Logs what the packer has to say (damaged TrueHD data dropped and counted). Call with
+// g_pt_mutex held.
+void log_packer_notices()
+{
+    std::string line;
+    while (g_pt_packer.take_notice(&line))
+        evo_boot_log("[PT] %s", line.c_str());
+}
 
 pt::Codec codec_from_av(int av_codec_id)
 {
@@ -219,6 +229,7 @@ int evo_pt_open(int av_codec_id)
     g_pt_codec = codec;
     g_pt_carrier = carrier;
     g_pt_packer.set_codec(codec);
+    log_packer_notices();
     g_pt_stream_buf.clear();
     g_pt_grain_queue.clear();
     g_pt_pending.clear();
@@ -232,6 +243,10 @@ int evo_pt_open(int av_codec_id)
 void evo_pt_close(int handle)
 {
     evo_boot_log("[PT] Closing bitstream passthrough (handle=%d)", handle);
+    pthread_mutex_lock(&g_pt_mutex);
+    g_pt_packer.report_damage(); // this stream's damage is logged with it, not at the next open
+    log_packer_notices();
+    pthread_mutex_unlock(&g_pt_mutex);
 
     if (handle >= 1)
     {
@@ -267,6 +282,8 @@ void evo_pt_reset(void)
     g_pt_stream_buf.clear();
     g_pt_grain_queue.clear();
     g_pt_pending.clear();
+    g_pt_packer.reset();
+    log_packer_notices();
     pthread_mutex_unlock(&g_pt_mutex);
     evo_boot_log("[PT] Queues flushed (seek)");
 }
@@ -331,6 +348,7 @@ int evo_pt_push_packet(const uint8_t *data, size_t size, int sample_rate, int ch
         g_pt_stream_buf.erase(g_pt_stream_buf.begin(), g_pt_stream_buf.begin() + cursor);
     }
 
+    log_packer_notices();
     pthread_mutex_unlock(&g_pt_mutex);
     return 1;
 }
