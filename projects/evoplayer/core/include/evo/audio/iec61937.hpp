@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace pt
@@ -40,6 +41,7 @@ enum class Codec : std::uint8_t
     dts,
     aac, // ADTS (MPEG-2/4 AAC with a header on every frame)
     truehd, // Dolby TrueHD access units, carried as MAT
+    dtshd,  // DTS with extension substreams (HRA, MA), whole frames as Type IV
     unknown,
 };
 
@@ -71,10 +73,30 @@ struct Frame
     int blocks = 0;         // E-AC-3: audio blocks (6 make one burst)
     bool dependent = false; // E-AC-3 dependent substream (7.1 extension)
     int bsmod = 0;          // AC-3 bitstream mode, goes into the burst header
+    int sample_rate = 0;    // DTS: the core's rate from its header, 0 for a reserved code
+    bool invalid = false;   // a sync word with a header after it that no more data makes valid
 };
 
-// Size and kind of the frame at `at`, or size 0 if there is no valid frame.
+// Size and kind of the frame at `at`. Size 0 if no whole frame is there yet; `invalid` if
+// the header can never become valid.
 Frame parse_frame(Codec codec, Span<std::uint8_t> data, std::size_t at);
+
+// The IEC 61937-9 Type IV subtype of a DTS frame of `samples` at `sample_rate` on the
+// 192 kHz port (its burst lasts 512 << subtype port frames), or -1 if none fits. Only a
+// 48 kHz-family rate has one: 44.1 kHz and its multiples never do.
+int dtshd_subtype(int sample_rate, int samples);
+
+// How a DTS stream goes out, from its FFmpeg profile and rate and whether the sink lists
+// DTS-HD (CEA-861 coding 11): whole frames as DTS-HD for an HRA, MA or MA X stream at a
+// 48 kHz-family rate on such a sink, else the DTS core.
+Codec dts_route(int profile, int sample_rate, bool sink_lists_dtshd);
+
+// Whether the end of a demuxed packet ends the frame in it, so next_burst can flush there
+// instead of waiting for the next sync word. Only for DTS-HD: FFmpeg's demuxers hand over
+// each DTS-HD frame whole, core and extension substreams in one packet (its DTS parser
+// joins them, and its spdif muxer counts on it). Waiting held every frame back by one, and
+// the last frame of a file never went out.
+bool packet_ends_frame(Codec codec);
 
 // Splits an elementary stream into bursts, each exactly as long as the
 // audio it holds, as little-endian S16 stereo samples ready for the port.
@@ -85,18 +107,84 @@ class Packer
     {
     }
 
-    void set_codec(Codec codec) { codec_ = codec; }
+    // A new stream: also ends a DTS-HD core-only fallback.
+    void set_codec(Codec codec)
+    {
+        codec_ = codec;
+        dtshd_core_only_ = 0;
+        dtshd_notices_given_ = 0;
+        drops_logged_ = 0;
+        notice_.clear();
+    }
     Codec codec() const { return codec_; }
+
+    // A seek: ends a DTS-HD core-only fallback, as mpv does (it makes a new spdif muxer).
+    void reset()
+    {
+        dtshd_core_only_ = 0;
+    }
+
+    // A change worth one log line (DTS-HD falling back to its core or dropping frames,
+    // data dropped once per reason and stream), once, or "".
+    std::string take_notice()
+    {
+        std::string notice;
+        notice.swap(notice_);
+        return notice;
+    }
 
     // Appends the next burst built from `data` starting at *cursor to `out`
     // and advances *cursor. Returns false at the end of data or on an incomplete/
-    // uncarriable frame (then *error says why if fatal).
+    // uncarriable frame (then *error says why if fatal). A frame that can never go out (a
+    // damaged header, too big for its burst) is dropped instead: it returns true with
+    // nothing appended and *cursor past that frame's sync word, or past the frames dropped.
     bool next_burst(Span<std::uint8_t> data, std::size_t *cursor,
                     std::vector<std::uint8_t> *out, const char **error,
                     bool flush = false);
 
+    // Moves the bursts `stream` holds into `out` and erases the bytes they used, as the
+    // passthrough does after each demuxed packet. What stays is a frame still arriving.
+    // A frame that can never go out is dropped and the stream goes on after it, so damaged
+    // data costs its own frames, not the rest of the stream. A DTS-HD frame ends with the
+    // packet just added (packet_ends_frame), so call it after each whole demuxed packet.
+    void take_bursts(std::vector<std::uint8_t> *stream, std::vector<std::uint8_t> *out);
+
   private:
+    bool next_dtshd_burst(Span<std::uint8_t> data, const Frame &core, std::size_t *cursor,
+                          std::vector<std::uint8_t> *out, bool flush);
+    // Why a DTS-HD frame is dropped or sent other than whole; each is logged once per stream.
+    enum DtshdNotice : unsigned
+    {
+        kNoticeNoPeriod = 1,
+        kNoticeCoreTooBig = 2,
+        kNoticeSizeMismatch = 4,
+        kNoticeInvalidCore = 8,
+    };
+    void notice_once(DtshdNotice notice);
+    std::size_t step_dtshd_fallback(const Frame &core, std::size_t frame_bytes, std::size_t max_frame_bytes);
+    void add_notice(const std::string &notice);
+    // Why data was dropped. Each reason is logged once per stream.
+    enum class Drop : unsigned
+    {
+        unsendable,     // next_burst gave an error for the frame
+        no_frame,       // the stream held more than any frame without giving one
+        damaged_header, // a sync word, then a header that is not valid
+        too_big,        // a frame, or E-AC-3 frames, too big for the burst
+        no_burst_type,  // a frame of a sample count that no burst type carries
+        cut_off,        // E-AC-3 frames short of a burst, then no frame to complete it
+    };
+    void drop(Drop why, const char *error = nullptr);
+    // Drops the frame whose sync word is at *cursor and steps past that sync word, so the
+    // next call looks for the next frame. Returns true, as next_burst does then.
+    bool skip_frame(Drop why, std::size_t *cursor);
+    // Drops data and goes on at `at`: sets *cursor to it. Returns true, as next_burst does then.
+    bool skip_to(Drop why, std::size_t *cursor, std::size_t at);
+
     Codec codec_;
+    long dtshd_core_only_ = 0; // DTS-HD frames left to send as core only, after one too big
+    unsigned dtshd_notices_given_ = 0; // DtshdNotice bits already logged for this stream
+    unsigned drops_logged_ = 0;        // one bit per Drop
+    std::string notice_;
 };
 
 // Writes one burst: header words Pa Pb Pc Pd, the payload as big-endian
