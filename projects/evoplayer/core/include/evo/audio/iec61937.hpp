@@ -118,6 +118,12 @@ class Packer
     }
     Codec codec() const { return codec_; }
 
+    // A seek: ends a DTS-HD core-only fallback, as mpv does (it makes a new spdif muxer).
+    void reset()
+    {
+        dtshd_core_only_ = 0;
+    }
+
     // A change worth one log line (DTS-HD falling back to its core or dropping frames,
     // data dropped once per reason and stream), once, or "".
     std::string take_notice()

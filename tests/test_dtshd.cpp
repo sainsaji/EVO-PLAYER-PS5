@@ -173,6 +173,32 @@ static void test_core_fallback_ends_with_the_stream(void)
     TEST_PASS();
 }
 
+// mpv ends the fallback at a seek: ad_spdif_reset frees its spdif muxer, so the next
+// packet starts a new one with dtshd_skip at 0.
+static void test_core_fallback_ends_at_a_seek(void)
+{
+    TEST_START("DTS-HD: after a seek whole frames go out again");
+    const Bytes big = read_file(data_path("dtshd-big.es"));
+    const Bytes big_ref = read_reference("dtshd-big-t4.ref");
+    const Bytes es = read_file(data_path("dtshd.es"));
+    const Bytes ref = read_reference("dtshd-t4.ref");
+    TEST_ASSERT(!big.empty() && !big_ref.empty() && !es.empty() && !ref.empty(), "test vector missing");
+
+    // Checks Packer::reset(), which evo_pt_reset calls on every seek. That wiring is
+    // checked by the 11-state-survives repro, since evo_pt.cpp has no host test.
+    pt::Packer packer(pt::Codec::dtshd);
+    const char *error = nullptr;
+    const Bytes before = pack(packer, big, big.size(), &error);
+    TEST_ASSERT(error == nullptr, error);
+    TEST_ASSERT(compare(before, big_ref, kTypeIvBurstBytes).empty(),
+                "the core-only fallback did not start");
+    packer.reset();
+    const Bytes got = pack(packer, es, es.size(), &error);
+    TEST_ASSERT(error == nullptr, error);
+    TEST_ASSERT_SAME(compare(got, ref, kTypeIvBurstBytes), "the core-only fallback outlived the seek");
+    TEST_PASS();
+}
+
 static Bytes concat(const Bytes &a, const Bytes &b)
 {
     Bytes out = a;
@@ -663,6 +689,7 @@ extern "C" void run_dtshd_tests(void)
     expect_ffmpeg_bursts("DTS-HD: a frame too big falls back to the core", pt::Codec::dtshd,
                          "dtshd-big", "dtshd-big-t4", kTypeIvBurstBytes);
     test_core_fallback_ends_with_the_stream();
+    test_core_fallback_ends_at_a_seek();
     // A sink without DTS-HD keeps today's path: the core of each frame, Type I.
     expect_ffmpeg_bursts("DTS-HD: on the DTS path only cores go out", pt::Codec::dts,
                          "dtshd", "dtshd-core", kCoreBurstBytes);
