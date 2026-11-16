@@ -73,6 +73,7 @@
 #include <libavutil/rational.h>
 
 #include "evo_dovi.h"
+#include "evo_hdr10plus.h"
 #include "sce/sce_videodec2.h"
 
 /* FFmpeg profile-id fallbacks — the pinned build has the FF_PROFILE_* spelling
@@ -1057,6 +1058,7 @@ struct evo_vdec_native {
     const evo_dovi_params *dovi_shown;   /* last one handed out */
     evo_dovi_params     dovi_default;    /* until the first RPU parses */
     unsigned            dovi_parsed, dovi_errs, dovi_misses;
+    int                 hdr10plus;       /* no RPU: the ring holds HDR10+ scene peaks */
 };
 
 static void pts_push(evo_vdec_native *n, int64_t pts)
@@ -1108,6 +1110,21 @@ static void dovi_note_au(evo_vdec_native *n, const uint8_t *au, int size, int64_
         note("EVO vdec native: dovi first RPU parsed (lo/hi Y %.3f/%.3f, Y pieces %s, L1 max %.0f nits%s)",
              e->p.lohi[0][0], e->p.lohi[0][1], e->p.lohi[0][2] != 0.0f ? "yes" : "none",
              e->p.lohi[0][3], e->p.lohi[2][3] == EVO_DOVI_KIND_MAP_ONLY ? ", map-only" : "");
+}
+
+/* HDR10+: file this AU's scene peak under its PTS, as map-only params. */
+static void hdr10plus_note_au(evo_vdec_native *n, const uint8_t *au, int size, int64_t pts)
+{
+    const float peak = evo_hdr10plus_peak_annexb(au, size);
+    if (!(peak > 0.0f))
+        return;
+    struct dovi_entry *e = &n->dovi_ring[n->dovi_head % DOVI_RING];
+    evo_dovi_params_map_only(&e->p, peak);
+    e->pts   = pts;
+    e->valid = 1;
+    n->dovi_head++;
+    if (n->dovi_parsed++ == 0)
+        note("EVO vdec native: HDR10+ first scene peak %.0f nits", peak);
 }
 
 /* The RPU for the frame leaving with `pts`; the last one shown when that AU
@@ -1613,6 +1630,8 @@ static int decode_one(evo_vdec_native *n, const uint8_t *au, int size,
     if (present) {
         if (n->dovi)
             dovi_note_au(n, au, au_size_orig, pts);
+        else if (n->hdr10plus)
+            hdr10plus_note_au(n, au, au_size_orig, pts);
         pts_push(n, pts);
     }
     if (out.valid && out.picture_count) {
@@ -1870,6 +1889,16 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
             n->dovi = NULL;
             n->dovi_ring = NULL;
         }
+    } else if (d->idx == NAT_HEVC10 && par->color_trc == AVCOL_TRC_SMPTE2084) {
+        /* Plain HDR10, possibly HDR10+: the scene peak in its SEI feeds the
+         * same per-shot mapping. A file without HDR10+ never fills the ring
+         * and keeps the static MaxCLL path. */
+        n->dovi_ring = (struct dovi_entry *)calloc(DOVI_RING, sizeof *n->dovi_ring);
+        if (n->dovi_ring) {
+            n->hdr10plus = 1;
+            evo_dovi_params_map_only(&n->dovi_default, 0.0f);
+            n->dovi_shown = &n->dovi_default;
+        }
     }
     /* GL video path: emit NV12 straight from the decoder - the GLSL video
      * shader samples NV12 and does the YUV->RGB + scale on-GPU, so the CPU
@@ -2012,7 +2041,7 @@ int evo_vdec_native_receive(evo_vdec_native *v, pp_frame *out)
     out->strides[2]   = (int)best->c_stride;
     out->pts_us       = best->pts;
     out->color_trc    = v->color_trc;
-    if (v->dovi) {
+    if (v->dovi || (v->hdr10plus && v->dovi_parsed)) {   /* HDR10+: only once a scene peak was seen */
         out->dovi      = dovi_for_pts(v, best->pts);
         out->dovi_size = sizeof(evo_dovi_params);
     }
@@ -2036,6 +2065,9 @@ void evo_vdec_native_flush(evo_vdec_native *v)   /* seek */
         for (int i = 0; i < DOVI_RING; i++)
             v->dovi_ring[i].valid = 0;
     }
+    if (v->hdr10plus)
+        for (int i = 0; i < DOVI_RING; i++)
+            v->dovi_ring[i].valid = 0;
     v->flushing       = 0;
     v->fatal          = 0;
     v->first_err_logged = 0;
