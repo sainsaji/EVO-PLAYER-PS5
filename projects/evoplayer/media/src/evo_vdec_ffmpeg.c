@@ -21,6 +21,7 @@
 
 #include <libavcodec/avcodec.h>
 #include <libavutil/frame.h>
+#include <libavutil/hdr_dynamic_metadata.h>
 #include <libavutil/pixfmt.h>
 
 #ifndef FF_PROFILE_UNKNOWN
@@ -444,6 +445,21 @@ static int vdec_receive_inner(evo_vdec *v, pp_frame *out)
                 evo_dovi_params_map_only(&v->dovi[next_idx], evo_dovi_l1_max_nits(sd->data));
                 out->dovi      = &v->dovi[next_idx];
                 out->dovi_size = sizeof(evo_dovi_params);
+            }
+        } else {
+            /* HDR10+: the scene's largest MaxSCL (1.0 = 10000 nits) is its peak. */
+            const AVFrameSideData *sd =
+                av_frame_get_side_data(frame, AV_FRAME_DATA_DYNAMIC_HDR_PLUS);
+            if (sd) {
+                const AVDynamicHDRPlus *h = (const AVDynamicHDRPlus *)sd->data;
+                double peak = 0.0;
+                for (int c = 0; c < 3; c++)
+                    if (av_q2d(h->params[0].maxscl[c]) > peak) peak = av_q2d(h->params[0].maxscl[c]);
+                if (peak > 0.0) {
+                    evo_dovi_params_map_only(&v->dovi[next_idx], (float)(peak * 10000.0));
+                    out->dovi      = &v->dovi[next_idx];
+                    out->dovi_size = sizeof(evo_dovi_params);
+                }
             }
         }
         return 1;
