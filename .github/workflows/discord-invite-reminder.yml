@@ -18,7 +18,7 @@ jobs:
   remind:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Open a reminder issue when the invite is about to expire
         env:
