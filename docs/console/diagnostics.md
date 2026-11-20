@@ -74,6 +74,7 @@ format is still checked.
 | `ffmpeg:` | FFmpeg's own warnings and errors, at its own level |
 | `hui:` | the kit screens starting, or switched off |
 | `CRASH signal=... addr=...` | written by the crash handler with raw I/O (async-signal-safe) |
+| `FATAL display:` / `FATAL boot:` | the app could not start: the GPU runtime did not come up (black screen, with a system notification giving the code), or `initialize` gave up. The boot lines just above it show the last step that finished (#198) |
 
 ## Live endpoints (default `:9780`)
 
