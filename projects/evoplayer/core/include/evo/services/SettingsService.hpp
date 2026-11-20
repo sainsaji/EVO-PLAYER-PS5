@@ -170,7 +170,7 @@ private:
     int m_keyboardType = 1;
     DecoderPreference m_decoderPreference = DecoderPreference::Auto;
     // Off until the upscaler is hardware-verified (#103), then Sharp.
-    Upscaler m_upscaler = Upscaler::Off;
+    Upscaler m_upscaler = Upscaler::Sharp;  // #111: hardware-verified in #103; a saved choice still wins
     AiNetwork m_aiNetwork = AiNetwork::Auto;
     MotionSmoothing m_motionSmoothing = MotionSmoothing::Off;
     DeepBlacks m_deepBlacks = DeepBlacks::Off;

@@ -4,8 +4,9 @@
 - **Hardware:** Off, Sharp and AI Standard / Large / Maximum all render
   correctly. AI Large costs ~1.75 ms per frame (1080p → 4K). AI Maximum's GPU
   cost is not measured yet.
-- **Default:** UPSCALING still defaults to **Off**. Issue #103 planned Sharp
-  once verified; that switch hasn't been made.
+- **Default:** UPSCALING defaults to **Sharp** (#111), as #103 planned once
+  it was verified. Only a fresh install or a settings file from before #103
+  gets it: a saved choice (line 14) is kept, Off included.
 - **Published:** lossless same-frame comparisons and the write-up are at
   https://github.com/sainsaji/ps5-upscalar-research.
 
