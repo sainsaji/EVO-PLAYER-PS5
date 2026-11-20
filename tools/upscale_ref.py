@@ -27,7 +27,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from gen_upscale_pipes import ANIME4K, parse_hooks  # noqa: E402
+from gen_upscale_pipes import ANIME4K, fsrcnnx_passes, parse_hooks  # noqa: E402
 
 RCAS_SHARPNESS = 0.8705506
 
@@ -269,8 +269,82 @@ def depth_to_space(src: np.ndarray, res: np.ndarray, w: int, h: int) -> np.ndarr
 
 
 # --------------------------------------------------------------------------
+# FSRCNNX x2 (#123): the vendored hooks, statement by statement
+# --------------------------------------------------------------------------
+
+_NUMS = r"\(([-0-9.,eE ]+)\)"
+_F_OFF = r"_texOff\(vec2\((-?\d+),\s*(-?\d+)\)\)"
+_F_BIAS = re.compile(r"vec4 res = vec4" + _NUMS + ";")
+_F_LUMA = re.compile(r"res \+= vec4" + _NUMS + r" \* float\(LUMA" + _F_OFF + r"\);")
+_F_MAT = re.compile(r"res \+= mat4(?:x4)?" + _NUMS + r" \* (\w+)" + _F_OFF + ";")
+_F_SKIP = re.compile(r"res \+= (\w+)_texOff\(vec2\(0,0\)\);")
+_F_PRELU = re.compile(r"res = max\(res, vec4\(0\.0\)\) \+ vec4" + _NUMS + r" \* min\(res, vec4\(0\.0\)\);")
+
+
+def _nums(text: str) -> np.ndarray:
+    return np.array([float(v) for v in text.split(",")])
+
+
+def _shift(t: np.ndarray, dx: int, dy: int) -> np.ndarray:
+    """t at texel offset (dx, dy), clamped to the edge like the shader's fetch."""
+    h, w = t.shape[:2]
+    return t[np.clip(np.arange(h) + dy, 0, h - 1)][:, np.clip(np.arange(w) + dx, 0, w - 1)]
+
+
+def luma709(c: np.ndarray) -> np.ndarray:
+    return c[..., 0] * 0.2126 + c[..., 1] * 0.7152 + c[..., 2] * 0.0722
+
+
+def fsrcnnx(src: np.ndarray, name: str = "FSRCNNX_x2_8-0-4-1.glsl") -> np.ndarray:
+    """SUBCONV1: per source pixel, its 2x2 output luma, x-major."""
+    tex = {"LUMA": luma709(src)}
+    for p in fsrcnnx_passes(name):
+        res = None
+        for line in p["body"].splitlines():
+            line = line.strip().replace("_texOff(0)", "_texOff(vec2(0,0))")
+            if m := _F_BIAS.fullmatch(line):
+                res = np.broadcast_to(_nums(m[1]), src.shape[:2] + (4,)).copy()
+            elif m := _F_LUMA.fullmatch(line):
+                res += _shift(tex["LUMA"], int(m[2]), int(m[3]))[..., None] * _nums(m[1])
+            elif m := _F_MAT.fullmatch(line):
+                # GLSL mat4 is column-major: mat * v = sum_j column_j * v[j]
+                res += _shift(tex[m[2]], int(m[3]), int(m[4])) @ _nums(m[1]).reshape(4, 4)
+            elif m := _F_SKIP.fullmatch(line):
+                res += tex[m[1]]
+            elif m := _F_PRELU.fullmatch(line):
+                res = np.maximum(res, 0) + _nums(m[1]) * np.minimum(res, 0)
+            elif line not in ("vec4 hook()", "{", "}", "return res;", "return vec4(res);", ""):
+                raise SystemExit(f"FSRCNNX {p['desc']}: unread statement: {line[:60]}")
+        tex[p["save"]] = res
+    return tex["SUBCONV1"]
+
+
+def fsrcnnx_final(src: np.ndarray, sub: np.ndarray, w: int, h: int) -> np.ndarray:
+    """upscale_fsrcnnx_final: the network's luma swapped into a bilinear base."""
+    u, v = out_uv(w, h, 0, h)
+    base = bilinear(src, u, v)
+    sh, sw = sub.shape[:2]
+    qx = u * sw * 2 - 0.5
+    qy = v * sh * 2 - 0.5
+    ix, iy = np.floor(qx).astype(np.int64), np.floor(qy).astype(np.int64)
+    fx, fy = qx - ix, qy - iy
+
+    def R(x, y):
+        x = np.clip(x, 0, sw * 2 - 1)
+        y = np.clip(y, 0, sh * 2 - 1)
+        idx = (x & 1) * 2 + (y & 1)
+        return np.take_along_axis(sub[y >> 1, x >> 1], idx[..., None], -1)[..., 0]
+
+    y2 = (R(ix, iy) * (1 - fx) + R(ix + 1, iy) * fx) * (1 - fy) + \
+         (R(ix, iy + 1) * (1 - fx) + R(ix + 1, iy + 1) * fx) * fy
+    return np.clip(base + (y2 - luma709(base))[..., None], 0, 1)
+
+
+# --------------------------------------------------------------------------
 
 def upscale(src: np.ndarray, mode: str, w: int, h: int) -> np.ndarray:
+    if mode == "live":
+        return fsrcnnx_final(src, fsrcnnx(src), w, h)
     if mode == "bilinear":
         return bilinear(src, *out_uv(w, h, 0, h))
     if mode == "sharp":
@@ -296,7 +370,7 @@ def selftest() -> int:
 
     ok = True
     ref = sharpness(upscale(img, "bilinear", W, H))
-    for mode in ("sharp", "ai-s", "ai-m"):
+    for mode in ("sharp", "ai-s", "ai-m", "live"):
         out = upscale(img, mode, W, H)
         finite = bool(np.isfinite(out).all())
         inrange = bool(out.min() >= 0 and out.max() <= 1)
@@ -309,6 +383,21 @@ def selftest() -> int:
     err = float(np.abs(a - b).max())
     print(f"  ai-m split accumulate vs single 1x1 conv: max |diff| = {err:.2e}")
     ok &= err < 1e-9
+    # FSRCNNX has no residual to fall back on: a wrong weight order, offset or
+    # sub-pixel index gives a worse picture than bilinear (the other three
+    # sub-pixel orders score about 20 dB lower here). So halve a smooth picture
+    # with a zone plate and a slanted edge, and ask which gets closer to it.
+    hh, hw = h * 2, w * 2
+    yy, xx = np.meshgrid(np.arange(hh), np.arange(hw), indexing="ij")
+    r2 = ((xx - hw / 2) ** 2 + (yy - hh / 2) ** 2) / 4000.0
+    g = 0.5 + 0.35 * np.cos(r2) * (r2 < 25) + 0.1 * np.tanh((xx * 0.7 + yy * 0.4 - 250) / 3.0)
+    hi = np.repeat(g[..., None], 3, -1)
+    lo = hi.reshape(h, 2, w, 2, 3).mean((1, 3))
+    psnr = lambda a: -10 * np.log10(np.mean((luma709(a) - g) ** 2))
+    p_live = psnr(upscale(lo, "live", W, H))
+    p_bil = psnr(upscale(lo, "bilinear", W, H))
+    print(f"  live     2x of a halved picture: {p_live:.2f} dB (bilinear {p_bil:.2f} dB)")
+    ok &= p_live > p_bil + 2.0
     print("OK" if ok else "FAIL")
     return 0 if ok else 1
 

@@ -20,6 +20,15 @@ upscale stage (see agc_upscale_* there):
          Both end in the same depth-to-space pass, which adds the network's
          2x luma residual to a bilinear upscale of the source.
 
+  Live   FSRCNNX x2 8-0-4-1 (LGPL-3.0-or-later, igv), trained on natural
+         images (#123). Vendored unchanged in third_party/fsrcnnx/. It hooks
+         LUMA, not RGB: 2 5x5 feature passes on luma, 8 3x3 mapping passes, 2
+         1x1 residual passes and one sub-pixel conv whose 4 channels are the
+         2x2 luma of each source pixel. mpv's own "aggregation" hook is
+         replaced by upscale_fsrcnnx_final, which swaps that luma into a
+         bilinear upscale of the RGB source. The pipes are generated; the
+         runtime does not draw them yet (needs a console).
+
 Every pipe shares one vertex stage: a quad over the whole viewport whose UV
 spans the rectangle `uUv` (origin.xy, size.zw) of the source. The runtime sets
 the viewport to the target size, so a pass reads texel ivec2(vUV * size) and
@@ -44,6 +53,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SHADER_DIR = ROOT / "projects/evoplayer/shaders/agc"
 ANIME4K = ROOT / "third_party/anime4k"
+FSRCNNX = ROOT / "third_party/fsrcnnx"
 
 RGBA8 = "VK_FORMAT_R8G8B8A8_UNORM"
 RGBA16F = "VK_FORMAT_R16G16B16A16_SFLOAT"
@@ -297,6 +307,78 @@ def parse_hooks(path: Path) -> list[dict]:
         passes.append({"desc": desc, "binds": binds, "save": save,
                        "body": "\n".join(body).strip()})
     return passes
+
+
+LUMA709 = "vec3(0.2126, 0.7152, 0.0722)"
+_OFF = r"_texOff\(vec2\((-?\d+),\s*(-?\d+)\)\)"
+
+
+def fsrcnnx_pass_fs(p: dict) -> str:
+    """An FSRCNNX hook -> fragment shader over texelFetch.
+
+    Same fetch model as conv_pass_fs, with literal offsets, several inputs, and
+    LUMA read as the BT.709 luma of the RGB source (the runtime's L0 is RGB).
+    """
+    n = len(p["binds"])
+    body = p["body"]
+    for i, src in enumerate(p["binds"]):
+        if src == "LUMA":
+            body = re.sub(r"float\(LUMA" + _OFF + r"\)", rf"dot(T{i}(\1, \2).rgb, {LUMA709})", body)
+        else:
+            body = re.sub(rf"\b{src}" + _OFF, rf"T{i}(\1, \2)", body)
+            body = body.replace(f"{src}_texOff(0)", f"T{i}(0, 0)")
+    if "_texOff" in body or "_tex(" in body:
+        raise SystemExit(f"untranslated texture access in {p['desc']}")
+    fetch = "\n".join(
+        f"#define T{i}(x, y) texelFetch(uIn{i}, "
+        f"clamp(g_ip + ivec2(x, y), ivec2(0), g_sz - 1), 0)"
+        for i in range(n))
+    return fs_header(n) + f"""
+/* FSRCNNX: {p['desc']} <- {', '.join(p['binds'])} */
+ivec2 g_ip;
+ivec2 g_sz;
+{fetch}
+{body}
+
+void main() {{
+    g_sz = textureSize(uIn0, 0);
+    g_ip = clamp(ivec2(vUV * vec2(g_sz)), ivec2(0), g_sz - 1);
+    out_color = hook();
+}}
+"""
+
+
+# uIn0 = RGB source, uIn1 = SUBCONV1. The network gives luma itself, not a
+# residual, and packs the 2x2 block x-major (mpv: res[index.x * 2 + index.y]).
+FSRCNNX_FINAL_FS = fs_header(2) + f"""
+ivec2 g_sz;
+
+float R(ivec2 v) {{
+    v = clamp(v, ivec2(0), g_sz * 2 - 1);
+    vec4 t = texelFetch(uIn1, v >> 1, 0);
+    return t[(v.x & 1) * 2 + (v.y & 1)];
+}}
+
+void main() {{
+    g_sz = textureSize(uIn1, 0);
+    vec3 base = texture(uIn0, vUV).rgb;
+
+    vec2 q = vUV * vec2(g_sz * 2) - vec2(0.5);
+    vec2 f = fract(q);
+    ivec2 i0 = ivec2(floor(q));
+    float y = mix(mix(R(i0),               R(i0 + ivec2(1, 0)), f.x),
+                  mix(R(i0 + ivec2(0, 1)), R(i0 + ivec2(1, 1)), f.x), f.y);
+    out_color = vec4(clamp(base + vec3(y - dot(base, {LUMA709})), 0.0, 1.0), 1.0);
+}}
+"""
+
+
+def fsrcnnx_passes(name: str) -> list[dict]:
+    """The network's passes in draw order, without mpv's aggregation hook."""
+    hooks = parse_hooks(FSRCNNX / name)
+    if hooks[-1]["desc"] != "aggregation" or hooks[-2]["save"] != "SUBCONV1":
+        raise SystemExit(f"{name}: unexpected tail, not FSRCNNX x2?")
+    return hooks[:-1]
 
 
 def conv_pass_fs(p: dict) -> str:
@@ -554,6 +636,12 @@ def main() -> int:
             for k in range(7):
                 write_pipe(f"upscale_a4k_m_acc{k}", acc_pass_fs(last, k),
                            1 if k == 0 else 2, RGBA16F, f"{last['desc']} layer {k}")
+
+    for i, p in enumerate(fsrcnnx_passes("FSRCNNX_x2_8-0-4-1.glsl")):
+        write_pipe(f"upscale_fsrcnnx8_p{i:02d}", fsrcnnx_pass_fs(p), len(p["binds"]), RGBA16F,
+                   f"FSRCNNX 8-0-4-1 {p['desc']}: {', '.join(p['binds'])} -> {p['save']}")
+    write_pipe("upscale_fsrcnnx_final", FSRCNNX_FINAL_FS, 2, RGBA8,
+               "FSRCNNX 2x luma into a bilinear RGB base -> scanout")
 
     write_pipe("upscale_a4k_rgb_final", RGB_FINAL_FS, 4, RGBA8,
                "Anime4K VL/UL depth-to-space (RGB residual) + bilinear base -> scanout")
