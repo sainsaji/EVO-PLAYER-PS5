@@ -126,13 +126,40 @@ and slots 7-12 (block 1) for two sets of three accumulators.
   (`16_16_16_16_FLOAT`). **Neither has been on hardware.** If AI mode draws
   garbage while Sharp is right, look here first.
 
+## 10-bit and HDR sources
+
+**Written 2026-11-16 without a console: it builds, it has not been seen on a
+PS5.** Until it has, treat a wrong picture on a 10-bit file as this change.
+
+v1 bypassed every 10-bit or HDR source, which is most anime (HEVC Main 10) and
+every HDR film. Nothing in the chain was SDR-only except the two RGBA8
+surfaces between passes:
+
+- **L0** (the YUV pass's RGB at source size) is RGBA16F for these sources. The
+  video pipes are declared RGBA8, but every pipe exports FP16_ABGR
+  (`SPI_SHADER_COL_FORMAT` = 4 in each `*_pipe.h`), so the shader already
+  hands over more than 10 bits; the target format decides what is kept.
+- **E** (Sharp's EASU output, at the output size) is RGBA16F too. At 4K that is
+  66.8 MB tiled, more than one 36 MB slot, so it takes slots 1 and 2. Both are
+  free in Sharp: they are the AI feature maps.
+- The feature maps and accumulators were RGBA16F already.
+
+The networks and FSR1 run on what the YUV pass wrote. With HDR OUTPUT on that
+is BT.2020 PQ code values, not gamma SDR; mpv runs the same hooks on the
+encoded signal for HDR, and the final passes clamp to 0..1, which is the full
+PQ range. With HDR OUTPUT off it is the tone-mapped SDR picture. Dolby Vision
+goes through the same pass and is not special-cased.
+
+Motion smoothing still bypasses 10-bit: its own passes are 8-bit.
+
 ## Scope guards and fallbacks
 
 Each of these is logged once per change of source or plan, never per frame:
 
 | Condition | Result | Log |
 |---|---|---|
-| 10-bit / HDR / HLG source | bypass (v1 is SDR 8-bit) | `agc upscale: bypass ... reason=HDR source` |
+| 10-bit / HDR / HLG source | runs, with L0 (and Sharp's E) as RGBA16F - see "10-bit and HDR sources" | `ten_bit=1` in the plan line |
+| 10-bit source whose L0 does not fit a slot at 8 bytes a pixel (above about 4.7 MP), or Sharp whose RGBA16F output does not fit two slots | bypass | `reason=size` |
 | image on panel ≤ 1.05x the source (4K source, 1080p panel) | bypass | `reason=source >= output` |
 | AI with < 1.2x scale (Anime4K's own threshold) or a feature map > 36 MB (tiled) | Sharp | `mode=Sharp` |
 | a pipeline failed to compile | next mode down | `agc pipe ... unavailable` at boot |
@@ -230,7 +257,11 @@ its AI mode is Anime4K in EVO's own shaders. In short:
    and `shot.py diff` each console shot against the matching PNG.
 6. **Off regression.** Off must be pixel-identical to a pre-#103 build
    (`shot.py diff` shows zero delta).
-7. **Bypass check.** Play a 4K source and an HDR source, and confirm
-   `bypass ... reason=` in the log.
+7. **Bypass check.** Play a 4K source and confirm `bypass ... reason=` in the
+   log.
+7b. **10-bit and HDR (not yet run on a console).** A 1080p 10-bit SDR file, an
+   HDR10 file with HDR OUTPUT on and the same with it off, each in Sharp and
+   AI: no banding added against Off, no colour shift, no black blocks, and the
+   GPU time still under budget.
 8. **On a PS5 Pro.** Repeat with `hw: ps5 pro=1` and `net=anime4k-M` expected.
 9. **Quit.** Use QUIT EVO.
