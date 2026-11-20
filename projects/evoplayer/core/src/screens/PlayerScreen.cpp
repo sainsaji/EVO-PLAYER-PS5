@@ -1041,6 +1041,14 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
             }
         }
 
+        // #151: a non-zero Settings > Audio > AUDIO DELAY shows beside the
+        // track, so a viewer whose sound is offset can see why.
+        if (const int delayMs = evo_av_get_audio_delay_ms()) {
+            const size_t used = std::strlen(audioTrackBuf);
+            std::snprintf(audioTrackBuf + used, sizeof(audioTrackBuf) - used,
+                          used ? "  -  Delay %+d ms" : "Delay %+d ms", delayMs);
+        }
+
         p.audio_track = audioTrackBuf[0] ? audioTrackBuf : "";
         p.sub_track   = subTrackBuf[0]   ? subTrackBuf   : "";
         p.sub_delay_ms = prospero_subtitle_enabled ? prospero_subtitle_delay_ms : 0;
