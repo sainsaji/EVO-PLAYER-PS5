@@ -140,6 +140,13 @@ roll-off on max(R,G,B), one gain for all three channels so hue survives:
   The peak rides in fields the reshape maths does not use (`lohi[0..2][3]` of
   `evo_dovi_params`, see `evo_dovi.h`). Profile 7/8 draws through
   `video_yuv_p010_pq_dyn`, Profile 5 through `video_yuv_p010_dovi_pq_out`.
+- **Dolby Vision Profile 7 FEL: groundwork only** (written 2026-11-20, host
+  tested, **not applied and not seen on a console**). `evo_dovi_fel.c` holds the
+  enhancement layer's inverse quantisation (ETSI GS CCM 001 linear dead zone,
+  pinned to the integer form by `tests/test_dovi_fel.cpp`) and the split of the
+  NAL 63 units into a plain HEVC access unit. Applying it still needs a second
+  HEVC decode in step with the base layer and a shader stage; until then FEL
+  discs play their HDR10 base layer plus RPU, as MEL discs do.
 - **HDR10, static.** No RPU: the film's MaxCLL, else its mastering peak (the
   smaller when both are there), read at open
   (`evo_agc_runtime_set_hdr_static_peak`).
