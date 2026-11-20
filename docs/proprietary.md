@@ -82,6 +82,7 @@ Not proprietary, but recorded here so the licences are in one place.
 | QuickJS-NG v0.17.0 | `projects/evoplayer/addons/src/quickjs-amalgam.c` + `addons/include/quickjs.h` (the release's amalgamation, unchanged, SHA-256 `a0955463…5cfeb`) | MIT, © Fabrice Bellard, Charlie Gordon, the QuickJS-NG authors | Runs yt-dlp's challenge solver for full-length YouTube links (`addons/src/evo_yt_link.c`). Interpreter only, no `std`/`os` modules |
 | yt-dlp-ejs 0.8.0 (YouTube challenge solver) | `third_party/yt-dlp-ejs/` (`lib.min.js`, `core.min.js`, unchanged, with `LICENSE`) → `addons/src/evo_ytjs_blob.c` via `tools/gen_ytjs_blob.py` | Unlicense; bundles meriyah 6.1.4 (ISC) and astring (MIT), named in `lib.min.js`'s header | Solves the `n` value of a YouTube HLS link. Update by copying a newer release's two files and re-running the generator |
 | libsmb2 | Linked from PS5 Payload SDK sysroot (`/opt/ps5-payload-sdk/target/user/homebrew/lib/libsmb2.a`) | LGPL-2.1-or-later, © Ronnie Sahlberg | SMB client library used for Samba and Windows network share browsing and AVIO streaming (`evo_smb_io.c`, `SmbClient.cpp`) |
+| FSRCNNX x2 8-0-4-1 and 16-0-4-1 (igv/FSRCNN-TensorFlow release 1.1) | `third_party/fsrcnnx/` (the two `.glsl` files unchanged, with `COPYING` and `COPYING.LESSER`) -> `shaders/agc/upscale_fsrcnnx8_p00..p12` + `upscale_fsrcnnx_final` via `tools/gen_upscale_pipes.py` | LGPL-3.0-or-later, (C) 2017-2021 igv | #123 live-action upscaler, pipes built but not drawn by the runtime yet (see below) |
 
 Live-action network (#123), tried 2026-10-08 and not shipped. FSRCNNX x2 8-0-4-1
 (igv/FSRCNN-TensorFlow 1.1) has LGPL-3.0-or-later weights, which fit EVO's
@@ -92,6 +93,12 @@ tile-sized black holes. Suspected cause: EVO's between-pass barrier
 fix needs a new GPU sync call (AcquireMem), which is a panic risk. Also
 checked: ArtCNN (MIT, anime-aimed), CuNNy (LGPL-3.0, visual novels), RAVU
 (LGPL-3.0 at repo level, per-file headers unchecked).
+
+Since 2026-11-20 the 8-0-4-1 network is in the repo again as generated pipes
+(`tools/gen_upscale_pipes.py`, the row above), checked on the host against a
+numpy reference (`tools/upscale_ref.py --selftest`: 58.7 dB vs 55.8 dB for
+bilinear). The runtime does not draw them: the barrier problem above is still
+open and nothing of this has run on a console.
 
 ## Sample photos in the Settings previews
 
