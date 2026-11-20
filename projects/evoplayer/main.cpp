@@ -113,6 +113,10 @@ int main(int argc, char* argv[]) {
 
     auto& app = evo::Application::getInstance();
     if (!app.initialize(argc, argv)) {
+        /* #198: say why the app is leaving, where a report will carry it. */
+        evo_bt("FATAL boot: Application::initialize failed - see the last "
+               "boot lines above for the step that did not finish");
+        evo_boot_log_flush();
         return 1;
     }
     const int rc = app.run();
