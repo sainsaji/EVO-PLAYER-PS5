@@ -124,6 +124,23 @@ threads, frame threading for HEVC and slice threading for H.264.
   around 128 / 512, with the chroma gain 255/224 or 1023/896. The BT.2020 paths
   (HDR10, HLG, both scanouts) used to skip the chroma gain, which left every HDR
   picture about 12 % less saturated than it was mastered.
+- **Chroma is sampled where it sits** (written 2026-11-16, built but **not yet
+  seen on a console**). 4:2:0 chroma of video codecs is on the left luma column
+  of each pair; the shaders used to sample the chroma plane as if it were
+  centred, which puts colour half a luma pixel to the right. Every video pipe
+  now offsets the chroma fetch by a quarter chroma texel (`with_chroma_siting`
+  in `tools/gen_video_pipes.py`). Horizontal only: top-left sited HDR discs
+  also want a quarter texel down, and JPEG/MPEG-1 are centred; neither is
+  handled until the decoders pass `chroma_location` through. This changes the
+  picture of every file slightly, UPSCALING Off included.
+- **Dither** (same date, same status). A 10-bit source drawn straight to the
+  scanout gets half a code step of noise before the rounding (`DITHER` in the
+  generator, `uDither` in the video constants): 1/255 on the 8-bit SDR scanout,
+  1/1023 on the HDR10 one. It is what keeps a 10-bit SDR gradient, a
+  tone-mapped HDR one or a peak-mapped one from banding. It is 0, and the
+  output exactly what it was, for 8-bit sources and for any scratch target
+  (upscaler, motion smoothing). To check on a console: a 10-bit grey ramp with
+  HDR OUTPUT off shows no bands and no visible grain.
 - **8-bit SDR above 576 lines uses BT.709** (`video_yuv_nv12_709`,
   `video_yuv_planar_709`); BT.601 is kept for SD. An untagged HD stream is read as
   BT.709, the rule every player follows.
