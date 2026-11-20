@@ -3341,6 +3341,7 @@ typedef struct {
     uint32_t src_w, src_h;
     int      x0, y0, x1, y1;              /* visible image rect on the scanout */
     float    uv[4];                       /* source UV origin + extent shown there */
+    int      deep;                        /* 10-bit / HDR source: L0 and E are RGBA16F */
 } agc_up_plan_t;
 
 /* current_layer_target while a scratch surface is bound, so the next
@@ -3362,11 +3363,16 @@ static agc_up_surface_t up_surface(int slot, uint32_t w, uint32_t h, int fp16)
 }
 
 /* Tiled footprint: 64 KB blocks of 128x128 pixels at 4 bpp, 128x64 at 8. */
-static int up_fits(uint32_t w, uint32_t h, uint32_t bpp)
+static int up_fits_slots(uint32_t w, uint32_t h, uint32_t bpp, uint32_t slots)
 {
     const uint32_t bh = bpp == 8u ? 64u : 128u;
     const uint64_t blocks = (uint64_t)((w + 127u) / 128u) * ((h + bh - 1u) / bh);
-    return blocks * 0x10000u <= EVO_AGC_UP_SLOT_BYTES;
+    return blocks * 0x10000u <= slots * EVO_AGC_UP_SLOT_BYTES;
+}
+
+static int up_fits(uint32_t w, uint32_t h, uint32_t bpp)
+{
+    return up_fits_slots(w, h, bpp, 1u);
 }
 
 static agc_up_tex_t up_tex(const agc_up_surface_t *s, int bilinear)
@@ -3603,12 +3609,15 @@ static int agc_upscale_plan(uint32_t src_w, uint32_t src_h, int ten_bit,
     if (x1 > g_agc_dev.width) x1 = g_agc_dev.width;
     if (y1 > g_agc_dev.height) y1 = g_agc_dev.height;
 
+    /* A 10-bit or HDR source keeps its precision in RGBA16F: L0 (8 bytes a
+     * pixel) and, for Sharp, E, which at the output size needs slots 1 and 2 -
+     * both free in Sharp, where no feature map exists. The networks then run
+     * on whatever the YUV pass wrote, PQ code values included, as mpv does. */
+    const uint32_t l0_bpp = ten_bit ? 8u : 4u;
     if (mode != EVO_AGC_UPSCALE_OFF) {
-        if (ten_bit)
-            reason = "HDR source";
-        else if (ratio <= 1.05f)
+        if (ratio <= 1.05f)
             reason = "source >= output";
-        else if (x1 <= x0 || y1 <= y0 || !up_fits(src_w, src_h, 4u) ||
+        else if (x1 <= x0 || y1 <= y0 || !up_fits(src_w, src_h, l0_bpp) ||
                  !up_fits((uint32_t)(x1 - x0), (uint32_t)(y1 - y0), 4u))
             reason = "size";
     }
@@ -3645,12 +3654,14 @@ static int agc_upscale_plan(uint32_t src_w, uint32_t src_h, int ten_bit,
     if (!reason && mode == EVO_AGC_UPSCALE_SHARP &&
         !(up_pipes_valid(EVO_AGC_PIPE_UP_EASU, 1) && up_pipes_valid(EVO_AGC_PIPE_UP_RCAS, 1)))
         reason = "pipeline missing";
+    if (!reason && mode == EVO_AGC_UPSCALE_SHARP && ten_bit &&
+        !up_fits_slots((uint32_t)(x1 - x0), (uint32_t)(y1 - y0), 8u, 2u))
+        reason = "size";
     if (!reason && mode != EVO_AGC_UPSCALE_OFF && agc_upscale_alloc(0) != 0)
         reason = "no memory";
 
     if (reason || mode == EVO_AGC_UPSCALE_OFF) {
         g_agc_dev.up.label = mode == EVO_AGC_UPSCALE_OFF ? "Off"
-            : !strcmp(reason, "HDR source") ? "Off (HDR source)"
             : !strcmp(reason, "source >= output") ? "Off (source >= output)"
             : "Off (unavailable)";
         mode = EVO_AGC_UPSCALE_OFF;
@@ -3686,6 +3697,7 @@ static int agc_upscale_plan(uint32_t src_w, uint32_t src_h, int ten_bit,
 
     pl->mode = mode;
     pl->net = net;
+    pl->deep = ten_bit;
     pl->src_w = src_w;
     pl->src_h = src_h;
     pl->x0 = x0; pl->y0 = y0; pl->x1 = x1; pl->y1 = y1;
@@ -3752,7 +3764,7 @@ static int agc_upscale_run(const agc_up_plan_t *pl)
     const uint32_t sw = pl->src_w, sh = pl->src_h;
     const int vw = pl->x1 - pl->x0, vh = pl->y1 - pl->y0;
 
-    agc_up_surface_t l0 = up_surface(UP_SLOT_L0, sw, sh, 0);
+    agc_up_surface_t l0 = up_surface(UP_SLOT_L0, sw, sh, pl->deep);
     agc_up_surface_t scan;
     memset(&scan, 0, sizeof(scan));
     scan.scanout = 1;
@@ -3760,7 +3772,7 @@ static int agc_upscale_run(const agc_up_plan_t *pl)
     int rc = 0;
 
     if (pl->mode == EVO_AGC_UPSCALE_SHARP) {
-        agc_up_surface_t e = up_surface(UP_SLOT_E, (uint32_t)vw, (uint32_t)vh, 0);
+        agc_up_surface_t e = up_surface(UP_SLOT_E, (uint32_t)vw, (uint32_t)vh, pl->deep);
         const agc_up_tex_t e_tex = up_tex(&e, 0);
         rc = agc_up_pass(EVO_AGC_PIPE_UP_EASU, &e, 0, 0, vw, vh, pl->uv, &l0_tex, 1);
         if (rc == 0)
@@ -4491,7 +4503,7 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
     const int interp_active = agc_motion_smoothing_plan(src_w, src_h, ten_bit || hdr_src, sx, sy, &interp_plan);
 
     agc_up_plan_t up_plan;
-    /* the upscalers are SDR-only: off for any HDR source, 8-bit ones too */
+    /* a 10-bit or HDR source upscales through RGBA16F surfaces (up_plan.deep) */
     const int upscale = agc_upscale_plan(src_w, src_h, ten_bit || hdr_src, sx, sy, &up_plan);
 
     if (interp_active && pts_us == g_agc_dev.interp.pts_b && g_agc_dev.interp.have_b) {
@@ -4728,7 +4740,9 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
 
     /* switch to target scratch surface only now, after every early return above */
     if (target_slot >= 0) {
-        agc_up_surface_t dst_surf = up_surface(target_slot, src_w, src_h, 0);
+        /* interpolation is 8-bit only, so a deep target is always the upscaler's L0 */
+        agc_up_surface_t dst_surf = up_surface(target_slot, src_w, src_h,
+                                               !interp_active && up_plan.deep);
         if (agc_up_bind_target(&dst_surf, 0, 0, (int)src_w, (int)src_h) != 0) {
             agc_up_restore_scanout();
             return -1;

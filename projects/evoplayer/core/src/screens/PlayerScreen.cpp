@@ -1056,7 +1056,6 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
                 { "AI (Standard)",          "AI UPSCALE",           1 },
                 { "AI (Large)",             "AI UPSCALE · LARGE",   1 },
                 { "AI (Maximum)",           "AI UPSCALE · MAX",     1 },
-                { "Off (HDR source)",       "UPSCALE OFF · 10-BIT", 0 },
                 { "Off (source >= output)", "UPSCALE OFF · NATIVE", 0 },
                 { "Off (unavailable)",      "UPSCALE OFF",          0 },
             };
