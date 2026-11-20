@@ -24,7 +24,7 @@ its real effect (#158). A row can be disabled by another setting, and then says 
 | | HDR peak | Off (the TV tone-maps), 800, 1000, 1500, 2000, 3000 nits. On a HDR10 output, fits Dolby Vision shot by shot from its L1 metadata and HDR10 from MaxCLL to that peak ([../hardware/video-decode.md](../hardware/video-decode.md#hdr-peak-mapping)) |
 | | Network buffer | 30 s, 1 min, 2 min, 5 min. Sized when a network file opens, so it applies from the next file; high-bitrate files get less than you pick |
 | **Audio** | Volume boost | Off, +50, +100, +200, +300 % ([../hardware/audio.md](../hardware/audio.md)) |
-| | Audio delay | 0, in 50 ms steps from -500 to +500 ms |
+| | Audio delay | 0, in 50 ms steps from -500 to +500 ms. When it is not 0 the player shows it beside the audio track (`Audio: ...  -  Delay +150 ms`) |
 | | Output channels | Auto, Stereo (downmix 5.1/7.1) |
 | | Audio passthrough | off, on (Dolby and DTS bitstream to a receiver) |
 | | Audio language | Auto, Italiano, English, Español, Français, Deutsch, Português, Japanese: the track a file opens with (Auto: the first decodable one) |
