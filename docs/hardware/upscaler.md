@@ -164,7 +164,7 @@ asks two libkernel queries through `sceKernelDlsym`:
 It logs:
 
 ```
-hw: ps5 pro=<0|1|?> trinity_mode=<0|1|?> authentic=<0|1|?>
+hw: ps5 pro=<0|1|?> trinity_mode=<0|1|?> authentic=<0|1|?> pro_pool=<0|1|?> (direct N MB)
 ```
 
 **On the dev PS5 Pro (FW 12.70) this always reports `?`, and there is no
@@ -180,13 +180,22 @@ details in [psml-research.md](psml-research.md#experiment-log)):
   mode (`attribute3 |= 0x400000` plus a `psml` block, as Pro-enhanced games
   have) still launches, but EVO has no way to observe whether it took effect.
   The build flag was removed with the experiment. (Bit 22 alone is different:
-  it gives a Pro +1.19 GiB of direct memory via `package-app.sh --pro-memory`,
-  see [memory-budget.md](memory-budget.md).)
+  it gives a Pro +1.19 GiB of direct memory, see
+  [memory-budget.md](memory-budget.md).)
 
-So "unknown" is the normal state:
-- **Auto** treats unknown as a base PS5 (Standard network).
-- The UI says **NOT DETECTED** / "PS5 model unknown".
-- **AI NETWORK** is the way to get Large or Maximum on a Pro.
+**What works instead: the memory pool.** Every package asks for the Pro memory
+mode (bit 22, set by `package-app.sh` by default), and only a Pro grants it:
+the direct pool is 12928 MB on a Pro against 11712 MB without it. So
+`evo_hw_probe()` reads `sceKernelGetDirectMemorySize()`, and a pool above
+12288 MB means a PS5 Pro. The boot line now also has
+`pro_pool=<0|1|?> (direct N MB)`.
+
+- **Auto** picks Large on a Pro, Standard on a base PS5.
+- The CONSOLE row says **PS5 PRO** or **PS5**. NOT DETECTED only when the
+  pool cannot be read.
+- **AI NETWORK** still overrides Auto (Maximum on a Pro, for example). Auto
+  does not pick Maximum, because its GPU cost is not measured yet (#111).
+- A `--standard-memory` dev build on a Pro reads as a base PS5.
 
 The model shows in Settings → System & Diagnostics → **CONSOLE**, the Media
 Info renderer line and the stats overlay.

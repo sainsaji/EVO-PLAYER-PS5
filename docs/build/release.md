@@ -9,8 +9,8 @@ A release carries four files, all built by CI from the pinned toolchain:
 
 | File | For |
 |---|---|
-| `EVOPlayer-<tag>-PPSA99039.ffpfsc` | the standard image, for any console. The only build tested on a base PS5 |
-| `EVOPlayer-<tag>-PPSA99039-pro.ffpfsc` | the same source with `attribute3` bit 22 set ([Pro memory mode](../hardware/memory-budget.md#pro-memory-mode-and-the-caps-143-decided-2026-10-22)); tested on a PS5 Pro only |
+| `EVOPlayer-<tag>-PPSA99039.ffpfsc` | the image, for a PS5 and a PS5 Pro. It asks for the [Pro memory mode](../hardware/memory-budget.md#pro-memory-mode-and-the-caps-143-decided-2026-10-22), which only a Pro grants |
+| `EVOPlayer-<tag>-PPSA99039-pro.ffpfsc` | the same file under its old name, because the updater of 0.13.x Pro builds asks for it. Drop it once those builds are gone |
 | `EVOPlayer-<tag>-PPSA99039.zip` | the folder-title archive, for loaders that want loose files |
 | `SHA256SUMS.txt` | checksums for the above |
 
@@ -53,7 +53,7 @@ Everything that carries the version string, as changed by the v0.12.5 commit
 | Workflow | Trigger | Does |
 |---|---|---|
 | `build.yml` | push to `main`, `develop`, `experiment/**`; PRs; manual | builds the dev image, runs `setup-sdk.sh`, `build-evoplayer.sh` and the compile-database build, validates the ELFs, and runs a `package-app` job (`package-app.sh --ffpfsc` on every PR, archived as an artifact). Skips doc-only changes |
-| `release.yml` | tag `v*`; manual (a dry run) | checks VERSION and `contentVersion`; builds FFmpeg 7.1.1 inside the container (the image ships 7.0.1); packages the standard and Pro images and the zip; verifies them; extracts the changelog section; publishes the GitHub release on a tag only |
+| `release.yml` | tag `v*`; manual (a dry run) | checks VERSION and `contentVersion`; builds FFmpeg 7.1.1 inside the container (the image ships 7.0.1); packages the one image (also published under the old `-pro` name) and the zip; verifies them; extracts the changelog section; publishes the GitHub release on a tag only |
 | `add-to-project.yml`, `issue-triage.yml`, `pr-labeler.yml`, `greetings.yml`, `stale.yml` | issue and PR events | project board, auto-labels, housekeeping |
 
 The release verify step checks the pre-sign ELF is a PS5 binary (not the host
@@ -74,7 +74,7 @@ Settings → System & Diagnostics → Software Update (`addons/src/evo_updater.c
 1. **Check** the latest release from the GitHub API and compare its tag with
    `EVO_PLAYER_VERSION`.
 2. **Download** (only after the user says so) the matching asset: the plain
-   `-PPSA99039.ffpfsc`, or the `-pro.ffpfsc` on a console in Pro memory mode.
+   `-PPSA99039.ffpfsc`. There is one image for every console.
    The image streams through FFmpeg's HTTP client to a staging file beside the
    installed image, never into memory.
 3. **Verify** the SHA-256 against the `digest` GitHub publishes for the asset. No

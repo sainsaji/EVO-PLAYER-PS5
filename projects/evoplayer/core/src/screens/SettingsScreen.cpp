@@ -722,12 +722,17 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
                       "../icons/icon_developer_tools.png", "OPEN");
         break;
 
-    /* #103: read-only - the badge is what evo_hw_probe() found at boot. */
-    case SettingKey::ConsoleModel:
-        d = actionDef(key, "CONSOLE", "DETECTED HARDWARE MODEL", "../icons/icon_monitor.png",
-                      evo_hw_is_ps5_pro() ? "PS5 PRO"
-                          : evo_hw_model_known() ? "PS5" : "NOT DETECTED");
+    /* #103: read-only - the badge is what evo_hw_probe() found at boot. The
+     * kit draws an action row with no badge, so the model also goes in the
+     * subtitle, as the MEMORY row does. */
+    case SettingKey::ConsoleModel: {
+        const char* model = evo_hw_is_ps5_pro() ? "PS5 PRO"
+                          : evo_hw_model_known() ? "PS5" : "NOT DETECTED";
+        static char s_model_sub[48];
+        std::snprintf(s_model_sub, sizeof s_model_sub, "DETECTED: %s", model);
+        d = actionDef(key, "CONSOLE", s_model_sub, "../icons/icon_monitor.png", model);
         break;
+    }
 
     /* #143: read-only row showing GPU memory budget & mode. */
     case SettingKey::MemoryMode: {
@@ -751,17 +756,10 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
             std::snprintf(s_mem_badge, sizeof s_mem_badge, "UNKNOWN");
         }
         /* The kit draws an action row as a chevron with no badge, so the value
-         * goes in the subtitle line, where it is visible. On a Pro in standard
-         * mode the line also points at the Pro build (EVO cannot switch itself). */
-        static char s_mem_sub[96];
-        /* Pro detection misses on the Pro (see Console row), so the hint cannot
-         * wait for evo_hw_is_ps5_pro(); it is worded for a Pro owner instead. */
-        if (pool > 0 && pool <= kProMemoryThresholdMb)
-            std::snprintf(s_mem_sub, sizeof s_mem_sub,
-                          "%s - PS5 PRO: GET THE PRO BUILD FOR +1.2 GIB", s_mem_badge);
-        else
-            std::snprintf(s_mem_sub, sizeof s_mem_sub, "%s", s_mem_badge);
-        d = actionDef(key, "MEMORY", s_mem_sub, "../icons/icon_memory_stick.png",
+         * goes in the subtitle line, where it is visible. There is one image:
+         * it asks for Pro mode, and only a Pro grants it, so STANDARD here is
+         * a base PS5 (or a --standard-memory dev build). */
+        d = actionDef(key, "MEMORY", s_mem_badge, "../icons/icon_memory_stick.png",
                       s_mem_badge);
         break;
     }
@@ -1237,7 +1235,7 @@ bool runAction(const SettingDef& def) {
         case EVO_UPD_APPLIED:
             break;
         default:
-            evo_updater_check(evo_direct_mem_kernel_total_mb() > 12288);
+            evo_updater_check();
             break;
         }
         return true;

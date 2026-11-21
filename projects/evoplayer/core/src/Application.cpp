@@ -1272,7 +1272,7 @@ int Application::run() {
                 if (s_upd_t0.tv_sec == 0) s_upd_t0 = t;
                 if (t.tv_sec - s_upd_t0.tv_sec >= 8) {
                     s_upd_checked = true;
-                    evo_updater_check(evo_direct_mem_kernel_total_mb() > 12288);
+                    evo_updater_check();
                 }
             }
             /* A small card at the side, not a screen: it stays until the user

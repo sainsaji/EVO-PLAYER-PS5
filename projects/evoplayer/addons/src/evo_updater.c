@@ -102,8 +102,6 @@ static int ends_with(const char *s, const char *suffix)
     return n >= m && strcmp(s + n - m, suffix) == 0;
 }
 
-static int g_prefer_pro;
-
 static void *check_thread(void *arg)
 {
     (void)arg;
@@ -137,7 +135,9 @@ static void *check_thread(void *arg)
         goto done;
     }
 
-    const char *want = g_prefer_pro ? "-" UPD_TITLE_ID "-pro.ffpfsc" : "-" UPD_TITLE_ID ".ffpfsc";
+    /* One image for every console. Releases still carry a "-pro.ffpfsc"
+     * copy of it for the builds that ask for that name. */
+    const char *want = "-" UPD_TITLE_ID ".ffpfsc";
     const cJSON *asset = NULL, *assets = cJSON_GetObjectItemCaseSensitive(root, "assets");
     cJSON_ArrayForEach(asset, assets) {
         const cJSON *name = cJSON_GetObjectItemCaseSensitive(asset, "name");
@@ -195,14 +195,13 @@ static int spawn(void *(*fn)(void *))
     return 1;
 }
 
-void evo_updater_check(int prefer_pro)
+void evo_updater_check(void)
 {
     pthread_mutex_lock(&s_mx);
     const int ok = !s_busy && s_st.state != EVO_UPD_DOWNLOADING && s_st.state != EVO_UPD_READY
                    && s_st.state != EVO_UPD_APPLIED;
     if (ok) {
         s_busy = 1;
-        g_prefer_pro = prefer_pro;
         s_st.state = EVO_UPD_CHECKING;
         s_st.error[0] = '\0';
     }

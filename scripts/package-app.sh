@@ -13,7 +13,11 @@
 #   ./scripts/package-app.sh --usb-remote     + the scriptable FTP dev remote
 #                                             (/mnt/usb0/evo_cmd + evo_status +
 #                                             verbose vdec log) — off in release
-#   ./scripts/package-app.sh --pro-memory     opt into PS5 Pro ~1.2 GiB direct memory mode (#143)
+#   ./scripts/package-app.sh --standard-memory  leave attribute3 bit 22 off. By default the
+#                                             one image asks for the PS5 Pro memory mode
+#                                             (~1.2 GiB more direct memory, #143); a base
+#                                             PS5 has no Pro mode. --pro-memory is the old
+#                                             name of the default and is still accepted
 #   ./scripts/package-app.sh --virtual-keyboard  debug only: always use
 #                                             EVO's own keyboard, never the
 #                                             PS5 IME, which the dev remote
@@ -46,7 +50,7 @@ REBUILD_LIBC=0
 FFPFSC=0
 ZIP=0
 USB_REMOTE=0
-PRO_MEMORY=0
+PRO_MEMORY=1
 BREADCRUMBS=0
 VIRTUAL_KB=0
 AGC_DEVICE=1        # bare-metal AGC is the only render path
@@ -66,7 +70,8 @@ while (( $# )); do
         --ffpfsc)       FFPFSC=1 ;;
         --zip)          ZIP=1 ;;
         --usb-remote)   USB_REMOTE=1 ;;   # dev: /mnt/usb0/evo_cmd + evo_status + verbose vdec log
-        --pro-memory)   PRO_MEMORY=1 ;;   # #143: set attribute3 bit 22 so a PS5 Pro gives the app ~1.2 GiB more direct memory
+        --pro-memory)   PRO_MEMORY=1 ;;   # #143: the default now; kept so older scripts and notes still work
+        --standard-memory) PRO_MEMORY=0 ;;  # leave attribute3 bit 22 off (for a base-PS5 comparison)
         --breadcrumbs)  BREADCRUMBS=1 ;;  # #51: bring back the on-screen boot-trace popups
         --virtual-keyboard) VIRTUAL_KB=1 ;;  # debug: EVO's keyboard instead of the PS5 IME
         --agc)          AGC_DEVICE=1 ;;   # accepted and redundant: AGC is the only render path
@@ -95,7 +100,7 @@ if ! in_container; then
     (( FFPFSC ))       && FWD+=(--ffpfsc)
     (( ZIP ))          && FWD+=(--zip)
     (( USB_REMOTE ))   && FWD+=(--usb-remote)
-    (( PRO_MEMORY ))   && FWD+=(--pro-memory)
+    (( PRO_MEMORY ))   || FWD+=(--standard-memory)
     (( BREADCRUMBS ))  && FWD+=(--breadcrumbs)
     (( VIRTUAL_KB ))   && FWD+=(--virtual-keyboard)
     # Forward the RESOLVED choice, never the default, so the in-container build
