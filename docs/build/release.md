@@ -53,7 +53,7 @@ Everything that carries the version string, as changed by the v0.12.5 commit
 | Workflow | Trigger | Does |
 |---|---|---|
 | `build.yml` | push to `main`, `develop`, `experiment/**`; PRs; manual | builds the dev image, runs `setup-sdk.sh`, `build-evoplayer.sh` and the compile-database build, validates the ELFs, and runs a `package-app` job (`package-app.sh --ffpfsc` on every PR, archived as an artifact). Skips doc-only changes |
-| `release.yml` | tag `v*`; manual (a dry run) | checks VERSION and `contentVersion`; builds FFmpeg 7.1.1 inside the container (the image ships 7.0.1); packages the standard and Pro images and the zip; verifies them; extracts the changelog section; publishes the GitHub release on a tag only |
+| `release.yml` | tag `v*`; manual (a dry run) | checks VERSION and `contentVersion`; builds FFmpeg 7.1.1 inside the container (the image ships 7.0.1); packages the one image (also published under the old `-pro` name) and the zip; verifies them; extracts the changelog section; publishes the GitHub release on a tag only |
 | `add-to-project.yml`, `issue-triage.yml`, `pr-labeler.yml`, `greetings.yml`, `stale.yml` | issue and PR events | project board, auto-labels, housekeeping |
 
 The release verify step checks the pre-sign ELF is a PS5 binary (not the host
