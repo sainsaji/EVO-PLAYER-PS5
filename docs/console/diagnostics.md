@@ -157,6 +157,7 @@ per use, where noted) and need no rebuild.
 | `/mnt/usb0/evo_dm_probe` | at boot, allocate, write and verify direct memory in 256 MB steps up to a ceiling in MB (default 8192), log a `dm probe:` line per step, release it. Delete the file to skip |
 | `/mnt/usb0/evo_agc_no_nt` | put copies back on `memcpy` plus a cache flush instead of non-temporal stores |
 | `/mnt/usb0/evo_dns_single` | turn the multi-record DNS lookup off |
+| `/mnt/usb0/evo_net_no_keepalive` | one connection per request again: no idle connections kept for the next request to the same host |
 | `/mnt/usb0/evo_web_probe` | the system-browser probe ([../providers/web-ui.md](../providers/web-ui.md)) |
 | `/mnt/usb0/evo_interp_stage`, `evo_interp_debug` | a digit stops the motion-smoothing chain early, or replaces its output with a debug view ([../hardware/motion-smoothing.md](../hardware/motion-smoothing.md)) |
 | `/mnt/usb0/evo_vdec_hang` | test hook: the 100th decode blocks forever, to exercise the watchdog |
