@@ -270,11 +270,14 @@ def main(argv):
             # the log go quiet: leave it out of the count. So is "[SKIP] game
             # info unavailable: <dir>", which a broken tile (no param.json, e.g.
             # /data/ps5upload/tile/PSUP00001) repeats on every one of those scans.
+            # So is "[IMG] stale image cleanup begin/done", logged every 15 s
+            # by the ShadowMount build seen 2026-11-21.
             quiet, limit = int(argv[2]), int(argv[3])
             deadline = time.time() + limit
             last, since = None, time.time()
             scan_noise = re.compile(r"(?m)^.*(\[MANUAL\] scanned \d+ manual source\(s\)"
-                                    r"|\[SKIP\] game info unavailable: .*)\n?")
+                                    r"|\[SKIP\] game info unavailable: .*"
+                                    r"|\[IMG\] stale image cleanup (?:begin|done))\n?")
             while True:
                 try:
                     n = len(scan_noise.sub("", sm_text()))
