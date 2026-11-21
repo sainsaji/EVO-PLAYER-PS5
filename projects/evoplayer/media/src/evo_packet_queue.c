@@ -45,6 +45,17 @@ typedef struct {
 volatile unsigned long packet_queue_ring_fallbacks = 0;
 extern void evo_boot_log(const char *fmt, ...);
 
+/* The app module's malloc shim serves this from direct memory only (NULL
+ * rather than flexible memory); host builds have no shim and use malloc. A
+ * ring that landed in flexible memory pinned 384 of its 1024 MB for the whole
+ * session on a boot with little direct memory free. */
+__attribute__((weak)) void *evo_alloc_direct_only(size_t n);
+
+static void *ring_store_alloc(size_t n)
+{
+    return evo_alloc_direct_only ? evo_alloc_direct_only(n) : malloc(n);
+}
+
 static uint8_t *ring_alloc(struct PacketRing *r, size_t n)
 {
     const size_t need = (RING_HDR + n + AV_INPUT_BUFFER_PADDING_SIZE + RING_ALIGN - 1) &
@@ -162,7 +173,7 @@ int packet_queue_use_ring(PacketQueue *q, size_t bytes)
         if (q->count == 0 && old->used == 0) {
             size_t want = bytes;
             uint8_t *nb = NULL;
-            while (want > old->size && !(nb = (uint8_t *)malloc(want)))
+            while (want > old->size && !(nb = (uint8_t *)ring_store_alloc(want)))
                 want = (want / 2) & ~(size_t)(RING_ALIGN - 1);
             if (nb && want > old->size) {
                 free(old->base);
@@ -180,10 +191,10 @@ int packet_queue_use_ring(PacketQueue *q, size_t bytes)
     struct PacketRing *r = (struct PacketRing *)calloc(1, sizeof *r);
     if (!r)
         return 0;
-    /* One allocation, so one mapping; the shim serves it from direct memory.
-     * Halve on refusal rather than go without. */
+    /* One allocation, so one mapping, from direct memory only. Halve on
+     * refusal rather than go without. */
     for (;;) {
-        r->base = (uint8_t *)malloc(bytes);
+        r->base = (uint8_t *)ring_store_alloc(bytes);
         if (r->base || bytes < ((size_t)64 << 20))
             break;
         bytes = (bytes / 2) & ~(size_t)(RING_ALIGN - 1);
