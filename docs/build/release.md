@@ -9,8 +9,8 @@ A release carries four files, all built by CI from the pinned toolchain:
 
 | File | For |
 |---|---|
-| `EVOPlayer-<tag>-PPSA99039.ffpfsc` | the standard image, for any console. The only build tested on a base PS5 |
-| `EVOPlayer-<tag>-PPSA99039-pro.ffpfsc` | the same source with `attribute3` bit 22 set ([Pro memory mode](../hardware/memory-budget.md#pro-memory-mode-and-the-caps-143-decided-2026-10-22)); tested on a PS5 Pro only |
+| `EVOPlayer-<tag>-PPSA99039.ffpfsc` | the image, for a PS5 and a PS5 Pro. It asks for the [Pro memory mode](../hardware/memory-budget.md#pro-memory-mode-and-the-caps-143-decided-2026-10-22), which only a Pro grants |
+| `EVOPlayer-<tag>-PPSA99039-pro.ffpfsc` | the same file under its old name, because the updater of 0.13.x Pro builds asks for it. Drop it once those builds are gone |
 | `EVOPlayer-<tag>-PPSA99039.zip` | the folder-title archive, for loaders that want loose files |
 | `SHA256SUMS.txt` | checksums for the above |
 
@@ -74,7 +74,7 @@ Settings → System & Diagnostics → Software Update (`addons/src/evo_updater.c
 1. **Check** the latest release from the GitHub API and compare its tag with
    `EVO_PLAYER_VERSION`.
 2. **Download** (only after the user says so) the matching asset: the plain
-   `-PPSA99039.ffpfsc`, or the `-pro.ffpfsc` on a console in Pro memory mode.
+   `-PPSA99039.ffpfsc`. There is one image for every console.
    The image streams through FFmpeg's HTTP client to a staging file beside the
    installed image, never into memory.
 3. **Verify** the SHA-256 against the `digest` GitHub publishes for the asset. No

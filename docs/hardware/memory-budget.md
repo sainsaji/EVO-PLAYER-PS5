@@ -7,7 +7,7 @@ check it against this page first.
 
 **Current configuration:**
 
-| Pool | Standard package | `--pro-memory` package (PS5 Pro) |
+| Pool | Base PS5, or a `--standard-memory` build | PS5 Pro (the default package) |
 |---|---|---|
 | Direct memory | about 11.4 GiB | about 12.6 GiB |
 | Flexible memory | **1 GiB** (`param.json` `kernel.flexibleMemorySize`; default 448 MB) | 1 GiB |
@@ -34,7 +34,10 @@ The tables further down were measured with the original 448 MB flexible pool.
 > | standard (`attribute3` 0x80040) | 11712 MB | - | 1024 MB |
 > | `--pro-memory` (0x480040) | **12928 MB** (+1216 MB) | 11566 MB | 1024 MB |
 >
-> No `map_fail`; the app launches and the UI runs normally. Build it with
+> No `map_fail`; the app launches and the UI runs normally. **Since the
+> one-image change, `package-app.sh` sets the bit by default** (opt out with
+> `--standard-memory`), and the pool size is how `evo_hw_is_ps5_pro()` tells a
+> Pro from a base PS5. Earlier text: build it with
 > `package-app.sh --pro-memory`; it edits only the packaged `param.json`, never
 > the source file. Bit 4 and the `psml` block are NOT needed (bit 4 changes the
 > TV video mode). The mode is read when ShadowMount registers the app, so a
