@@ -126,10 +126,6 @@ EVO Player/
 └── docs/           you are here
 ```
 
-`main.c.legacy` in `projects/evoplayer/` is the pre-C++ monolith. It is **not
-compiled**, and it is kept only for `git blame` archaeology. Do not edit it or
-treat it as a reference for current behaviour.
-
 ## Where to start reading
 
 | If you want to… | Read |

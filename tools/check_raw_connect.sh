@@ -17,7 +17,7 @@ SRC=projects/evoplayer
 
 hits=$(grep -rnE '(^|[^_[:alnum:].>])connect[[:space:]]*\(' \
           --include='*.c' --include='*.cpp' --include='*.h' --include='*.hpp' \
-          --exclude='main.c.legacy' "${SRC}" |
+          "${SRC}" |
        grep -v 'connect-ok:' |
        grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*|/\*)' |
        grep -vE '/third_party/|_bundle_data\.cpp:' || true)

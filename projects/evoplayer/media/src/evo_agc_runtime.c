@@ -17,7 +17,7 @@
 
 /* PS5_tilemap, for de-swizzling the scanout in evo_agc_runtime_read_scanout().
  * Included here rather than linked: its only previous includer was main.c,
- * which is now main.c.legacy and is not compiled by anything. */
+ * which is gone. */
 #include "../../SDL_ps5tilemap.inc"
 
 #define PS5_TILE_W_SHIFT 9    /* 1 << 9 == PS5_TILE_WIDTH  (512) */

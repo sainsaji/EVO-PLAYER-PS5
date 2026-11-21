@@ -127,7 +127,6 @@ HOST), screenshot measurement and env vars: [tooling.md](docs/build/tooling.md).
 ```
 projects/evoplayer/
   main.cpp       entry point only: crash/SIGTERM handlers -> Application::run()
-  main.c.legacy  old monolith, NOT COMPILED: don't edit or read it.
   core/          the player: Application.cpp (frame loop, soft close), screens/,
                  services/ (PlaybackController, settings, metadata)
   media/         decode, audio, evo_agc_runtime.c (GPU present + VideoOut)
