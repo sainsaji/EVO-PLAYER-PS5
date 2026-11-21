@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <time.h>
 
 /* ---- mocked kernel ------------------------------------------------------ */
 static size_t g_direct_free, g_flex_free;
@@ -125,8 +126,35 @@ static void run(const char *label, size_t direct_mb, long long abps, int after)
     atomic_store(&g_map_fail, 0);
 }
 
+/* The cost of one large-block cycle (map, touch every page, unmap) on the
+ * host, against a slab-sized one. evo.log's `large=` counter climbs ~20 per
+ * second in steady playback, so this tells whether a block cache would pay. */
+static double now_us(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1e6 + ts.tv_nsec / 1e3;
+}
+
+static void churn(size_t bytes, int n)
+{
+    g_flex_free = (size_t)1 << 40;
+    g_direct_free = (size_t)1 << 40;
+    double t0 = now_us();
+    for (int i = 0; i < n; i++) {
+        unsigned char *p = shim_malloc(bytes);
+        for (size_t o = 0; o < bytes; o += 4096) p[o] = (unsigned char)i;
+        shim_free(p);
+    }
+    printf("churn %7zu B: %.2f us per malloc+touch+free\n", bytes, (now_us() - t0) / n);
+}
+
 int main(void)
 {
+    churn(8192, 20000);        /* slab */
+    churn(65536, 20000);       /* large, flexible */
+    churn(262144, 5000);
+    churn(2u << 20, 2000);     /* large, direct */
     /* AAC 2.0 at 256 kbit/s: the 2026-11-07 Jellyfin test file. */
     run("1392 MB direct free, AAC 256k", 1392, 256000, 0);
     run("1392 MB direct free, AAC 256k", 1392, 256000, 1);
