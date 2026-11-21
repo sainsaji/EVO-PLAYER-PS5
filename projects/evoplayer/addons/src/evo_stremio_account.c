@@ -123,8 +123,9 @@ void evo_sa_init(void)
     if (g_addons && !cJSON_IsArray(g_addons)) { cJSON_Delete(g_addons); g_addons = NULL; }
     g_library = read_json(SA_FILE_LIBRARY);
     if (g_library && !cJSON_IsArray(g_library)) { cJSON_Delete(g_library); g_library = NULL; }
+    /* Never the address itself: evo.log goes into bug reports. */
     PROV_LOG("stremio account: signed in (%s), %d addon(s) and %d library item(s) cached",
-             g_email[0] ? g_email : "no email yet",
+             g_email[0] ? "email known" : "no email yet",
              g_addons ? cJSON_GetArraySize(g_addons) : 0,
              g_library ? cJSON_GetArraySize(g_library) : 0);
 }
