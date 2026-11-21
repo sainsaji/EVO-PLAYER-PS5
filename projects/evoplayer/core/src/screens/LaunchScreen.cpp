@@ -308,6 +308,7 @@ void LaunchScreen::render(uint32_t* framebuffer, int width, int height) {
     }
 
     auto coverService = Application::getInstance().getCoverArtService();
+    if (coverService) coverService->pumpAsync();
     /* Complete up to two provider artwork decodes per Home frame. */
     evo_provider_art_poll();
 
@@ -390,7 +391,6 @@ void LaunchScreen::render(uint32_t* framebuffer, int width, int height) {
     params.recent_cursor = (!railFocused && m_selectedRow == 1) ? m_selectedCol : -1;
     params.recent_visible = (recent_file_count > EVO_RMLUI_TILES) ? EVO_RMLUI_TILES : recent_file_count;
 
-    int coverBudget = 1;
     for (int i = 0; i < params.recent_visible; ++i) {
         const auto& r = recent_files[i];
         char safeRecentPath[512];
@@ -425,11 +425,12 @@ void LaunchScreen::render(uint32_t* framebuffer, int width, int height) {
             params.recent[i].art_h = ah;
         } else if (coverService) {
             art = coverService->peekCoverArt(r.path);
-            bool tried = coverService->hasTriedCoverArt(r.path);
-            if (!art && !tried && coverBudget > 0) {
-                art = coverService->getCoverArt(r.path, false);
-                coverBudget--;
-            }
+            /* Decoded on the cover worker, as in the browser: a synchronous
+             * getCoverArt() here cost the Home frame ~42 ms per poster
+             * (evo.log thumb-start/thumb-end), plus a USB fsync per breadcrumb.
+             * The tile fills in after pumpAsync(). */
+            if (!art && !coverService->hasTriedCoverArt(r.path))
+                coverService->requestCoverArt(r.path, false);
         }
         if (art) {
             params.recent[i].art = art;
