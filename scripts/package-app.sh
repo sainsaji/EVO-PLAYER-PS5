@@ -57,9 +57,11 @@ NO_NATIVE_SECONDARY_4K=0
 NATIVE_10BIT=1
 NO_NATIVE_10BIT=0
 CLEAN=0
+GC_SECTIONS=0
 while (( $# )); do
     case "$1" in
         --clean)        CLEAN=1 ;;
+        --gc-sections)  GC_SECTIONS=1 ;;  # experimental: drop unreferenced sections at link (untested on console)
         --probe)        MODE="probe" ;;
         --player)       MODE="player" ;;
         --rebuild-libc) REBUILD_LIBC=1 ;;
@@ -606,8 +608,15 @@ LINK_TAIL=(--as-needed "${STUBDIR}"/*.so)
 [[ "${MODE}" == "player" ]] && \
     LINK_TAIL+=(--start-group "${PS5_SYSROOT}/lib/libc.a" --end-group)
 
+# --gc-sections: every object is built with -ffunction-sections
+# -fdata-sections, but without this the linker keeps all of them. The linker
+# script KEEPs the init/fini arrays and .eh_frame; exported symbols stay roots.
+# Off by default until a console load is proven.
+GC_FLAGS=()
+(( GC_SECTIONS )) && GC_FLAGS=(--gc-sections)
+
 LINK_RC=0
-if ! "${LLD}" -T "${NATIVE}/ps5-pie.ld" --eh-frame-hdr \
+if ! "${LLD}" -T "${NATIVE}/ps5-pie.ld" --eh-frame-hdr ${GC_FLAGS[@]+"${GC_FLAGS[@]}"} \
     --version-script "${NATIVE}/app-symbols.map" \
     --exclude-libs=ALL --error-limit=0 \
 \
