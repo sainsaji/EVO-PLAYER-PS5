@@ -291,22 +291,26 @@ static long long videoBitsPerSecond(const AVFormatContext* fmt, int streamIndex)
  * The highest bitrate among the file's audio streams - every one, because the
  * ring is sized once at open and the user can switch track mid-play. 0 when
  * any audio stream does not say (TrueHD, DTS-HD MA, FLAC, PCM in Matroska):
- * the caller then keeps the full ring.
+ * the caller then keeps the full ring. 1 when the file has no audio at all,
+ * so the ring stays at its floor (a video-only file took 384 MB on the
+ * console, 2026-11-21).
  */
 static long long audioMaxBitsPerSecond(const AVFormatContext* fmt)
 {
     if (!fmt)
         return 0;
     long long best = 0;
+    int audio = 0;
     for (unsigned i = 0; i < fmt->nb_streams; i++) {
         const AVStream* st = fmt->streams[i];
         if (!st || !st->codecpar || st->codecpar->codec_type != AVMEDIA_TYPE_AUDIO)
             continue;
+        audio++;
         if (st->codecpar->bit_rate <= 0)
             return 0;
         best = std::max(best, static_cast<long long>(st->codecpar->bit_rate));
     }
-    return best;
+    return audio ? best : 1;
 }
 
 /* Audio ring bytes for `seconds` of the file's audio: twice the stated rate
