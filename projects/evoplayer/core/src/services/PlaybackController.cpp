@@ -288,6 +288,43 @@ static long long videoBitsPerSecond(const AVFormatContext* fmt, int streamIndex)
 }
 
 /*
+ * The highest bitrate among the file's audio streams - every one, because the
+ * ring is sized once at open and the user can switch track mid-play. 0 when
+ * any audio stream does not say (TrueHD, DTS-HD MA, FLAC, PCM in Matroska):
+ * the caller then keeps the full ring.
+ */
+static long long audioMaxBitsPerSecond(const AVFormatContext* fmt)
+{
+    if (!fmt)
+        return 0;
+    long long best = 0;
+    for (unsigned i = 0; i < fmt->nb_streams; i++) {
+        const AVStream* st = fmt->streams[i];
+        if (!st || !st->codecpar || st->codecpar->codec_type != AVMEDIA_TYPE_AUDIO)
+            continue;
+        if (st->codecpar->bit_rate <= 0)
+            return 0;
+        best = std::max(best, static_cast<long long>(st->codecpar->bit_rate));
+    }
+    return best;
+}
+
+/* Audio ring bytes for `seconds` of the file's audio: twice the stated rate
+ * (VBR peaks, per-packet headers), at least 16 MB, at most `full`. */
+static size_t audioRingBytesFor(const AVFormatContext* fmt, double seconds, size_t full)
+{
+    const long long abps = audioMaxBitsPerSecond(fmt);
+    if (abps <= 0)
+        return full;
+    const double want = seconds * static_cast<double>(abps) / 8.0 * 2.0;
+    const size_t floorBytes = static_cast<size_t>(16) << 20;
+    size_t bytes = want > static_cast<double>(full) ? full : static_cast<size_t>(want);
+    if (bytes < floorBytes)
+        bytes = floorBytes;
+    return bytes > full ? full : bytes;
+}
+
+/*
  * Size the four demux ceilings for this source, and say so in evo.log: when a
  * stream stutters, the first question is whether the cushion was ever there.
  */
@@ -316,7 +353,8 @@ static void sizeReadAhead(bool networkSource, const AVFormatContext* fmt,
     const bool ring = packet_queue_use_ring(&video_packet_queue,
                                             static_cast<size_t>(kVideoRingBytes * vscale)) &&
                       packet_queue_use_ring(&audio_packet_queue,
-                                            static_cast<size_t>(kAudioRingBytes * ascale));
+                                            audioRingBytesFor(fmt, ringSeconds,
+                                                static_cast<size_t>(kAudioRingBytes * ascale)));
     if (ring) {
         const long long vring = static_cast<long long>(packet_queue_ring_size(&video_packet_queue));
         const long long aring = static_cast<long long>(packet_queue_ring_size(&audio_packet_queue));

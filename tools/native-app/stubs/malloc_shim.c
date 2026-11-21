@@ -342,6 +342,29 @@ static void *large_alloc(size_t user)
     return base + PAGE;
 }
 
+/* A large block that may only come from direct memory: NULL instead of
+ * falling back to flexible memory. For big, long-lived buffers (the demux
+ * packet rings) whose caller halves and retries on refusal - in flexible
+ * memory they would pin a third of the pool for the whole session. Released
+ * with free() like any other block. */
+void *evo_alloc_direct_only(size_t user)
+{
+    size_t total = (PAGE + user + (PAGE - 1)) & ~(PAGE - 1);
+    if (user == 0 || total < user)
+        return 0;
+    uint8_t *base = (uint8_t *)dm_map(total);
+    if (!base)
+        return 0;
+    atomic_fetch_add_explicit(&g_map_direct, 1, memory_order_relaxed);
+    acct_add(total);
+    atomic_fetch_add_explicit(&g_large_count, 1, memory_order_relaxed);
+    hdr_t *tag = (hdr_t *)(base + PAGE - HDR);
+    tag->magic = MAGIC_LARGE;
+    tag->info  = total;
+    tag->pad[0] = MAGIC_DIRECT;
+    return base + PAGE;
+}
+
 static void *small_alloc(size_t user)
 {
     int c = class_for(user);
