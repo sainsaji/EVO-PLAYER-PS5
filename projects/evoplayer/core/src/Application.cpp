@@ -1851,7 +1851,16 @@ int Application::run() {
 
             bool smoothing_active = evo_agc_motion_smoothing_is_active() && !is_paused && !is_scrubbing && !g_pp_pb.seek_discarding;
 
-            bool should_render = (have && new_frame) || buffer_stale || overlay_active || is_paused || is_scrubbing || toast_visible || g_pp_pb.seek_discarding || (have && smoothing_active);
+            /* Steady presents: while a picture is up, present on every
+             * refresh, as a paused picture already does. Presenting only on
+             * a new frame (plus the stale-buffer redraw) gave a 24 fps file
+             * on the 120 Hz output an 8 ms / 33-50 ms flip rhythm (pace:
+             * presents 48/s, gap max 50 ms). A VRR panel follows that rhythm,
+             * and OLED/VA gamma moves with the refresh interval, so dark
+             * scenes pulsed: the "VRR flicker" seen on anime night scenes.
+             * The redraw reuses the staged planes (no new copy), ~0.8 ms GPU. */
+            const bool steady_present = have;
+            bool should_render = (have && new_frame) || buffer_stale || overlay_active || is_paused || is_scrubbing || toast_visible || g_pp_pb.seek_discarding || (have && smoothing_active) || steady_present;
 
             /* #103 `upcompare`: capture what the previous iteration presented,
              * then move to the next mode. */
