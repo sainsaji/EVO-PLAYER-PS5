@@ -710,16 +710,21 @@ int decode_next_video_frame(void)
             return 0;
         }
 
-        int64_t send_pts_us = INT64_MIN;
-        if (video_video_pending_pkt->pts != AV_NOPTS_VALUE && play_fmt &&
-            video_stream_index >= 0)
-            send_pts_us = av_rescale_q(
-                video_video_pending_pkt->pts,
-                play_fmt->streams[video_stream_index]->time_base,
-                (AVRational){ 1, 1000000 });
+        int64_t send_pts_us = INT64_MIN, send_dts_us = INT64_MIN;
+        if (play_fmt && video_stream_index >= 0) {
+            const AVRational tb = play_fmt->streams[video_stream_index]->time_base;
+            if (video_video_pending_pkt->pts != AV_NOPTS_VALUE)
+                send_pts_us = av_rescale_q(video_video_pending_pkt->pts, tb,
+                                           (AVRational){ 1, 1000000 });
+            /* #255: AVI gives MPEG-4 Part 2 packets a dts and no pts. */
+            if (video_video_pending_pkt->dts != AV_NOPTS_VALUE)
+                send_dts_us = av_rescale_q(video_video_pending_pkt->dts, tb,
+                                           (AVRational){ 1, 1000000 });
+        }
 
-        int send_ret = evo_vdec_send(g_vdec, video_video_pending_pkt->data,
-                                     video_video_pending_pkt->size, send_pts_us);
+        int send_ret = evo_vdec_send_ts(g_vdec, video_video_pending_pkt->data,
+                                        video_video_pending_pkt->size,
+                                        send_pts_us, send_dts_us);
 
         if (send_ret == 0) {
             av_packet_free(&video_video_pending_pkt);

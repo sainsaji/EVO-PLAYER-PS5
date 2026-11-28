@@ -127,6 +127,14 @@ evo_vdec *evo_vdec_open(const evo_vdec_open_params *p, evo_vdec_backend *chosen)
  *  <0  = fatal (caller falls back / stops) */
 int evo_vdec_send(evo_vdec *v, const uint8_t *data, int size, int64_t pts_us);
 
+/* Same, with the packet's decode timestamp too (microseconds, INT64_MIN for
+ * unknown). Some containers set only the DTS: an AVI with MPEG-4 Part 2 video
+ * leaves the PTS unset (#255). Without the DTS the FFmpeg decoder has no
+ * timestamp for any frame and the picture freezes on the first one. The
+ * hardware backend ignores dts_us. */
+int evo_vdec_send_ts(evo_vdec *v, const uint8_t *data, int size,
+                     int64_t pts_us, int64_t dts_us);
+
 /* Pull one decoded frame.
  *   1  = frame written to *out (planes borrow decoder memory — valid until the
  *        next send/receive/flush; present synchronously)
