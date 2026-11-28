@@ -4,6 +4,8 @@
 #include "evo/audio/iec61937.hpp"
 #include <algorithm>
 #include <cstring>
+#include <iterator>
+#include <string>
 
 namespace pt
 {
@@ -22,11 +24,42 @@ constexpr std::uint16_t kTypeEac3 = 0x15;
 constexpr std::uint16_t kTypeAac  = 0x07; // MPEG-2/4 AAC, 1024 samples per frame
 constexpr std::uint16_t kTypeTruehd = 0x16; // Dolby TrueHD, as MAT
 
-// One MAT frame holds up to 24 TrueHD access units (40 samples each, so 20 ms)
-// and goes out in a 61440-byte burst on the 768 kHz port.
+// A TrueHD access unit is 1/1200 s of audio: 40 samples at 48 kHz, twice that
+// for each doubling of the rate. A major sync (sync word at byte 4, then a
+// format byte) gives the rate bits; FFmpeg's muxer needs at least the bytes
+// up to the second rate byte in every unit.
+constexpr std::uint8_t kTruehdMajorSync[3] = {0xF8, 0x72, 0x6F};
+constexpr std::size_t kMajorSyncPos = 4;
+constexpr std::size_t kMajorSyncFormatPos = kMajorSyncPos + sizeof(kTruehdMajorSync);
+constexpr std::uint8_t kMajorSyncTruehd = 0xBA;
+constexpr std::uint8_t kMajorSyncMlp = 0xBB;
+constexpr std::size_t kTruehdRatePos = 8; // rate bits: high nibble, low 2 bits used
+constexpr std::size_t kMlpRatePos = 9;
+constexpr std::size_t kMajorSyncHeaderBytes = kMlpRatePos + 1;
+constexpr int kTruehdBaseSamples = 40;
+// What FFmpeg's TrueHD parser (libavcodec/mlp_parser.c, mlp_parse.c) also reads: the
+// substream count, and the major sync's full length, 28 bytes from the sync word plus
+// any extensions a TrueHD (0xBA) one announces. Its last two bytes are a checksum.
+constexpr std::size_t kSubstreamsPos = 20; // high nibble
+constexpr std::size_t kMajorSyncBytes = 28;
+constexpr std::size_t kMajorSyncExtFlagPos = kMajorSyncPos + 25; // low bit
+constexpr std::size_t kMajorSyncExtCountPos = kMajorSyncPos + 26; // high nibble
+constexpr std::size_t kMajorSyncExtBaseBytes = 2;     // with the flag set, plus...
+constexpr std::size_t kMajorSyncExtBytesPerCount = 2; // ...this per count
+constexpr std::uint16_t kMajorSyncCrcPoly = 0x002D;   // 16-bit CRC, MSB first, from 0
+// The unit headers the check nibble covers: 4 bytes for the unit, then per substream
+// 2 bytes, or 4 when its first byte's top bit (an extra word) is set.
+constexpr std::size_t kUnitHeaderBytes = 4;
+constexpr std::size_t kSubstreamHeaderBytes = 2;
+constexpr std::size_t kSubstreamHeaderLongBytes = 4;
+constexpr std::uint8_t kSubstreamHeaderLongFlag = 0x80;
+
+// One MAT frame holds 24 TrueHD time slots (so 20 ms) and goes out in one
+// kMatBurstBytes burst on the 768 kHz port.
 constexpr std::size_t kMatFrameSize = 61424;
-constexpr std::size_t kMatBurstBytes = 61440;
-constexpr int kMatAccessUnits = 24;
+constexpr std::size_t kMatMiddleCodePos = 30708;
+constexpr std::size_t kMatSlots = 24;
+constexpr std::size_t kMatSlotBytes = kMatBurstBytes / kMatSlots; // one 1/1200 s slot
 constexpr std::uint8_t kMatStartCode[20] = {
     0x07, 0x9E, 0x00, 0x03, 0x84, 0x01, 0x01, 0x01, 0x80, 0x00,
     0x56, 0xA5, 0x3B, 0xF4, 0x81, 0x83, 0x49, 0x80, 0x77, 0xE0,
@@ -83,10 +116,117 @@ bool is_sync_any(Codec codec, Span<std::uint8_t> d, std::size_t at)
     case Codec::aac:
         return is_adts_sync(d, at);
     case Codec::truehd:
-        return true; // access units are packet-aligned: there is no sync word to find
+        return true; // not used: next_truehd_burst finds its own major syncs
     default:
         return false;
     }
+}
+
+enum class MajorSync { none, accepted, unknown_format };
+
+// What starts at `at`: no major sync, one of a format FFmpeg takes (0xBA TrueHD, 0xBB MLP,
+// which goes to *format), or its sync word with another format byte. Needs
+// kMajorSyncFormatPos + 1 bytes.
+MajorSync truehd_major_sync(Span<std::uint8_t> d, std::size_t at, std::uint8_t *format = nullptr)
+{
+    if (!std::equal(std::begin(kTruehdMajorSync), std::end(kTruehdMajorSync),
+                    d.data() + at + kMajorSyncPos))
+        return MajorSync::none;
+    const std::uint8_t f = d[at + kMajorSyncFormatPos];
+    if (f != kMajorSyncTruehd && f != kMajorSyncMlp)
+        return MajorSync::unknown_format;
+    if (format)
+        *format = f;
+    return MajorSync::accepted;
+}
+
+// FFmpeg's ff_mlp_checksum16 check of a major sync of `size` bytes from its sync word:
+// the CRC of all but the last 4 bytes, XORed with the word before the last, is the last word.
+bool truehd_major_sync_crc_ok(const std::uint8_t *sync, std::size_t size)
+{
+    std::uint16_t crc = 0;
+    for (std::size_t i = 0; i + 4 < size; ++i)
+    {
+        crc ^= static_cast<std::uint16_t>(sync[i] << 8);
+        for (int bit = 0; bit < 8; ++bit)
+            crc = static_cast<std::uint16_t>(crc & 0x8000 ? (crc << 1) ^ kMajorSyncCrcPoly : crc << 1);
+    }
+    crc ^= static_cast<std::uint16_t>(sync[size - 4] << 8 | sync[size - 3]);
+    return crc == (sync[size - 2] << 8 | sync[size - 1]);
+}
+
+// Marks what FFmpeg's TrueHD parser and spdif muxer make of a whole access unit.
+void classify_truehd_unit(Span<std::uint8_t> u, Frame *f)
+{
+    if (u.size() < kMajorSyncHeaderBytes)
+    {
+        f->invalid = true;
+        return;
+    }
+    std::uint8_t format = 0;
+    switch (truehd_major_sync(u, 0, &format))
+    {
+    case MajorSync::none:
+        return;
+    case MajorSync::unknown_format:
+        f->invalid = true;
+        return;
+    case MajorSync::accepted:
+        break;
+    }
+    const std::uint8_t rate = u[format == kMajorSyncTruehd ? kTruehdRatePos : kMlpRatePos];
+    f->major_sync = true;
+    f->samples = kTruehdBaseSamples << ((rate >> 4) & 3);
+    std::size_t sync_bytes = kMajorSyncBytes;
+    if (format == kMajorSyncTruehd && u.size() > kMajorSyncExtCountPos && (u[kMajorSyncExtFlagPos] & 1))
+        sync_bytes += kMajorSyncExtBaseBytes + (u[kMajorSyncExtCountPos] >> 4) * kMajorSyncExtBytesPerCount;
+    if (u.size() < kMajorSyncPos + sync_bytes || !truehd_major_sync_crc_ok(u.data() + kMajorSyncPos, sync_bytes))
+        f->damaged = true;
+    else
+        f->substreams = u[kSubstreamsPos] >> 4;
+}
+
+// FFmpeg's TrueHD parser's check of a unit without a major sync: the 4-bit check of the
+// unit header and each substream's header, which `u` starts with.
+enum class NibbleCheck { ok, failed, incomplete };
+NibbleCheck truehd_check_nibble(Span<std::uint8_t> u, int substreams)
+{
+    std::uint8_t parity = 0;
+    std::size_t p = 0;
+    for (int i = -1; i < substreams; ++i)
+    {
+        if (p + kSubstreamHeaderBytes > u.size())
+            return NibbleCheck::incomplete;
+        const std::size_t n = i < 0                                ? kUnitHeaderBytes
+                              : u[p] & kSubstreamHeaderLongFlag ? kSubstreamHeaderLongBytes
+                                                                : kSubstreamHeaderBytes;
+        if (p + n > u.size())
+            return NibbleCheck::incomplete;
+        for (std::size_t k = 0; k < n; ++k)
+            parity ^= u[p + k];
+        p += n;
+    }
+    return (((parity >> 4) ^ parity) & 0xF) == 0xF ? NibbleCheck::ok : NibbleCheck::failed;
+}
+
+// Where the next unit with a major sync FFmpeg's parser takes begins, searching from
+// `from`, or d.size().
+std::size_t find_truehd_major_sync(Span<std::uint8_t> d, std::size_t from)
+{
+    for (std::size_t at = from; at + kMajorSyncFormatPos < d.size(); ++at)
+    {
+        if (truehd_major_sync(d, at) == MajorSync::accepted)
+            return at;
+    }
+    return d.size();
+}
+
+// Damaged data is dropped as bytes, not units (its units cannot be told apart), so the
+// count is of sync losses: one per damaged unit the parser stopped at.
+std::string losses_and_bytes(std::size_t losses, std::size_t bytes)
+{
+    return "lost sync " + std::to_string(losses) + (losses == 1 ? " time, " : " times, ") +
+           std::to_string(bytes) + " bytes dropped";
 }
 
 } // namespace
@@ -201,7 +341,10 @@ Frame parse_frame(Codec codec, Span<std::uint8_t> d, std::size_t at)
         if (at + 2 > d.size())
             return f;
         f.size = ((static_cast<std::size_t>(d[at] & 0x0F) << 8) | d[at + 1]) * 2;
-        f.samples = 40;
+        if (f.size == 0)
+            f.damaged = true; // no unit ever arrives here
+        else if (at + f.size <= d.size())
+            classify_truehd_unit(d.subspan(at, f.size), &f);
     }
     if (at + f.size > d.size())
         f.size = 0;
@@ -233,6 +376,202 @@ void write_burst(std::uint16_t data_type, std::uint16_t length_code,
     }
 }
 
+// Places one TrueHD access unit in the MAT frame the way FFmpeg's spdif muxer
+// does (libavformat/spdifenc.c, spdif_header_truehd): each unit starts at its
+// time slot from input_timing, kMatSlotBytes per slot of the 768 kHz port,
+// zero padding fills the slot, and a unit that reaches a MAT code continues
+// after it, into the next frame if it was the end code. The codes and the gap
+// between frames count as padding. Returns true once a frame is complete and
+// its burst is in `out`.
+bool Packer::add_truehd_unit(const std::uint8_t *unit, std::size_t size,
+                             std::vector<std::uint8_t> *out)
+{
+    struct MatCode
+    {
+        std::size_t pos;
+        const std::uint8_t *code;
+        std::size_t len;
+    };
+    static const MatCode kCodes[] = {
+        {0, kMatStartCode, sizeof(kMatStartCode)},
+        {kMatMiddleCodePos, kMatMiddleCode, sizeof(kMatMiddleCode)},
+        {kMatFrameSize - sizeof(kMatEndCode), kMatEndCode, sizeof(kMatEndCode)},
+    };
+    constexpr std::size_t kCodeCount = std::size(kCodes);
+
+    Truehd &t = truehd_;
+    if (t.mat.size() != kMatFrameSize)
+        t.mat.assign(kMatFrameSize, 0);
+
+    const std::uint16_t input_timing = static_cast<std::uint16_t>((unit[2] << 8) | unit[3]);
+    std::size_t padding = 0;
+    if (t.prev_size != 0)
+    {
+        const std::uint16_t delta_samples = static_cast<std::uint16_t>(input_timing - t.prev_time);
+        const std::size_t delta_bytes =
+            delta_samples * kMatSlotBytes / static_cast<std::size_t>(t.samples_per_unit);
+        // Timing that would go backwards or skip half a frame is ignored, as FFmpeg does.
+        if (delta_bytes > t.prev_size && delta_bytes - t.prev_size < kMatFrameSize / 2)
+            padding = delta_bytes - t.prev_size;
+    }
+
+    std::size_t next = 0;
+    while (next < kCodeCount && t.mat_filled > kCodes[next].pos)
+        ++next;
+
+    std::size_t total = size; // bytes this unit takes on the port, codes it does not pad included
+    const std::uint8_t *data = unit;
+    std::size_t remaining = size;
+    bool complete = false;
+    while (padding > 0 || remaining > 0 || kCodes[next].pos == t.mat_filled)
+    {
+        if (kCodes[next].pos == t.mat_filled)
+        {
+            std::memcpy(t.mat.data() + t.mat_filled, kCodes[next].code, kCodes[next].len);
+            t.mat_filled += kCodes[next].len;
+            std::size_t code_left = kCodes[next].len;
+            if (++next == kCodeCount)
+            {
+                write_burst(kTypeTruehd, static_cast<std::uint16_t>(kMatFrameSize),
+                            Span<std::uint8_t>(t.mat), kMatBurstBytes, out);
+                complete = true;
+                next = 0;
+                t.mat_filled = 0;
+                code_left += kMatBurstBytes - kMatFrameSize; // the gap before the next frame
+            }
+            const std::size_t as_padding = std::min(padding, code_left);
+            padding -= as_padding;
+            total += code_left - as_padding;
+        }
+        const std::size_t room = kCodes[next].pos - t.mat_filled;
+        if (padding > 0)
+        {
+            const std::size_t n = std::min(room, padding);
+            std::memset(t.mat.data() + t.mat_filled, 0, n);
+            t.mat_filled += n;
+            padding -= n;
+            if (padding > 0)
+                continue; // a code comes first
+        }
+        if (remaining > 0)
+        {
+            const std::size_t n = std::min(kCodes[next].pos - t.mat_filled, remaining);
+            std::memcpy(t.mat.data() + t.mat_filled, data, n);
+            t.mat_filled += n;
+            data += n;
+            remaining -= n;
+        }
+    }
+
+    t.prev_size = total;
+    t.prev_time = input_timing;
+    return complete;
+}
+
+void Packer::note_damage()
+{
+    Truehd &t = truehd_;
+    if (!t.dropping && t.report_next)
+        notices_.push_back("TrueHD: damaged access unit, dropping data up to the next major sync");
+    t.dropping = true;
+    ++t.sync_losses;
+}
+
+void Packer::note_resumed()
+{
+    Truehd &t = truehd_;
+    t.dropping = false;
+    if (!t.report_next)
+        return;
+    notices_.push_back("TrueHD: resumed at a major sync; " +
+                       losses_and_bytes(t.sync_losses, t.dropped_bytes) +
+                       "; more damage is counted until the next seek");
+    t.report_next = false;
+    t.sync_losses = 0;
+    t.dropped_bytes = 0;
+}
+
+void Packer::report_damage()
+{
+    Truehd &t = truehd_;
+    if (t.sync_losses > 0)
+        notices_.push_back("TrueHD: " + losses_and_bytes(t.sync_losses, t.dropped_bytes) +
+                           " since the last line");
+    t.report_next = true;
+    t.dropping = false;
+    t.sync_losses = 0;
+    t.dropped_bytes = 0;
+}
+
+// One access unit at a time, until one completes a MAT frame. Like FFmpeg's TrueHD
+// parser, a unit it loses sync on (see Frame::damaged, and the check nibble) is dropped
+// with everything up to the next major sync, which restarts the units. It returns false
+// only to wait for bytes still arriving (the rest of one unit, at most 8 KB, or of a
+// unit's headers or a major sync): damaged data is consumed, never waited on.
+bool Packer::next_truehd_burst(Span<std::uint8_t> d, std::size_t *cursor,
+                               std::vector<std::uint8_t> *out)
+{
+    Truehd &t = truehd_;
+    std::size_t cur = *cursor;
+    bool emitted = false;
+    while (!emitted && cur < d.size())
+    {
+        if (!t.in_sync)
+        {
+            const std::size_t from = cur;
+            const std::size_t sync = find_truehd_major_sync(d, cur);
+            // If none, keep the bytes a major sync split across this and the next data may start in.
+            cur = sync < d.size() ? sync : std::max(cur, d.size() - std::min(d.size(), kMajorSyncFormatPos));
+            if (t.dropping)
+                t.dropped_bytes += cur - from;
+            if (sync == d.size())
+                break;
+            t.in_sync = true;
+        }
+        if (d.size() - cur <= kMajorSyncFormatPos)
+            break; // too little to tell whether a major sync starts here
+        // The check nibble is read as soon as the headers it covers are in, so a garbled
+        // length is caught before its bytes are waited for. FFmpeg's parser reads it only
+        // once the whole unit is in, and then resumes at whichever later major sync its
+        // read chunks lead it to.
+        NibbleCheck check = NibbleCheck::ok;
+        if (truehd_major_sync(d, cur) != MajorSync::accepted)
+            check = truehd_check_nibble(d.subspan(cur), t.substreams);
+        if (check == NibbleCheck::incomplete)
+            break;
+        const Frame f = parse_frame(codec_, d, cur);
+        if (f.damaged || check == NibbleCheck::failed)
+        {
+            note_damage();
+            t.in_sync = false;
+            ++cur;
+            ++t.dropped_bytes;
+            continue;
+        }
+        if (f.size == 0)
+            break; // the rest of the unit has not arrived
+        if (t.dropping)
+            note_resumed();
+        const std::uint8_t *unit = d.data() + cur;
+        cur += f.size;
+        if (f.major_sync)
+        {
+            t.samples_per_unit = f.samples;
+            t.substreams = f.substreams;
+        }
+        // FFmpeg's muxer rejects a unit it cannot place (shorter than kMajorSyncHeaderBytes,
+        // a major sync of unknown format, or before the first major sync, so without a
+        // sample rate) with AVERROR_INVALIDDATA; here it is skipped and the stream goes on.
+        if (f.invalid || t.samples_per_unit == 0)
+            continue;
+        emitted = add_truehd_unit(unit, f.size, out);
+    }
+    if (cur == *cursor)
+        return false;
+    *cursor = cur;
+    return true;
+}
+
 bool Packer::next_burst(Span<std::uint8_t> d, std::size_t *cursor,
                         std::vector<std::uint8_t> *out, const char **error,
                         bool flush)
@@ -240,6 +579,8 @@ bool Packer::next_burst(Span<std::uint8_t> d, std::size_t *cursor,
     *error = nullptr;
     if (*cursor >= d.size())
         return false;
+    if (codec_ == Codec::truehd)
+        return next_truehd_burst(d, cursor, out);
 
     // Resynchronize if cursor doesn't point to a sync word
     while (*cursor < d.size() && !is_sync_any(codec_, d, *cursor))
@@ -331,68 +672,6 @@ bool Packer::next_burst(Span<std::uint8_t> d, std::size_t *cursor,
         write_burst(kTypeAac, static_cast<std::uint16_t>(((first.size + 1) & ~std::size_t{1}) * 8), // Pd: bits, padded to a whole 16-bit word
                     d.subspan(first.offset, first.size), kBurst, out);
         *cursor += first.size;
-        return true;
-    }
-
-    if (codec_ == Codec::truehd)
-    {
-        // Pack 24 access units into one MAT frame. A short frame would last
-        // as long as a full one and run the audio fast, so wait for all 24
-        // unless the stream is ending.
-        std::size_t cur = *cursor;
-        int available = 0;
-        while (available < kMatAccessUnits)
-        {
-            const Frame f = parse_frame(codec_, d, cur);
-            if (f.size == 0)
-                break;
-            cur += f.size;
-            ++available;
-        }
-        if (available == 0 || (available < kMatAccessUnits && !flush))
-            return false;
-
-        std::vector<std::uint8_t> mat(kMatFrameSize, 0);
-        std::memcpy(mat.data(), kMatStartCode, sizeof(kMatStartCode));
-        std::memcpy(mat.data() + 30708, kMatMiddleCode, sizeof(kMatMiddleCode));
-        std::memcpy(mat.data() + (kMatFrameSize - sizeof(kMatEndCode)), kMatEndCode,
-                    sizeof(kMatEndCode));
-
-        cur = *cursor;
-        std::size_t pos = sizeof(kMatStartCode);
-        int packed = 0;
-        while (packed < available)
-        {
-            const Frame f = parse_frame(codec_, d, cur);
-            if (f.size == 0)
-                break;
-            if (packed >= 12 && pos < 30720)
-                pos = 30720; // the second half of the frame starts after the middle code
-            std::size_t limit = (pos < 30708) ? 30708 : (kMatFrameSize - sizeof(kMatEndCode));
-            if (pos + f.size > limit)
-            {
-                if (pos < 30708)
-                {
-                    pos = 30720;
-                    limit = kMatFrameSize - sizeof(kMatEndCode);
-                }
-                if (pos + f.size > limit)
-                    break;
-            }
-            std::memcpy(mat.data() + pos, d.data() + cur, f.size);
-            pos += f.size;
-            cur += f.size;
-            ++packed;
-        }
-        if (packed == 0)
-        {
-            *error = "TrueHD access unit does not fit a MAT frame";
-            return false;
-        }
-
-        write_burst(kTypeTruehd, static_cast<std::uint16_t>(kMatFrameSize),
-                    Span<std::uint8_t>(mat), kMatBurstBytes, out);
-        *cursor = cur;
         return true;
     }
 
