@@ -1,5 +1,6 @@
 #include "evo/screens/PlayerScreen.hpp"
 #include "evo/Application.hpp"
+#include "evo/PlayFmtLock.hpp"
 #include "evo/services/NetworkStorageService.hpp"
 #include "evo/screens/ProviderHostScreen.hpp"
 #include "evo_provider.h"
@@ -713,6 +714,9 @@ void PlayerScreen::feedPerformanceHud() {
     const char *hdrName = "SDR";
     int vw = 0, vh = 0, ach = 0, arate = detected_audio_rate;
 
+    /* #279: play_fmt under its try-lock, released after the container name. */
+    evo::PlayFmtRead fmtRead;
+    AVFormatContext *play_fmt = fmtRead.get();
     if (play_fmt && video_stream_index >= 0 && video_stream_index < (int)play_fmt->nb_streams) {
         AVCodecParameters *cp = play_fmt->streams[video_stream_index]->codecpar;
         if (cp) {
@@ -771,6 +775,8 @@ void PlayerScreen::feedPerformanceHud() {
                 if (*c >= 'a' && *c <= 'z') *c = static_cast<char>(*c - 'a' + 'A');
         }
     }
+    fmtRead.release();
+    play_fmt = nullptr;
     char where[48] = "LOCAL FILE";
     if (auto pb = Application::getInstance().getPlaybackController()) {
         const PlaybackSource &srcInfo = pb->getSource();
@@ -926,6 +932,11 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         const char* hdrBadge = "";
         resBuf[0] = codecBuf[0] = fpsBuf[0] = '\0';
 
+        /* #279: the stream walks below read play_fmt under its try-lock
+         * (released after the secondary track's name); while a file opens
+         * or closes they read nothing and the badges stay empty a frame. */
+        evo::PlayFmtRead fmtRead;
+        AVFormatContext* play_fmt = fmtRead.get();
         if (play_fmt && video_stream_index >= 0 &&
             video_stream_index < static_cast<int>(play_fmt->nb_streams)) {
             AVCodecParameters* cp = play_fmt->streams[video_stream_index]->codecpar;
@@ -1023,6 +1034,8 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
             std::snprintf(subTrackBuf + used, sizeof(subTrackBuf) - used,
                           used ? " + %s" : "+ %s", second);
         }
+        fmtRead.release();
+        play_fmt = nullptr;
 
         // A stream with several video qualities (an HLS master): show the one
         // playing beside the audio, so R2 (Quality & Audio) is discoverable.

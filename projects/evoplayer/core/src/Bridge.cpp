@@ -21,6 +21,7 @@
 #include "evo/services/NetworkStorageService.hpp"
 
 #include <cstring>
+#include <pthread.h>
 
 namespace evo {
 /* Startup default; evo::Application::initialize() replaces these with what
@@ -50,6 +51,15 @@ char current_media_path[768] = {0};
 int evo_audio_channels = 2;
 
 AVFormatContext *play_fmt = nullptr;
+
+/* play_fmt's lock (evo/PlayFmtLock.hpp, #279): writers hold it across an
+ * open + probe and across a close, readers only try it. */
+static pthread_mutex_t g_play_fmt_mutex = PTHREAD_MUTEX_INITIALIZER;
+void evo_play_fmt_lock(void) { pthread_mutex_lock(&g_play_fmt_mutex); }
+void evo_play_fmt_unlock(void) { pthread_mutex_unlock(&g_play_fmt_mutex); }
+int evo_play_fmt_trylock(void) { return pthread_mutex_trylock(&g_play_fmt_mutex) == 0; }
+AVFormatContext *evo_play_fmt_get(void) { return play_fmt; }
+
 AVCodecContext *audio_ctx = nullptr;
 evo_vdec *g_vdec = nullptr;
 int g_vdec_force_ffmpeg = 0;
