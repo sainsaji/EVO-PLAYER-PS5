@@ -48,6 +48,7 @@ public:
 private:
     struct Job {
         bool preview = false;
+        bool hero = false;          /* the Home hero backdrop, HeroWidth x HeroHeight */
         std::string path;
         bool isDir = false;
         unsigned generation = 0;
@@ -63,6 +64,7 @@ private:
     bool loadArtInto(const std::string& mediaPath, bool isDirectory,
                      uint32_t* out, int w, int h);
     bool loadNetArtInto(const NetArtRequest& req, uint32_t* out, int w, int h);   /* worker only */
+    bool loadHeroInto(const std::string& mediaPath, uint32_t* out);              /* worker only */
     void startWorker();
     void workerMain();
     static void* workerEntry(void* self);
@@ -81,6 +83,8 @@ private:
     std::deque<Job> m_posterJobs;           /* guarded by m_jobMutex */
     bool m_hasPreviewJob = false;
     Job m_previewJob;
+    bool m_hasHeroJob = false;              /* guarded by m_jobMutex */
+    Job m_heroJob;
     std::deque<Result> m_results;
     std::set<std::string> m_pendingPosters; /* UI thread only */
     bool m_previewPending = false;          /* UI thread only */

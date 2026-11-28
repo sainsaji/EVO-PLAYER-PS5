@@ -491,6 +491,7 @@ void CoverArtService::clearCache() {
     m_generation++;                 /* results already in flight are discarded */
     m_posterJobs.clear();
     m_hasPreviewJob = false;
+    m_hasHeroJob = false;
     pthread_mutex_unlock(&m_jobMutex);
     m_pendingPosters.clear();
     m_previewPending = false;
@@ -1251,15 +1252,28 @@ void CoverArtService::ensureHeroArt(const std::string& mediaPath) {
     m_heroArtPath = mediaPath;
     m_heroArtValid = false;
 
-    if (!isNetworkPath(mediaPath) && !pathReadable(mediaPath.c_str())) {
-        return;
-    }
+    /* Decoded on the worker: a 960x540 frame extraction on the render thread
+     * stalled Home for tens of ms once the cursor settled. The poster stands
+     * in until pumpAsync() delivers it. */
+    startWorker();
+    if (!m_workerStarted) return;
+    pthread_mutex_lock(&m_jobMutex);
+    m_heroJob = Job();
+    m_heroJob.hero = true;
+    m_heroJob.path = mediaPath;
+    m_heroJob.generation = m_generation;
+    m_hasHeroJob = true;                             /* replaces any older one */
+    pthread_cond_signal(&m_jobCond);
+    pthread_mutex_unlock(&m_jobMutex);
+}
+
+bool CoverArtService::loadHeroInto(const std::string& mediaPath, uint32_t* out) {
+    if (!isNetworkPath(mediaPath) && !pathReadable(mediaPath.c_str()))
+        return false;
 
     if (!isNetworkPath(mediaPath) && isVideoFile(mediaPath)) {
-        if (extractVideoFrame(mediaPath, m_heroArtPixels.data(), HeroWidth, HeroHeight)) {
-            m_heroArtValid = true;
-            return;
-        }
+        if (extractVideoFrame(mediaPath, out, HeroWidth, HeroHeight))
+            return true;
     }
 
     std::string sidecar = resolveSidecarPath(mediaPath, false);
@@ -1267,13 +1281,13 @@ void CoverArtService::ensureHeroArt(const std::string& mediaPath) {
         int w = 0, h = 0, ch = 0;
         unsigned char* data = stbi_load(sidecar.c_str(), &w, &h, &ch, 4);
         if (data && w >= 2 && h >= 2) {
-            boxFilterScaleRgba(data, w, h, m_heroArtPixels.data(), HeroWidth, HeroHeight);
+            boxFilterScaleRgba(data, w, h, out, HeroWidth, HeroHeight);
             stbi_image_free(data);
-            m_heroArtValid = true;
-            return;
+            return true;
         }
         if (data) stbi_image_free(data);
     }
+    return false;
 }
 
 void CoverArtService::ensureBrowserPreview(const std::string& mediaPath, bool isDirectory) {
@@ -1504,6 +1518,11 @@ void CoverArtService::workerMain() {
                 m_hasPreviewJob = false;
                 break;
             }
+            if (m_hasHeroJob) {
+                job = m_heroJob;
+                m_hasHeroJob = false;
+                break;
+            }
             if (!m_posterJobs.empty()) {
                 job = m_posterJobs.front();
                 m_posterJobs.pop_front();
@@ -1516,11 +1535,12 @@ void CoverArtService::workerMain() {
 
         Result res;
         res.job = job;
-        const int w = job.preview ? PreviewWidth : PosterWidth;
-        const int h = job.preview ? PreviewHeight : PosterHeight;
+        const int w = job.hero ? HeroWidth : job.preview ? PreviewWidth : PosterWidth;
+        const int h = job.hero ? HeroHeight : job.preview ? PreviewHeight : PosterHeight;
         res.pixels.assign(static_cast<size_t>(w) * h, 0);
-        res.ok = job.net ? loadNetArtInto(job.netReq, res.pixels.data(), w, h)
-                         : loadArtInto(job.path, job.isDir, res.pixels.data(), w, h);
+        res.ok = job.hero ? loadHeroInto(job.path, res.pixels.data())
+               : job.net  ? loadNetArtInto(job.netReq, res.pixels.data(), w, h)
+                          : loadArtInto(job.path, job.isDir, res.pixels.data(), w, h);
 
         pthread_mutex_lock(&m_jobMutex);
         m_results.push_back(std::move(res));
@@ -1530,7 +1550,7 @@ void CoverArtService::workerMain() {
 
         /* Back-to-back 4K decodes exhausted the heap before this was paced
          * (see the pre-flight in extractVideoFrame); leave the allocator a gap. */
-        if (!job.preview && !job.net)
+        if (!job.preview && !job.hero && !job.net)
             usleep(150 * 1000);
     }
 }
@@ -1628,7 +1648,13 @@ void CoverArtService::pumpAsync() {
 
         if (res.job.generation != gen) continue;     /* cache was cleared */
 
-        if (res.job.preview) {
+        if (res.job.hero) {
+            if (res.job.path != m_heroArtPath) continue;          /* hero moved on */
+            if (res.ok) {
+                std::copy(res.pixels.begin(), res.pixels.end(), m_heroArtPixels.begin());
+                m_heroArtValid = true;
+            }
+        } else if (res.job.preview) {
             if (res.job.path != m_browserPreviewPath) continue;   /* cursor moved on */
             m_previewPending = false;
             if (res.ok) {
@@ -1655,12 +1681,15 @@ void CoverArtService::quiesce() {
     pthread_mutex_lock(&m_jobMutex);
     m_posterJobs.clear();
     m_hasPreviewJob = false;
+    m_hasHeroJob = false;
     while (m_busy)
         pthread_cond_wait(&m_idleCond, &m_jobMutex);
     pthread_mutex_unlock(&m_jobMutex);
     m_pendingPosters.clear();
     m_previewPending = false;
     pumpAsync();
+    /* A hero job that was queued and dropped is asked for again. */
+    if (!m_heroArtValid) m_heroArtPath.clear();
     /* A preview that was queued and dropped must be re-requestable. */
     if (!m_browserPreviewValid && !m_browserPreviewFailed)
         m_browserPreviewPath.clear();

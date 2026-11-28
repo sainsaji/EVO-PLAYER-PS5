@@ -60,10 +60,10 @@ private:
     int m_selectedCol = 0;
 
     /*
-     * Hero backdrop resolution is debounced. ensureHeroArt() decodes a video
-     * frame synchronously on the render thread, and the hero follows the
-     * recent-shelf cursor, so resolving it on every D-pad press put a full
-     * demux + decode + scale in the input path. The cached poster stands in
+     * Hero backdrop resolution is debounced. ensureHeroArt() queues a video
+     * frame decode on the cover worker, and the hero follows the recent-shelf
+     * cursor, so resolving it on every D-pad press would queue a full
+     * demux + decode + scale per press. The cached poster stands in
      * (same 16:9, just 320x180) until the cursor has been still long enough
      * for the sharp 960x540 extraction to be worth paying for.
      */
