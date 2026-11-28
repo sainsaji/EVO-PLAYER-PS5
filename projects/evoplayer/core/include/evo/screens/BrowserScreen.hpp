@@ -81,6 +81,7 @@ public:
     void handleAddSmbHost(const std::string& hostStr);
     void handleEditSmbHost(const std::string& hostStr);
     void handleEditFtpHost(const std::string& hostStr);
+    void handleRenameShare(const std::string& nameStr);
     void handleActionRename(const std::string& newName);
     void handleActionNewFolder(const std::string& folderName);
 
