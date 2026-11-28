@@ -39,6 +39,7 @@ fi
 SRCS=(
     "${REPO_ROOT}/tests/test_runner.c"
     "${REPO_ROOT}/tests/test_settings.c"
+    "${REPO_ROOT}/tests/test_persistence.c"
     "${CORE}/src/services/SettingsService.cpp"
     "${MEDIA}/src/evo_direct_mem.c"
     "${MEDIA}/src/evo_textreader.c"

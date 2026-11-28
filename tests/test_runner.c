@@ -1433,6 +1433,7 @@ static void test_stremio_stream_ranking(void)
 /* Settings service save/load and backward compatibility host tests */
 extern void test_settings_save_load_roundtrip(void);
 extern void test_settings_legacy_compat(void);
+extern void test_persistence_all(void);   /* #50: data root, recent, favorites */
 
 /* SMB client and network storage host tests */
 extern void test_smb_split_path(void);
@@ -1476,6 +1477,7 @@ int main(void)
     test_audio_volume_boost();
     test_settings_save_load_roundtrip();
     test_settings_legacy_compat();
+    test_persistence_all();
     test_smb_split_path();
     test_smb_storage_service();
     test_smb_url_sanitizer();
