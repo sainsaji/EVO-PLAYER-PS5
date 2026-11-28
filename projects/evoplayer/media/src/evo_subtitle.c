@@ -2988,135 +2988,12 @@ static void clean_sample_str(char *str) {
     *dst = '\0';
 }
 
-static int prospero_subtitle_extract_samples_from_file(const char *path, int stream_index, int slot_idx)
-{
-    if (!path || !path[0] || stream_index < 0 || slot_idx < 0 || slot_idx > 1) return 0;
-    /* This runs on the UI thread (the subtitle picker). A second open of a
-     * network stream - with none of the network options or timeouts - froze
-     * the UI for seconds, or 75 s on a dead host (PS5 connect() ignores
-     * timeouts). Local files only; a stream's preview fills from the cues
-     * playback has already decoded. */
-    if (path[0] != '/') return 0;
-
-    pthread_mutex_lock(&s_sample_pool_mutex);
-    sample_pool_sync_locked(slot_idx);
-    if (s_sample_cue_count[slot_idx] > 0) {
-        int c = s_sample_cue_count[slot_idx];
-        pthread_mutex_unlock(&s_sample_pool_mutex);
-        return c;
-    }
-    pthread_mutex_unlock(&s_sample_pool_mutex);
-
-    AVFormatContext *fmt = NULL;
-    if (avformat_open_input(&fmt, path, NULL, NULL) < 0) {
-        return 0;
-    }
-    if (avformat_find_stream_info(fmt, NULL) < 0 || stream_index >= (int)fmt->nb_streams) {
-        avformat_close_input(&fmt);
-        return 0;
-    }
-
-    for (unsigned int i = 0; i < fmt->nb_streams; ++i) {
-        fmt->streams[i]->discard = ((int)i == stream_index) ? AVDISCARD_DEFAULT : AVDISCARD_ALL;
-    }
-
-    AVStream *st = fmt->streams[stream_index];
-    enum AVCodecID cid = st->codecpar ? st->codecpar->codec_id : AV_CODEC_ID_NONE;
-    if (st->codecpar && st->codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE) {
-        avformat_close_input(&fmt);
-        return 0;
-    }
-
-    /* Seek into ~10% of duration to bypass initial silence/logos */
-    if (fmt->duration > 0) {
-        int64_t target_ts = fmt->duration / 10;
-        av_seek_frame(fmt, -1, target_ts, AVSEEK_FLAG_BACKWARD);
-    }
-
-    AVCodecContext *dec_ctx = NULL;
-    if (cid != AV_CODEC_ID_SUBRIP) {
-        const AVCodec *dec = avcodec_find_decoder(cid);
-        if (dec) {
-            dec_ctx = avcodec_alloc_context3(dec);
-            if (dec_ctx) {
-                avcodec_parameters_to_context(dec_ctx, st->codecpar);
-                dec_ctx->pkt_timebase = st->time_base;
-                if (avcodec_open2(dec_ctx, dec, NULL) < 0) {
-                    avcodec_free_context(&dec_ctx);
-                    dec_ctx = NULL;
-                }
-            }
-        }
-    }
-
-    AVPacket *pkt = av_packet_alloc();
-    if (!pkt) {
-        if (dec_ctx) avcodec_free_context(&dec_ctx);
-        avformat_close_input(&fmt);
-        return 0;
-    }
-
-    int collected = 0;
-    int packets_read = 0;
-    while (collected < 32 && packets_read < 500) {
-        int ret = av_read_frame(fmt, pkt);
-        if (ret < 0) break;
-        packets_read++;
-
-        if (pkt->stream_index == stream_index && pkt->size > 0 && pkt->data) {
-            char raw_text[512] = {0};
-            if (cid == AV_CODEC_ID_SUBRIP) {
-                size_t sz = (size_t)pkt->size < sizeof(raw_text) - 1 ? (size_t)pkt->size : sizeof(raw_text) - 1;
-                memcpy(raw_text, pkt->data, sz);
-                raw_text[sz] = 0;
-            } else if (dec_ctx) {
-                AVSubtitle sub;
-                memset(&sub, 0, sizeof(sub));
-                int got_sub = 0;
-                if (avcodec_decode_subtitle2(dec_ctx, &sub, &got_sub, pkt) >= 0 && got_sub) {
-                    for (unsigned int ri = 0; ri < sub.num_rects; ++ri) {
-                        if (sub.rects[ri]->text) {
-                            snprintf(raw_text, sizeof(raw_text), "%s", sub.rects[ri]->text);
-                            break;
-                        } else if (sub.rects[ri]->ass) {
-                            const char *payload = prospero_embedded_subtitle_ass_payload(sub.rects[ri]->ass);
-                            if (payload) snprintf(raw_text, sizeof(raw_text), "%s", payload);
-                            break;
-                        }
-                    }
-                    avsubtitle_free(&sub);
-                }
-            }
-
-            char cleaned[512] = {0};
-            prospero_subtitle_clean_line(raw_text, cleaned, sizeof(cleaned));
-            clean_sample_str(cleaned);
-            if (cleaned[0] && strlen(cleaned) > 2) {
-                bool dup = false;
-                for (int ci = 0; ci < collected; ++ci) {
-                    if (strcmp(s_sample_cue_pool[slot_idx][ci], cleaned) == 0) {
-                        dup = true;
-                        break;
-                    }
-                }
-                if (!dup) {
-                    pthread_mutex_lock(&s_sample_pool_mutex);
-                    snprintf(s_sample_cue_pool[slot_idx][collected],
-                             sizeof(s_sample_cue_pool[slot_idx][0]), "%s", cleaned);
-                    collected++;
-                    s_sample_cue_count[slot_idx] = collected;
-                    pthread_mutex_unlock(&s_sample_pool_mutex);
-                }
-            }
-        }
-        av_packet_unref(pkt);
-    }
-
-    av_packet_free(&pkt);
-    if (dec_ctx) avcodec_free_context(&dec_ctx);
-    avformat_close_input(&fmt);
-    return collected;
-}
+/* The subtitle picker's preview lines come only from cues playback has
+ * already decoded (prospero_embedded_subtitle_add_cue feeds the sample pool).
+ * It used to re-open the media file here, on the UI thread, and read up to 500
+ * subtitle packets when the pool was empty. A picture track (PGS, DVD, DVB)
+ * never yields text, so on a large Blu-ray remux that read scanned gigabytes
+ * of the file and the app froze until the system killed it (#266, #279). */
 
 int prospero_subtitle_get_cue_count(int is_secondary) {
     if (is_secondary) {
@@ -3135,8 +3012,7 @@ int prospero_subtitle_get_cue_count(int is_secondary) {
             sample_pool_sync_locked(1);
             int scnt = s_sample_cue_count[1];
             pthread_mutex_unlock(&s_sample_pool_mutex);
-            if (scnt > 0) return scnt;
-            return prospero_subtitle_extract_samples_from_file(current_media_path, prospero_secondary_subtitle_stream_index, 1);
+            return scnt > 0 ? scnt : 0;
         }
         return 0;
     }
@@ -3155,8 +3031,7 @@ int prospero_subtitle_get_cue_count(int is_secondary) {
         sample_pool_sync_locked(0);
         int scnt = s_sample_cue_count[0];
         pthread_mutex_unlock(&s_sample_pool_mutex);
-        if (scnt > 0) return scnt;
-        return prospero_subtitle_extract_samples_from_file(current_media_path, prospero_embedded_subtitle_stream_index, 0);
+        return scnt > 0 ? scnt : 0;
     }
     if (prospero_subtitle_count > 0) {
         return prospero_subtitle_count;
