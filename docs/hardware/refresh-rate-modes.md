@@ -82,6 +82,10 @@ Notes for whoever picks this up:
 
 ## Open
 
+- FW 13.60 follow-up (media-app category, Blu-ray call sequence, AvControl,
+  per-video HDR/SDR): [hdr-sdr-switching.md](hdr-sdr-switching.md). As a
+  media app `ConfigureOutputEx` is accepted for the current modes, but 23.976
+  is still refused (`0x80290016`) and the `0xb` flags still give `0x80290001`.
 - Why step 3 still fails after the setter returned 0. Either the setter took a
   path that does not set `0x80`, or another check in the options validator
   (`0x163e0`) or the flag mask applies.
