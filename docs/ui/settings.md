@@ -57,7 +57,7 @@ its real effect (#158). A row can be disabled by another setting, and then says 
 | | Match video frame rate | off, on ([../hardware/refresh-rate-modes.md](../hardware/refresh-rate-modes.md)) |
 | | Deep blacks | Off, Low, High (pulls raised shadows to true black on OLED) |
 
-Defaults: the first listed choice, except Default font style (Rounded, the second), Subtitle size (Medium, the second) and Skip intros & credits (Ask, the second); Phone & log port defaults to 9780; toggles that default on are Resume playback, Auto subtitles, Navigation sounds, Controller lightbar, Folders first and Ask which live stream. Everything in Experimental, Upscaling, Audio passthrough and the Debug overlay defaults off. A fresh install uses the MIDNIGHT theme.
+Defaults: the first listed choice, except Default font style (Rounded, the second), Subtitle size (Medium, the second) and Skip intros & credits (Ask, the second); Phone & log port defaults to 9780; toggles that default on are Resume playback, Auto subtitles, Navigation sounds, Controller lightbar, Folders first and Ask which live stream. Everything in Experimental, Audio passthrough and the Debug overlay defaults off. Upscaling defaults to Sharp. A fresh install uses the MIDNIGHT theme.
 
 The row titles above are what the dev remote addresses: `evo-remote.sh set audio-delay
 +100` uses the title lower-cased with dashes, `set --list` prints every name with its valid

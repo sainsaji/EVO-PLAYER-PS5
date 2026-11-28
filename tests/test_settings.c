@@ -105,7 +105,7 @@ extern "C" void test_settings_save_load_roundtrip(void)
     TEST_ASSERT(svc1.getSubtitleFontFace() == 0, "Initial SubtitleFontFace default mismatch");
     TEST_ASSERT(svc1.getKeyboardType() == 1, "Initial KeyboardType default mismatch");
     TEST_ASSERT(svc1.getVideoDecoderPreference() == evo::DecoderPreference::Auto, "Initial VideoDecoderPreference default mismatch");
-    TEST_ASSERT(svc1.getUpscaler() == evo::Upscaler::Off, "Initial Upscaler default mismatch");
+    TEST_ASSERT(svc1.getUpscaler() == evo::Upscaler::Sharp, "Initial Upscaler default mismatch");
     TEST_ASSERT(svc1.getAiNetwork() == evo::AiNetwork::Auto, "Initial AiNetwork default mismatch");
     TEST_ASSERT(svc1.getRefreshRateMode() == evo::RefreshRateMode::Off, "Initial RefreshRateMode default mismatch");
     TEST_ASSERT(svc1.getHdrOutputMode() == evo::HdrOutputMode::Auto, "Initial HdrOutputMode default mismatch");
@@ -142,7 +142,7 @@ extern "C" void test_settings_save_load_roundtrip(void)
     svc1.setSubtitleFontFace(2);
     svc1.setKeyboardType(0);
     svc1.setVideoDecoderPreference(evo::DecoderPreference::NativeHardware);
-    svc1.setUpscaler(evo::Upscaler::Sharp);
+    svc1.setUpscaler(evo::Upscaler::Off);  // not the default (Sharp): a saved Off must survive (#111)
     svc1.setAiNetwork(evo::AiNetwork::Standard);
     svc1.setRefreshRateMode(evo::RefreshRateMode::Always);
     svc1.setHdrOutputMode(evo::HdrOutputMode::Off);
@@ -199,7 +199,7 @@ extern "C" void test_settings_save_load_roundtrip(void)
     TEST_ASSERT(svc2.getSubtitleFontFace() == 2, "SubtitleFontFace round-trip mismatch");
     TEST_ASSERT(svc2.getKeyboardType() == 0, "KeyboardType round-trip mismatch");
     TEST_ASSERT(svc2.getVideoDecoderPreference() == evo::DecoderPreference::NativeHardware, "VideoDecoderPreference round-trip mismatch");
-    TEST_ASSERT(svc2.getUpscaler() == evo::Upscaler::Sharp, "Upscaler round-trip mismatch");
+    TEST_ASSERT(svc2.getUpscaler() == evo::Upscaler::Off, "Upscaler round-trip mismatch (saved Off lost to the Sharp default)");
     TEST_ASSERT(svc2.getAiNetwork() == evo::AiNetwork::Standard, "AiNetwork round-trip mismatch");
     TEST_ASSERT(svc2.getRefreshRateMode() == evo::RefreshRateMode::Always, "RefreshRateMode round-trip mismatch");
     TEST_ASSERT(svc2.getHdrOutputMode() == evo::HdrOutputMode::Off, "HdrOutputMode round-trip mismatch");
