@@ -17,6 +17,7 @@ extern "C" {
 #include "evo_hw.h"
 extern AVFormatContext *play_fmt;
 extern int video_stream_index;
+extern int audio_stream_index;
 extern evo_vdec *g_vdec;
 extern int evo_audio_channels;
 extern int prospero_subtitle_enabled;
@@ -199,10 +200,26 @@ void MediaInfoScreen::render(uint32_t* framebuffer, int width, int height) {
     std::snprintf(decoderBadge, sizeof(decoderBadge), "%s",
                   isNativeHw ? "Hardware (sceVideodec2)" : "Software (FFmpeg)");
 
-    // Audio channels
-    std::snprintf(channelsStr, sizeof(channelsStr), "%d Channels (%s)",
-                  evo_audio_channels,
-                  evo_audio_channels == 6 ? "5.1 Surround" : (evo_audio_channels == 8 ? "7.1 Surround" : "Stereo"));
+    // Audio channels: the playing track's own count, as the OSD shows it.
+    // evo_audio_channels is the console's output setup (8 on a 7.1 system
+    // even for a mono file); it is only the fallback when no track is readable.
+    int fileCh = 0;
+    {
+        evo::PlayFmtRead chRead;   /* #279: play_fmt only under its try-lock */
+        AVFormatContext* f = chRead.get();
+        if (f && audio_stream_index >= 0 &&
+            audio_stream_index < static_cast<int>(f->nb_streams) &&
+            f->streams[audio_stream_index]->codecpar)
+            fileCh = f->streams[audio_stream_index]->codecpar->ch_layout.nb_channels;
+    }
+    const int ch = fileCh > 0 ? fileCh : evo_audio_channels;
+    const char* chName = (ch >= 8) ? "7.1 Surround" : (ch >= 6) ? "5.1 Surround"
+                       : (ch == 2) ? "Stereo" : (ch == 1) ? "Mono" : nullptr;
+    if (chName)
+        std::snprintf(channelsStr, sizeof(channelsStr), "%d %s (%s)",
+                      ch, ch == 1 ? "Channel" : "Channels", chName);
+    else
+        std::snprintf(channelsStr, sizeof(channelsStr), "%d Channels", ch);
 
     // Display output status (derived from VideoOut query)
     bool displayHdr = evo_agc_runtime_is_display_hdr() != 0;
