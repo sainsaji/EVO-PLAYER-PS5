@@ -140,7 +140,15 @@ roll-off on max(R,G,B), one gain for all three channels so hue survives:
   The peak rides in fields the reshape maths does not use (`lohi[0..2][3]` of
   `evo_dovi_params`, see `evo_dovi.h`). Profile 7/8 draws through
   `video_yuv_p010_pq_dyn`, Profile 5 through `video_yuv_p010_dovi_pq_out`.
-- **HDR10, static.** No RPU: the film's MaxCLL, else its mastering peak (the
+- **HDR10+, per scene.** The PS5 cannot send HDR10+ to the TV, so EVO reads the
+  scene peak itself (`evo_hdr10plus.c`: the largest MaxSCL of the ST 2094-40
+  SEI, else its 99 % percentile) and feeds it to the same map-only path as
+  Profile 7/8. Native HEVC reads the prefix SEI of each access unit; the FFmpeg
+  path (and AV1 through dav1d) reads the frame's side data. A stream with both
+  an RPU and HDR10+ uses the RPU. Host-tested on built payloads only
+  (`tests/test_hdr10plus.cpp`); not yet seen on a console or checked against a
+  real HDR10+ file (2026-11-16).
+- **HDR10, static.** No RPU and no HDR10+ scene peak yet: the film's MaxCLL, else its mastering peak (the
   smaller when both are there), read at open
   (`evo_agc_runtime_set_hdr_static_peak`).
 - A shot at or below the panel peak is passed through untouched, so the setting
