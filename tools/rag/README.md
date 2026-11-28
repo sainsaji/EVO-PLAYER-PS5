@@ -99,7 +99,7 @@ update the checkout.
 
 The rest of `third_party/` (ffmpeg, FastCopy, the Half-Life port), generated shader pipe
 tables, the embedded asset bundle,
-`main.c.legacy` (CLAUDE.md: do not learn from it), files over 300 KB, binaries.
+files over 300 KB, binaries.
 
 ## Changing things
 

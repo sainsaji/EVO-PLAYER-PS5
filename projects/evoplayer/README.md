@@ -16,7 +16,6 @@ nothing of the original remains.
 | `addons/` | `evo_net`, the provider seam and the providers, the in-app updater |
 | `src/`, `include/` | boot log, jailbreak, data paths, recent and favourites, log server, dev remote |
 | `assets/`, `shaders/`, `sce_sys/` | UI documents and fonts, `.pipe` shaders, `param.json` and title art |
-| `main.c.legacy` | the old monolith. **Not compiled.** Kept for `git blame` only |
 
 Do not run `make` here; the project Makefile lacks FFmpeg's transitive link
 dependencies. Build with `scripts/package-app.sh` from the repository root.

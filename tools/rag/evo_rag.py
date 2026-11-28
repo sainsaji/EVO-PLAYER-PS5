@@ -26,8 +26,8 @@ Sources (the `source` filter):
               "[not in checkout]". Same rule as thirdparty: only when asked for.
 
 Skipped on purpose: third_party/ffmpeg, FastCopy, daemons (see THIRDPARTY_SKIP),
-generated pipe tables and the embedded asset bundle, main.c.legacy (CLAUDE.md says not
-to learn from it), anything over 300 KB.
+generated pipe tables and the embedded asset bundle,
+anything over 300 KB.
 """
 import argparse
 import hashlib
