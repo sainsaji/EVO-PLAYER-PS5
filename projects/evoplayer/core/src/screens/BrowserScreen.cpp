@@ -2265,8 +2265,8 @@ void BrowserScreen::update(double deltaMs) {
         if (kb == ADDKB_ADDRESS) {
             static std::string title;
             title = !s_addError.empty() ? s_addError
-                  : smb ? "Server address (e.g. 192.168.0.10 or smb://nas/Movies)"
-                        : "Server address (e.g. 192.168.0.10:21 or ftp://host)";
+                  : smb ? "Step 2 of 4: server address (e.g. 192.168.0.10 or smb://nas/Movies)"
+                        : "Step 2 of 3: server address (e.g. 192.168.0.10:21 or ftp://host)";
             s_addError.clear();
             evo_keyboard_open_phone(title.c_str(), draftAddressText().c_str(), 512, OnAddAddress, this);
         } else if (kb == ADDKB_USER) {
@@ -2787,11 +2787,12 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         params.action_menu_focused = 0;
         params.action_menu_target = s_addDraft.host.c_str();
         params.action_target_sub = s_addDraft.protocol == NetworkProtocol::SMB ? "SMB" : "FTP";
-        params.action_menu_eyebrow = "TESTING";
+        params.action_menu_eyebrow = !s_addEditId.empty() ? "TESTING"
+            : s_addDraft.protocol == NetworkProtocol::SMB ? "TESTING  •  STEP 3 OF 4" : "TESTING  •  STEP 3 OF 3";
         params.action_menu_count = 1;
         params.action_menu_items[0].label = "Cancel";
         params.action_menu_items[0].desc = "Checking the address and login...";
-        params.action_menu_items[0].icon_path = "../icons/icon_folder.png";
+        params.action_menu_items[0].icon_path = "../icons/btn_circle.png";
         params.action_menu_items[0].danger = 0;
         params.action_paste_enabled = 0;
         params.action_clipboard_info = nullptr;
@@ -2807,7 +2808,7 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         params.action_menu_focused = s_pickFocus < n ? s_pickFocus - top : rows;
         params.action_menu_target = s_addDraft.host.c_str();
         params.action_target_sub = sub.c_str();
-        params.action_menu_eyebrow = "CHOOSE SHARES";
+        params.action_menu_eyebrow = !s_addEditId.empty() ? "CHOOSE SHARES" : "CHOOSE SHARES  •  STEP 4 OF 4";
         params.action_menu_count = rows + 1;
         for (int i = 0; i < rows; ++i) {
             const int idx = top + i;
@@ -2831,15 +2832,16 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         params.action_menu_target = s_addDraft.host.c_str();
         params.action_target_sub = !s_addError.empty() ? s_addError.c_str()
                                  : s_addDraft.protocol == NetworkProtocol::SMB ? "SMB" : "FTP";
-        params.action_menu_eyebrow = "SIGN IN";
+        params.action_menu_eyebrow = !s_addEditId.empty() ? "SIGN IN"
+            : s_addDraft.protocol == NetworkProtocol::SMB ? "SIGN IN  •  STEP 3 OF 4" : "SIGN IN  •  STEP 3 OF 3";
         params.action_menu_count = 2;
         params.action_menu_items[0].label = "Guest";
         params.action_menu_items[0].desc = "No user or password";
-        params.action_menu_items[0].icon_path = "../icons/icon_folder.png";
+        params.action_menu_items[0].icon_path = "../icons/icon_link.png";
         params.action_menu_items[0].danger = 0;
         params.action_menu_items[1].label = "Account";
         params.action_menu_items[1].desc = "Enter a user and password";
-        params.action_menu_items[1].icon_path = "../icons/icon_folder.png";
+        params.action_menu_items[1].icon_path = "../icons/icon_keyboard.png";
         params.action_menu_items[1].danger = 0;
         params.action_paste_enabled = 0;
         params.action_clipboard_info = nullptr;
@@ -2848,17 +2850,17 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         params.action_menu_focused = s_addServerChooserFocused;
         params.action_menu_target = "+ Add Server";
         params.action_target_sub = "SMB or FTP";
-        params.action_menu_eyebrow = "ADD SERVER";
+        params.action_menu_eyebrow = "ADD SERVER  •  STEP 1";
         params.action_menu_count = 2;
 
         params.action_menu_items[0].label = "Samba / Windows share (SMB)";
         params.action_menu_items[0].desc = "Connect via Samba / Windows share (SMB2/3)";
-        params.action_menu_items[0].icon_path = "../icons/icon_folder.png";
+        params.action_menu_items[0].icon_path = "../icons/icon_monitor.png";
         params.action_menu_items[0].danger = 0;
 
         params.action_menu_items[1].label = "FTP server";
         params.action_menu_items[1].desc = "Connect via Network FTP";
-        params.action_menu_items[1].icon_path = "../icons/icon_folder.png";
+        params.action_menu_items[1].icon_path = "../icons/icon_globe.png";
         params.action_menu_items[1].danger = 0;
 
         params.action_paste_enabled = 0;
