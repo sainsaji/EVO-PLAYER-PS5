@@ -284,17 +284,27 @@ send_controller() {   # send_controller launch|close
 # 0x80940033 and no [SHELLCORE] line for the title appears, though its scanner
 # keeps logging. Re-sending ShadowMount to elfldr stops the old instance
 # ("[RESTART]") and installs the hooks again. deploy-app.sh --ffpfsc runs this
-# itself. Only v1.7beta4 - the build the console runs - is accepted: the other
-# ShadowMount ELFs are different versions.
-SM_ELF="${SHADOWMOUNT_ELF:-${OUTPUT_DIR}/shadowmountplusb4.elf}"
-SM_SHA="fc4e5f715e76660ce34bde2adb10eaf1d069cb2cdf06f7a380896dfb62bd0c4a"
+# itself. Only the builds the console autoloads are accepted, by sha256: send
+# the one it runs. v1.7beta12 (pldmgr, /data/pldmgr/payloads/ShadowMountPlus/)
+# since 2026-11-16; v1.7beta4 before. Both stop the running instance
+# ("[RESTART]") and log "hooks installed ... launch=1".
+if [[ -n "${SHADOWMOUNT_ELF:-}" ]]; then
+    SM_ELF="${SHADOWMOUNT_ELF}"
+elif [[ -f "${OUTPUT_DIR}/ShadowMountPlus_1.7beta12.elf" ]]; then
+    SM_ELF="${OUTPUT_DIR}/ShadowMountPlus_1.7beta12.elf"
+else
+    SM_ELF="${OUTPUT_DIR}/shadowmountplusb4.elf"
+fi
+SM_SHAS="8755172ec9bef1bff5453ea75606e0caf7c41b5963f94f5a1087e7e8c6d9b1bd fc4e5f715e76660ce34bde2adb10eaf1d069cb2cdf06f7a380896dfb62bd0c4a"
 
 do_smrestart() {
-    local slot hb base rc=0
+    local slot hb base rc=0 sha
     [[ -f "${SM_ELF}" ]] || die "no ${SM_ELF}.
-   Copy ShadowMount+ v1.7beta4 (shadowmountplusb4.elf) there, or set SHADOWMOUNT_ELF."
-    [[ "$(sha256sum "${SM_ELF}" | cut -d' ' -f1)" == "${SM_SHA}" ]] \
-        || die "${SM_ELF} is not ShadowMount+ v1.7beta4 (sha256 differs) - only b4 matches the console's."
+   Copy the ShadowMount+ ELF the console autoloads there (ShadowMountPlus_1.7beta12.elf from
+   /data/pldmgr/payloads/ShadowMountPlus/ over FTP), or set SHADOWMOUNT_ELF."
+    sha="$(sha256sum "${SM_ELF}" | cut -d' ' -f1)"
+    [[ " ${SM_SHAS} " == *" ${sha} "* ]] \
+        || die "${SM_ELF} is not a ShadowMount+ build this console runs (sha256 ${sha})."
     hb="$(lc heartbeat)"
     [[ "${hb}" == RUNNING ]] && die "EVO is running - quit + close it before restarting ShadowMount."
     slot="$(lc slot)"
@@ -303,7 +313,7 @@ do_smrestart() {
     # A resident payload never closes the socket: exit 124 (timeout) is normal.
     timeout --signal=TERM 15s nc -q0 "${PS5_HOST}" "${ELF_PORT}" < "${SM_ELF}" > /dev/null 2>&1 || rc=$?
     (( rc == 0 || rc == 124 )) || die "elfldr ${PS5_HOST}:${ELF_PORT} did not take ShadowMount (nc exit ${rc})"
-    echo "sent: ShadowMount+ v1.7beta4 -> ${PS5_HOST}:${ELF_PORT}"
+    echo "sent: $(basename "${SM_ELF}") -> ${PS5_HOST}:${ELF_PORT}"
     [[ "$(lc wait-hooks "${base}" 45)" == HOOKED ]] \
         || die "no '[SHELLCORE] hooks installed ... launch=1' within 45 s of the restart. STOP - check the console."
     ok "ShadowMount restarted (launch hook installed)"
