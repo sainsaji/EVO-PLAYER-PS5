@@ -4561,7 +4561,12 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
     constants.black = k_deep_black[g_deep_black_mode][0];
     constants.knee  = k_deep_black[g_deep_black_mode][1];
     constants.slope = k_deep_black[g_deep_black_mode][2];
-    constants.pad   = 0.0f;
+    /* Dither (uDither): one code step of the scanout, for a 10-bit source drawn
+     * straight to it. 0 for 8-bit sources (nothing to gain, and Off stays
+     * pixel-identical) and for a scratch target, whose later passes would
+     * sharpen the grain. */
+    constants.pad   = (ten_bit && target_slot < 0)
+                          ? (g_agc_dev.is_hdr ? 1.0f / 1023.0f : 1.0f / 255.0f) : 0.0f;
 
     float cx = (disp_w > 0 && disp_w <= coded_w) ? (float)disp_w / (float)coded_w : 1.0f;
     float cy = (disp_h > 0 && disp_h <= coded_h) ? (float)disp_h / (float)coded_h : 1.0f;
