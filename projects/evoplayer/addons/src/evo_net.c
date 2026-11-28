@@ -1513,12 +1513,12 @@ static void net_log_failure(const char *method, const char *url, int res, int st
     if (res == EVO_NET_OK || !url || url_is_image(url)) return;
     char why[200];
     evo_net_describe_failure(res, status, url, why, sizeof why);
-    const char *u = strstr(url, "://");
-    u = u ? u + 3 : url;
-    const char *p = u + strcspn(u, "/?");
-    const int plen = (int)strcspn(p, "?");
+    /* The whole link up to the query, scheme included, so evo_log_redact()
+     * masks the debrid keys and tokens a path can carry (it acts only on a
+     * line with a "://" link). */
+    const int plen = (int)strcspn(url, "?");
     PROV_ERR("net: %s %.*s failed after %lld ms: %s", method,
-             plen > 100 ? 100 : plen, p, ms, why);
+             plen > 140 ? 140 : plen, url, ms, why);
 }
 
 int evo_net_http_get_sync(const char *url,
@@ -1610,9 +1610,11 @@ static void *evo_net_worker(void *arg)
             if (!image_worker)
                 net_log_failure(req->method, req->url, res, req->status_code, ms);
             if (!image_worker && res == EVO_NET_OK) {
-                /* Host and path only: a query string can hold a token. */
-                const char *u = strstr(req->url, "://");
-                u = u ? u + 3 : req->url;
+                /* No query: it can hold a token. The scheme stays, because
+                 * evo_log_redact() masks debrid keys and opaque path segments
+                 * (torbox=KEY, an addon's encoded config) only in a line that
+                 * holds a "://" link. */
+                const char *u = req->url;
                 const int ulen = (int)strcspn(u, "?");
                 PROV_LOG("net: %s %.*s -> %d http=%d %zu B in %ld ms%s", req->method,
                          ulen > 120 ? 120 : ulen, u, res, req->status_code, req->response_len, ms,
