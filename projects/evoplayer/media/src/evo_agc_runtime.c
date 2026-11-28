@@ -357,6 +357,14 @@ typedef struct evo_agc_device {
         uint8_t     *mem_base[2];
         /* The last plan, so a change of source or mode is logged once. */
         int          last_key[6];
+        /* The network's result still in the scratch slots: for which source
+         * frame, plan and picture settings. A redraw of the same frame (the
+         * other scanout buffer, a subtitle or OSD frame over it) then runs
+         * only the final pass. See agc_upscale_run. */
+        int          net_valid;
+        int64_t      net_pts;
+        int          net_key[13];
+        uint32_t     reused;           /* final-pass-only runs, for the us= log */
         /* This frame carried upscale passes; frame_end times its GPU work. */
         int          this_frame;
         uint32_t     window_frames;
@@ -3417,6 +3425,7 @@ static int agc_upscale_alloc(int blk)
 /* Called from shutdown after the GPU drain. */
 static void agc_upscale_release(void)
 {
+    g_agc_dev.up.net_valid = 0;
     for (int blk = 0; blk < 2; ++blk) {
         const size_t bytes = (size_t)(blk ? EVO_AGC_UP_EXT_SURFACES : EVO_AGC_UP_SURFACES) *
                              EVO_AGC_UP_SLOT_BYTES;
@@ -3701,7 +3710,7 @@ static int agc_upscale_plan(uint32_t src_w, uint32_t src_h, int ten_bit,
  * ends the network produces 3 textures - the residual for R, G and B - and is
  * run as accumulate passes for each layer it reads (2..6), per output. */
 static int agc_upscale_run_ul(const agc_up_plan_t *pl, const agc_up_tex_t *l0_tex,
-                              const agc_up_surface_t *scan)
+                              const agc_up_surface_t *scan, int reuse)
 {
     static const float full[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
     enum { W = EVO_AGC_UP_UL_WIDTH };
@@ -3715,7 +3724,13 @@ static int agc_upscale_run_ul(const agc_up_plan_t *pl, const agc_up_tex_t *l0_te
 
     agc_up_tex_t cur[W + 1], acc[W];
     int have_acc = 0, pass = 0, apass = 0, rc = 0;
-    for (int layer = 0; layer < EVO_AGC_UP_UL_LAYERS && rc == 0; ++layer) {
+    if (reuse) {
+        /* The accumulators the last full run ended in. */
+        const int aset = (EVO_AGC_UP_UL_LAYERS - 1 - EVO_AGC_UP_UL_FED_FIRST) & 1;
+        for (int j = 0; j < W; ++j)
+            acc[j] = up_tex(&a[aset][j], 0);
+    }
+    for (int layer = 0; !reuse && layer < EVO_AGC_UP_UL_LAYERS && rc == 0; ++layer) {
         const int set = layer & 1;
         agc_up_tex_t in[W];
         for (int j = 0; j < W; ++j)
@@ -3745,8 +3760,22 @@ static int agc_upscale_run_ul(const agc_up_plan_t *pl, const agc_up_tex_t *l0_te
     return rc;
 }
 
-/* Everything after the YUV pass has filled L0. */
-static int agc_upscale_run(const agc_up_plan_t *pl)
+/* Read by the redraw cache below; defined with the deep-black and HDR code. */
+static int g_deep_black_mode;
+static int g_hdr_peak_nits;
+static int g_hdr_map_mode;
+
+/* Everything after the YUV pass has filled L0.
+ *
+ * pts_us is the source frame (INT64_MIN: unknown, never reuse). The same
+ * frame is drawn more than once - into the other scanout buffer, and on every
+ * refresh while a subtitle or the OSD is over it, because that clears the
+ * buffer - and the network's output for it is still in the scratch slots. So
+ * a redraw of the frame it last ran on, with the same plan and picture
+ * settings, runs only the final pass. Measured on a PS5 Pro, 960x540 -> 4K,
+ * AI Maximum: 56 network runs a second on a 6 fps file with PGS subtitles
+ * shown a third of the time, where once per source frame is enough. */
+static int agc_upscale_run(const agc_up_plan_t *pl, int64_t pts_us)
 {
     static const float full[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
     const uint32_t sw = pl->src_w, sh = pl->src_h;
@@ -3759,10 +3788,24 @@ static int agc_upscale_run(const agc_up_plan_t *pl)
     const agc_up_tex_t l0_tex = up_tex(&l0, 1);
     int rc = 0;
 
+    int key[13];
+    key[0] = pl->mode; key[1] = pl->net; key[2] = pl->deep;
+    key[3] = (int)sw; key[4] = (int)sh;
+    key[5] = pl->x0; key[6] = pl->y0; key[7] = pl->x1; key[8] = pl->y1;
+    key[9] = g_deep_black_mode; key[10] = g_hdr_peak_nits; key[11] = g_hdr_map_mode;
+    float uvsum = pl->uv[0] + 3.0f * pl->uv[1] + 7.0f * pl->uv[2] + 13.0f * pl->uv[3];
+    memcpy(&key[12], &uvsum, sizeof(int));
+    const int reuse = pts_us != INT64_MIN && g_agc_dev.up.net_valid &&
+                      g_agc_dev.up.net_pts == pts_us &&
+                      memcmp(key, g_agc_dev.up.net_key, sizeof(key)) == 0;
+    /* Invalid until this run's passes are recorded; set again below. */
+    g_agc_dev.up.net_valid = 0;
+
     if (pl->mode == EVO_AGC_UPSCALE_SHARP) {
         agc_up_surface_t e = up_surface(UP_SLOT_E, (uint32_t)vw, (uint32_t)vh, 0);
         const agc_up_tex_t e_tex = up_tex(&e, 0);
-        rc = agc_up_pass(EVO_AGC_PIPE_UP_EASU, &e, 0, 0, vw, vh, pl->uv, &l0_tex, 1);
+        if (!reuse)
+            rc = agc_up_pass(EVO_AGC_PIPE_UP_EASU, &e, 0, 0, vw, vh, pl->uv, &l0_tex, 1);
         if (rc == 0)
             rc = agc_up_pass(EVO_AGC_PIPE_UP_RCAS, &scan, pl->x0, pl->y0, vw, vh, full, &e_tex, 1);
     } else {
@@ -3772,10 +3815,14 @@ static int agc_upscale_run(const agc_up_plan_t *pl)
                                   up_surface(UP_SLOT_A0 + 1, sw, sh, 1) };
         agc_up_tex_t in = l0_tex, residual;
         if (pl->net == 2) {
-            rc = agc_upscale_run_ul(pl, &l0_tex, &scan);
+            rc = agc_upscale_run_ul(pl, &l0_tex, &scan, reuse);
             goto done;
         }
-        if (!pl->net) {
+        if (reuse) {
+            /* Where the last full run left its residual. */
+            residual = !pl->net ? up_tex(&f[(EVO_AGC_UP_S_CONVS - 1) & 1], 0)
+                                : up_tex(&a[(EVO_AGC_UP_M_CONVS - 1) & 1], 0);
+        } else if (!pl->net) {
             for (int i = 0; i < EVO_AGC_UP_S_CONVS && rc == 0; ++i) {
                 rc |= agc_up_pass(EVO_AGC_PIPE_UP_S_CONV0 + i, &f[i & 1], 0, 0,
                                   (int)sw, (int)sh, full, &in, 1);
@@ -3805,6 +3852,13 @@ done:
     agc_up_restore_scanout();
     if (rc == 0) {
         g_agc_dev.up.this_frame = 1;
+        if (pts_us != INT64_MIN) {
+            g_agc_dev.up.net_valid = 1;
+            g_agc_dev.up.net_pts = pts_us;
+            memcpy(g_agc_dev.up.net_key, key, sizeof(key));
+        }
+        if (reuse)
+            g_agc_dev.up.reused++;
     } else {
         static int s_fail_log = 4;
         if (s_fail_log > 0) {
@@ -3826,11 +3880,12 @@ static void agc_upscale_note_gpu_time(uint64_t us)
     if (++g_agc_dev.up.window_frames < EVO_AGC_UP_WINDOW)
         return;
     const uint64_t avg = g_agc_dev.up.window_us / g_agc_dev.up.window_frames;
-    evo_boot_log("agc upscale us=%llu n=%u mode=%s budget_us=%u (frame GPU submit->retire, 100 us grain)",
-                 (unsigned long long)avg, g_agc_dev.up.window_frames,
+    evo_boot_log("agc upscale us=%llu n=%u reused=%u mode=%s budget_us=%u (frame GPU submit->retire, 100 us grain)",
+                 (unsigned long long)avg, g_agc_dev.up.window_frames, g_agc_dev.up.reused,
                  g_agc_dev.up.label, EVO_AGC_UP_BUDGET_US);
     g_agc_dev.up.window_us = 0;
     g_agc_dev.up.window_frames = 0;
+    g_agc_dev.up.reused = 0;
 
     if (avg <= EVO_AGC_UP_BUDGET_US) {
         g_agc_dev.up.over_budget_windows = 0;
@@ -4290,7 +4345,7 @@ static int agc_interp_run_warp(const agc_interp_plan_t *ipl, const agc_up_plan_t
                                 (int)sw, (int)sh, full, params, tex_warp, 3);
         if (rc == 0) {
             evo_agc_flush_color_target();
-            rc = agc_upscale_run(upl);
+            rc = agc_upscale_run(upl, INT64_MIN);
         }
     } else {
         agc_up_surface_t scan;
@@ -4320,7 +4375,7 @@ static int agc_interp_present_single(int slot, const agc_interp_plan_t *ipl, con
                                 (int)sw, (int)sh, full, params, tex3, 3);
         if (rc == 0) {
             evo_agc_flush_color_target();
-            rc = agc_upscale_run(upl);
+            rc = agc_upscale_run(upl, INT64_MIN);
         }
     } else {
         agc_up_surface_t scan;
@@ -4760,7 +4815,7 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
                 return -1;
         }
     } else if (upscale) {
-        if (agc_upscale_run(&up_plan) != 0)
+        if (agc_upscale_run(&up_plan, pts_us) != 0)
             return -1;
     }
 

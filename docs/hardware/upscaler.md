@@ -26,7 +26,13 @@ YUV→RGB shader. **Settings → Video & Display → UPSCALING** now offers:
 | Auto | Large on a detected PS5 Pro, Standard otherwise | — |
 | Standard | Anime4K S: 4 convs x 4 channels | ≤ ~1.1 ms |
 | Large | Anime4K M: 7 convs x 4 channels + 1x1 | ~1.75 ms |
-| Maximum (Pro) | Anime4K UL: 7 layers x 12 channels + an RGB 1x1 over layers 2-6 | not yet measured |
+| Maximum (Pro) | Anime4K UL: 7 layers x 12 channels + an RGB 1x1 over layers 2-6 | ~2.5 ms from a 960x540 source (2026-11-28); 1080p not measured |
+
+A redraw of the same source frame (the other scanout buffer, or every refresh
+while a subtitle or the OSD is over the picture) reuses the network's output
+and runs only the final pass: 0.5-0.75 ms average instead of 2.5 ms with
+Maximum, 85-95 % of draws reused with subtitles on (`reused=` in the
+`agc upscale us=` line). See `agc_upscale_run`.
 
 The override exists because the Pro probe cannot identify every Pro (it fails
 on the dev console, which *is* a Pro). Every choice works on any PS5; each
