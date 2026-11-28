@@ -352,10 +352,27 @@ bool Application::initialize(int argc, char** argv) {
     return true;
 }
 
+namespace { static void notifyOnScreen(const char* text); }  // defined below
+
 bool Application::initHardware() {
 #if defined(EVO_APP_MODULE)
     evo_bt("AGC: bare-metal AGC device context");
     int agcOk = evo_agc_runtime_init(DisplayWidth, DisplayHeight, 0);
+    if (agcOk != 0) {
+        /* #198: this used to leave a black screen and no word anywhere a user
+         * could read: the runtime prints its reason to stdout, which the app
+         * module does not have. Say it in evo.log (evo_bt lines are held until
+         * the self-unjail opens /mnt/usb0, then flushed) and on screen. */
+        evo_bt("FATAL display: GPU runtime did not start (rc=%d: %s) - "
+               "nothing can be drawn, the screen stays black",
+               agcOk, agcOk == -2 ? "direct memory could not be mapped"
+                    : "direct memory or VideoOut/AGC setup failed");
+        char note[160];
+        std::snprintf(note, sizeof note,
+                      "EVO Player could not start the display (code %d). "
+                      "Close it and send evo.log with your report.", agcOk);
+        notifyOnScreen(note);
+    }
     if (agcOk == 0) {
         /*
          * The runtime resolves what the panel is actually running at while it
