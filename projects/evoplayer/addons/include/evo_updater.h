@@ -44,8 +44,9 @@ typedef struct {
 } evo_updater_status_t;
 
 /* Start a check (no-op while one is running or a download is in progress).
- * prefer_pro picks the "-pro.ffpfsc" asset, for a console running in Pro memory mode. */
-void evo_updater_check(int prefer_pro);
+ * There is one image for every console: it asks for the PS5 Pro memory mode,
+ * which only a Pro grants. */
+void evo_updater_check(void);
 
 /* From AVAILABLE: start the download. Returns 1 if it started. */
 int  evo_updater_download(void);

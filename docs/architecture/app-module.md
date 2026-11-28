@@ -23,7 +23,7 @@ build.
 | `applicationCategoryType` / `contentBadgeType` | `0` / `1` | game category; the validator requires this pair |
 | `gameIntent.permittedIntents` | `launchActivity` | required for category 0 |
 | `attribute` | `1644167168` (`0x62000000`) | required for the HDR-capable VideoOut profile |
-| `attribute3` | `524352` (`0x80040`) | standard memory. `--pro-memory` sets bit 22 in the *packaged* copy only |
+| `attribute3` | `524352` (`0x80040`) | standard memory in the source file. `package-app.sh` sets bit 22 (PS5 Pro memory mode) in the *packaged* copy by default; `--standard-memory` leaves it off |
 | `kernel.flexibleMemorySize` | `1073741824` | 1 GiB, the most the console accepts. Default is 448 MB ([hardware/memory-budget.md](../hardware/memory-budget.md)) |
 | `downloadDataSize` | `256` | must be above 0 or `/download0` is not writable |
 | `contentVersion` | `NN.NNN.NNN` | **raise it every release** (0.13.6 is `01.013.060`), or ProsperoStore never offers the update; the release workflow fails if it did not go up |

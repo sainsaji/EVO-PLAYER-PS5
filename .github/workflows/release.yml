@@ -120,13 +120,12 @@ jobs:
           # evo_dovi.c refuses to build against anything else). Local builds get
           # it from build-ffmpeg.sh --install in a persistent volume, so CI has
           # to build and install it into this container before packaging.
-          # Second build is the Pro-memory package (#143): same source, only
-          # attribute3 bit 22 differs. The standard files go back into
-          # output/app afterwards so the verify step checks the standard image.
+          # One image for every console: package-app.sh asks for the PS5 Pro
+          # memory mode by default (#143) and a base PS5 has no Pro mode.
           docker run --rm -v "$PWD:/workspace" -w /workspace \
             -e TITLE_ID="${{ env.TITLE_ID }}" \
             evo-player/ps5-dev:release bash -lc \
-            './scripts/build-ffmpeg.sh --profile minimal --install && ./scripts/package-app.sh --ffpfsc --zip && mkdir -p output/pro && cp output/app/${TITLE_ID}.ffpfsc output/pro/standard.ffpfsc && cp output/app/${TITLE_ID}.zip output/pro/standard.zip && ./scripts/package-app.sh --ffpfsc --pro-memory && cp output/app/${TITLE_ID}.ffpfsc output/pro/pro.ffpfsc && cp output/pro/standard.ffpfsc output/app/${TITLE_ID}.ffpfsc && cp output/pro/standard.zip output/app/${TITLE_ID}.zip'
+            './scripts/build-ffmpeg.sh --profile minimal --install && ./scripts/package-app.sh --ffpfsc --zip'
 
       # Independent checks on top of what package-app.sh already asserts
       # while building (titleId/version format, MkPFS "Errors: 0") - a
@@ -193,7 +192,9 @@ jobs:
           mkdir -p dist
           T="${{ steps.ver.outputs.tag }}"
           cp "output/app/${TITLE_ID}.ffpfsc" "dist/EVOPlayer-${T}-${TITLE_ID}.ffpfsc"
-          cp "output/pro/pro.ffpfsc" "dist/EVOPlayer-${T}-${TITLE_ID}-pro.ffpfsc"
+          # The same image under the old Pro name: 0.13.x Pro builds' updater
+          # asks for "-pro.ffpfsc". Drop this once those builds are gone.
+          cp "output/app/${TITLE_ID}.ffpfsc" "dist/EVOPlayer-${T}-${TITLE_ID}-pro.ffpfsc"
           cp "output/app/${TITLE_ID}.zip" "dist/EVOPlayer-${T}-${TITLE_ID}.zip"
           ( cd dist && sha256sum * > SHA256SUMS.txt )
           ls -la dist
@@ -245,17 +246,14 @@ jobs:
              change and can auto-launch it; otherwise mount it and launch
              **EVO Player from the Games row**.
 
-          ### Standard or Pro memory build
+          ### One image for PS5 and PS5 Pro
 
-          * **`EVOPlayer-*-PPSA99039.ffpfsc`** is the standard build. Use it on a
-            base PS5. It is the only build tested there.
-          * **`EVOPlayer-*-PPSA99039-pro.ffpfsc`** is for a **PS5 Pro**. It asks
-            for the Pro memory mode: about 1.2 GiB more GPU memory (12.6 GiB
-            instead of 11.4 GiB). Tested on a PS5 Pro only. On a base PS5 it is
-            untested, so use the standard build there.
-
-          Install only one of the two. Settings > System & Diagnostics > Memory
-          shows which mode you got.
+          **`EVOPlayer-*-PPSA99039.ffpfsc`** works on both. On a PS5 Pro it
+          gets the Pro memory mode (about 1.2 GiB more GPU memory) and EVO
+          detects the Pro, so the AI upscaler's Auto network uses the larger
+          network. Settings > System & Diagnostics shows the console and the
+          memory mode. `EVOPlayer-*-PPSA99039-pro.ffpfsc` is the same file
+          under its old name, so older Pro installs keep updating.
 
           ### Option B: Folder Title Archive (`.zip`)
 

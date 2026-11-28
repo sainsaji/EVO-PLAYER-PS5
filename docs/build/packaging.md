@@ -25,7 +25,7 @@ bounded hardware cycle are in [../console/hardware-cycle.md](../console/hardware
 | `--ffpfsc` | also PFS-pack the app folder into `output/app/PPSA99039.ffpfsc` with MkPFS |
 | `--zip` | also write `PPSA99039.zip`, the folder-title archive (the layout Kodi PS5 uses) |
 | `--usb-remote` | add the scriptable FTP dev remote (`evo_cmd`, `evo_status`, `evo_ui.json`, verbose decoder log). **Always use it for testing; off in releases** |
-| `--pro-memory` | set `attribute3` bit 22 in the packaged `param.json` only, so a PS5 Pro gives the app about 1.2 GiB more direct memory (#143) |
+| `--standard-memory` | leave `attribute3` bit 22 off. By default the packaged `param.json` (never the source) has it set, so the one image gets about 1.2 GiB more direct memory on a PS5 Pro (#143); a base PS5 has no Pro mode. `--pro-memory`, the old name of the default, is still accepted |
 | `--virtual-keyboard` | debug: always use EVO's own keyboard, never the system IME that the dev remote can neither press nor see |
 | `--breadcrumbs` | pop each boot-trace line as an on-screen notification (off by default; klog carries the same lines) |
 | `--probe` | build the sandbox probe instead of the player |
