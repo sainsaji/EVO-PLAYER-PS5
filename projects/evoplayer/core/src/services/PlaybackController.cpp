@@ -3,6 +3,7 @@
 #include "evo/services/NetworkStorageService.hpp"
 #include "evo/services/CoverArtService.hpp"   /* decodeImageBytes: embedded cover */
 #include "evo/Application.hpp"
+#include "evo/PlayFmtLock.hpp"   /* #279: play_fmt writers lock */
 
 #include "pp_playback.h"
 #include "evo_playback.h"
@@ -741,6 +742,7 @@ void PlaybackController::stopPlayback() {
     }
 
     if (play_fmt) {
+        PlayFmtWrite lock;   /* #279: no screen walks it while it is freed */
         avformat_close_input(&play_fmt);
         play_fmt = nullptr;
     }
@@ -906,8 +908,13 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     std::memset(&io_cfg, 0, sizeof io_cfg);
     io_cfg.ring_buffer_size = 8u * 1024u * 1024u;
 
+    /* #279: play_fmt is being built - its streams[] grows during the open
+     * and the probe - so screens must not walk it until both are done. They
+     * only try the lock, so a slow network open never stalls the UI. */
+    evo_play_fmt_lock();
     int open_rc = evo_stream_io_open(openUrl.c_str(), &play_fmt, &io_cfg, &m_streamIo);
     if (open_rc < 0) {
+        evo_play_fmt_unlock();
         m_playbackFsm.postEvent(PlaybackEvent::Fail);
         /* evo_stream_io_open recorded why (wrong link, refused login, dead
          * server, damaged file, a playlist where a stream belongs). */
@@ -950,6 +957,7 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                       play_fmt ? play_fmt->nb_streams : 0u);
         SIO_STAGE("P8_02b_FIND_INFO_RC", d);
     }
+    evo_play_fmt_unlock();
 
     /*
      * The deadline is checked as well as the return code, not instead of it:
@@ -997,8 +1005,11 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
             EVO_LOGE("playback", "find_stream_info failed (rc=%d, timeout=%d) "
                    "and the header named no usable stream - giving up",
                    find_rc, probe_timed_out ? 1 : 0);
-            avformat_close_input(&play_fmt);
-            play_fmt = nullptr;
+            {
+                PlayFmtWrite lock;   /* #279 */
+                avformat_close_input(&play_fmt);
+                play_fmt = nullptr;
+            }
             evo_stream_io_close(m_streamIo);
             m_streamIo = nullptr;
             m_playbackFsm.postEvent(PlaybackEvent::Fail);
@@ -1376,8 +1387,11 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                          "decoder - /mnt/usb0/evo_no_sw_4k is set",
                          vp.width, vp.height);
             evo_mem_budget_log("sw-refuse");
-            avformat_close_input(&play_fmt);
-            play_fmt = nullptr;
+            {
+                PlayFmtWrite lock;   /* #279 */
+                avformat_close_input(&play_fmt);
+                play_fmt = nullptr;
+            }
             m_playbackFsm.postEvent(PlaybackEvent::Fail);
             toast("UNSUPPORTED", "4K software decode is switched off (evo_no_sw_4k)");
             return false;
@@ -1418,8 +1432,11 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                                   "native_pref_refused");
             evo_vdec_close(g_vdec);
             g_vdec = nullptr;
-            avformat_close_input(&play_fmt);
-            play_fmt = nullptr;
+            {
+                PlayFmtWrite lock;   /* #279 */
+                avformat_close_input(&play_fmt);
+                play_fmt = nullptr;
+            }
             m_playbackFsm.postEvent(PlaybackEvent::Fail);
             toast("UNSUPPORTED", "4K software decode is switched off (evo_no_sw_4k)");
             return false;

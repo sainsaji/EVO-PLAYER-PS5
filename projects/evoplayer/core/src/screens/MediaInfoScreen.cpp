@@ -1,5 +1,6 @@
 #include "evo/screens/MediaInfoScreen.hpp"
 #include "evo/Application.hpp"
+#include "evo/PlayFmtLock.hpp"
 #include "evo_rmlui_bridge.h"
 #include "evo_feedback.h"
 #include "evo_recent.h"
@@ -64,7 +65,10 @@ void MediaInfoScreen::render(uint32_t* framebuffer, int width, int height) {
     auto playback = Application::getInstance().getPlaybackController();
     if (!metaService || !playback) return;
 
-    auto meta = metaService->extractMetadataFromFormat(play_fmt, playback->getCurrentFilePath());
+    /* #279: play_fmt only under its try-lock (memory-only walks). */
+    evo::PlayFmtRead metaRead;
+    auto meta = metaService->extractMetadataFromFormat(metaRead.get(), playback->getCurrentFilePath());
+    metaRead.release();
 
     evo_rmlui_mediainfo_params_t params;
     std::memset(&params, 0, sizeof(params));
@@ -129,12 +133,16 @@ void MediaInfoScreen::render(uint32_t* framebuffer, int width, int height) {
          * when there is no stream to ask.
          */
         int vc_trc = evo_vdec_ffmpeg_color_trc(g_vdec);
-        if (play_fmt && video_stream_index >= 0 &&
-            video_stream_index < static_cast<int>(play_fmt->nb_streams)) {
-            if (AVCodecParameters* vcp =
-                    play_fmt->streams[video_stream_index]->codecpar) {
-                if (vcp->color_trc != AVCOL_TRC_UNSPECIFIED)
-                    vc_trc = (int)vcp->color_trc;
+        {
+            evo::PlayFmtRead fmtRead;
+            AVFormatContext* play_fmt = fmtRead.get();
+            if (play_fmt && video_stream_index >= 0 &&
+                video_stream_index < static_cast<int>(play_fmt->nb_streams)) {
+                if (AVCodecParameters* vcp =
+                        play_fmt->streams[video_stream_index]->codecpar) {
+                    if (vcp->color_trc != AVCOL_TRC_UNSPECIFIED)
+                        vc_trc = (int)vcp->color_trc;
+                }
             }
         }
         int vc_pf = evo_vdec_ffmpeg_pix_fmt(g_vdec);

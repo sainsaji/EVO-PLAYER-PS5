@@ -8,6 +8,8 @@
 #include "evo_toast.h"
 #include "evo_online_subs.h"
 
+#include "evo/PlayFmtLock.hpp"
+
 extern "C" {
 #include <libavformat/avformat.h>
 extern AVFormatContext *play_fmt;
@@ -68,6 +70,11 @@ void SubtitlePickerScreen::refreshTracks() {
     }
 
     // 3. Embedded subtitle streams
+    {
+    /* #279: try-locked; a file mid-open or mid-close shows no tracks this
+     * time rather than being read while it is freed. */
+    evo::PlayFmtRead fmtRead;
+    AVFormatContext* play_fmt = fmtRead.get();
     if (play_fmt) {
         for (unsigned int i = 0; i < play_fmt->nb_streams; ++i) {
             AVStream* stream = play_fmt->streams[i];
@@ -124,6 +131,7 @@ void SubtitlePickerScreen::refreshTracks() {
 
             m_tracks.push_back(std::move(streamTrack));
         }
+    }
     }
 
     // 4. Online subtitles from the Stremio addons for this title (not yet loaded)
