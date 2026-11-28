@@ -603,6 +603,130 @@ static void tls_session_keep(SSL *ssl, const char *host, int port)
 #endif
 
 /*
+ * Idle keep-alive connections, so the next request to the same host skips the
+ * DNS lookup, the TCP handshake and the (resumed) TLS handshake: two round
+ * trips per request on https. A connection goes back here only after a
+ * response whose end was known (Content-Length or the last chunk) and that did
+ * not say "Connection: close". One that the server has closed meanwhile fails
+ * on first use, and the request is retried once on a new connection.
+ */
+#define EVO_NET_POOL       6
+#define EVO_NET_POOL_IDLE  15   /* seconds; servers commonly close after 15-60 s */
+static struct { char host[128]; int port; int https; int sock; void *ssl; time_t idle; } s_pool[EVO_NET_POOL];
+static pthread_mutex_t s_pool_mx = PTHREAD_MUTEX_INITIALIZER;
+
+/* /mnt/usb0/evo_net_no_keepalive puts back one connection per request. A
+ * server that leaves Nagle on and writes header and body apart stalls a
+ * kept-open connection on the client's delayed ACK (tests/perf: 61 -> 72 ms
+ * per request on Linux; FreeBSD's delayed ACK is longer). Read once. */
+static int keepalive_on(void)
+{
+    static int on = -1;
+    if (on < 0)
+        on = access("/mnt/usb0/evo_net_no_keepalive", F_OK) == 0 ? 0 : 1;
+    return on;
+}
+
+static void pool_close(int sock, void *ssl)
+{
+#ifndef NO_OPENSSL
+    if (ssl) SSL_free((SSL *)ssl);
+#else
+    (void)ssl;
+#endif
+    if (sock >= 0) close(sock);
+}
+
+/* 1 and the connection when an idle one to host:port is there. */
+static int pool_take(const char *host, int port, int https, int *sock, void **ssl)
+{
+    const time_t now = time(NULL);
+    int found = 0;
+    pthread_mutex_lock(&s_pool_mx);
+    for (int i = 0; i < EVO_NET_POOL; i++) {
+        if (s_pool[i].sock < 1) continue;
+        if (now - s_pool[i].idle > EVO_NET_POOL_IDLE) {      /* stale: drop it */
+            pool_close(s_pool[i].sock, s_pool[i].ssl);
+            s_pool[i].sock = 0;
+            continue;
+        }
+        if (!found && s_pool[i].port == port && s_pool[i].https == https &&
+            !strcmp(s_pool[i].host, host)) {
+            *sock = s_pool[i].sock;
+            *ssl  = s_pool[i].ssl;
+            s_pool[i].sock = 0;
+            found = 1;
+        }
+    }
+    pthread_mutex_unlock(&s_pool_mx);
+    return found;
+}
+
+static void pool_put(const char *host, int port, int https, int sock, void *ssl)
+{
+    if (strlen(host) >= sizeof s_pool[0].host) { pool_close(sock, ssl); return; }
+    pthread_mutex_lock(&s_pool_mx);
+    int slot = -1;
+    for (int i = 0; i < EVO_NET_POOL; i++) {
+        if (s_pool[i].sock < 1) { slot = i; break; }
+        if (slot < 0 || s_pool[i].idle < s_pool[slot].idle) slot = i;   /* oldest */
+    }
+    if (s_pool[slot].sock > 0)
+        pool_close(s_pool[slot].sock, s_pool[slot].ssl);
+    snprintf(s_pool[slot].host, sizeof s_pool[slot].host, "%s", host);
+    s_pool[slot].port  = port;
+    s_pool[slot].https = https;
+    s_pool[slot].sock  = sock;
+    s_pool[slot].ssl   = ssl;
+    s_pool[slot].idle  = time(NULL);
+    pthread_mutex_unlock(&s_pool_mx);
+}
+
+static void pool_drain(void)
+{
+    pthread_mutex_lock(&s_pool_mx);
+    for (int i = 0; i < EVO_NET_POOL; i++) {
+        if (s_pool[i].sock > 0) pool_close(s_pool[i].sock, s_pool[i].ssl);
+        s_pool[i].sock = 0;
+    }
+    pthread_mutex_unlock(&s_pool_mx);
+}
+
+/*
+ * How far a chunked body is complete. Walks the chunk headers from *pos (kept
+ * between reads so the walk is linear) over body[0..len). 1 once the last chunk
+ * and the blank line after any trailers are in, 0 while more is to come, -1 on
+ * a malformed size line.
+ */
+static int chunked_done(const char *body, size_t len, size_t *pos)
+{
+    for (;;) {
+        size_t p = *pos;
+        const char *eol = NULL;
+        for (size_t i = p; i + 1 < len; i++)
+            if (body[i] == '\r' && body[i + 1] == '\n') { eol = body + i; break; }
+        if (!eol) return 0;
+        char *end = NULL;
+        unsigned long long sz = strtoull(body + p, &end, 16);
+        if (end == body + p) return -1;
+        size_t data = (size_t)(eol - body) + 2;
+        if (sz == 0) {
+            /* Trailers, if any, end with an empty line. */
+            for (size_t i = data; i + 1 < len; i++) {
+                if (body[i] == '\r' && body[i + 1] == '\n') {
+                    if (i == data) return 1;
+                    if (i >= 2 && body[i - 2] == '\r' && body[i - 1] == '\n') return 1;
+                }
+            }
+            return 0;
+        }
+        if (sz > EVO_NET_MAX_BODY) return -1;
+        if (data + (size_t)sz + 2 > len) return 0;
+        *pos = data + (size_t)sz + 2;
+    }
+}
+
+/*
  * Releases all heap memory associated with an evo_net request structure.
  * Consistently invoked across async overflow rejection, worker overflow drop,
  * shutdown pending/completed cleanups, and the main poll dispatch loop.
@@ -956,6 +1080,7 @@ static int execute_http(const char *method,
 
     const char *current_post_data = post_data;
     int redirect_count = 0;
+    int fresh_only = 0;   /* a pooled connection just failed: open a new one */
 
     while (1) {
         char host[EVO_NET_MAX_HOST] = {0};
@@ -968,34 +1093,41 @@ static int execute_http(const char *method,
             return (pres == -2) ? EVO_NET_ERR_TOO_LONG : EVO_NET_ERR_INVALID_URL;
         }
 
-        struct addrinfo hints, *res = NULL, *rp = NULL;
-        char port_str[16];
-        snprintf(port_str, sizeof(port_str), "%d", port);
+        int sock = -1;
+        void *pooled_ssl = NULL;
+        const int ka = keepalive_on();
+        const int reused = ka && !fresh_only && pool_take(host, port, is_https, &sock, &pooled_ssl);
+        fresh_only = 0;
 
-        memset(&hints, 0, sizeof(hints));
-        hints.ai_family   = AF_INET;
-        hints.ai_socktype = SOCK_STREAM;
+        if (!reused) {
+            struct addrinfo hints, *res = NULL;
+            char port_str[16];
+            snprintf(port_str, sizeof(port_str), "%d", port);
 
-        const int gai = getaddrinfo(host, port_str, &hints, &res);
-        if (gai != 0 || !res) {
-            PROV_WARN("net: name lookup for %s failed (getaddrinfo %d)", host, gai);
-            return EVO_NET_ERR_DNS;
-        }
+            memset(&hints, 0, sizeof(hints));
+            hints.ai_family   = AF_INET;
+            hints.ai_socktype = SOCK_STREAM;
 
-        (void)rp;
-        int sock = evo_net_connect_list(res, EVO_NET_CONNECT_TIMEOUT_MS);
+            const int gai = getaddrinfo(host, port_str, &hints, &res);
+            if (gai != 0 || !res) {
+                PROV_WARN("net: name lookup for %s failed (getaddrinfo %d)", host, gai);
+                return EVO_NET_ERR_DNS;
+            }
 
-        freeaddrinfo(res);
+            sock = evo_net_connect_list(res, EVO_NET_CONNECT_TIMEOUT_MS);
 
-        if (sock < 0) {
-            PROV_WARN("net: connect %s:%d failed on every address", host, port);
-            return EVO_NET_ERR_CONNECT;
+            freeaddrinfo(res);
+
+            if (sock < 0) {
+                PROV_WARN("net: connect %s:%d failed on every address", host, port);
+                return EVO_NET_ERR_CONNECT;
+            }
         }
 
         /* Initialize SSL if HTTPS */
 #ifndef NO_OPENSSL
-        SSL *ssl = NULL;
-        if (is_https) {
+        SSL *ssl = (SSL *)pooled_ssl;
+        if (is_https && !reused) {
             SSL_CTX *ctx = evo_net_get_ssl_ctx();
             if (!ctx) {
                 close(sock);
@@ -1031,6 +1163,7 @@ static int execute_http(const char *method,
             }
         }
 #else
+        (void)pooled_ssl;
         if (is_https) {
             close(sock);
             return EVO_NET_ERR_SSL_CTX;
@@ -1060,8 +1193,9 @@ static int execute_http(const char *method,
                               "%s"
                               "User-Agent: EVOPlayer-PS5/" EVO_PLAYER_VERSION "\r\n"
                               "Accept: */*\r\n"
-                              "Connection: close\r\n",
-                              current_method, path, host_hdr) != 0) {
+                              "Connection: %s\r\n",
+                              current_method, path, host_hdr,
+                              ka ? "keep-alive" : "close") != 0) {
             build_err = 1;
         }
 
@@ -1131,6 +1265,7 @@ static int execute_http(const char *method,
             if (ssl) { SSL_shutdown(ssl); SSL_free(ssl); }
 #endif
             close(sock);
+            if (reused) { fresh_only = 1; continue; }   /* the server closed it */
             return EVO_NET_ERR_SEND_HDR;
         }
 
@@ -1174,6 +1309,10 @@ static int execute_http(const char *method,
         ssize_t content_length = -1;
         size_t header_len = 0;
         int headers_parsed = 0;
+        int chunked = 0;          /* body is chunked: its end is the last chunk */
+        size_t chunk_pos = 0;     /* chunked_done()'s place in the body */
+        int body_complete = 0;    /* the response ended where it said it would */
+        int server_close = 0;     /* "Connection: close" or HTTP/1.0 */
 
         while (1) {
             size_t to_read = cap - total - 1;
@@ -1228,6 +1367,15 @@ static int execute_http(const char *method,
                             }
                         }
                     }
+                    chunked = is_chunked;
+
+                    /* Whether the server keeps the connection open after this
+                     * response: HTTP/1.1 does unless it says close. */
+                    size_t cn_len = 0;
+                    const char *cn_val = find_header_val(buf, hend, "Connection", &cn_len);
+                    if (strncmp(buf, "HTTP/1.1", 8) != 0 ||
+                        (cn_val && cn_len >= 5 && strncasecmp(cn_val, "close", 5) == 0))
+                        server_close = 1;
 
                     if (!is_chunked) {
                         size_t cl_len = 0;
@@ -1251,8 +1399,20 @@ static int execute_http(const char *method,
                                 }
                             }
                         }
+                        /* No body by definition (RFC 9112 6.3): without this a
+                         * kept-open connection would be read until timeout. */
+                        int st = 0;
+                        if (content_length < 0 && sscanf(buf, "HTTP/1.%*d %d", &st) == 1 &&
+                            ((st >= 100 && st < 200) || st == 204 || st == 304))
+                            content_length = 0;
                     }
                 }
+            }
+
+            if (headers_parsed && chunked) {
+                const int cd = chunked_done(buf + header_len, total - header_len, &chunk_pos);
+                if (cd > 0) { body_complete = 1; break; }
+                if (cd < 0) { chunked = 0; server_close = 1; }   /* read until close, as before */
             }
 
             /* Hard body cap check */
@@ -1277,7 +1437,9 @@ static int execute_http(const char *method,
                 }
             }
 
-            if (content_length >= 0 && total >= header_len + (size_t)content_length) {
+            if (headers_parsed && content_length >= 0 &&
+                total >= header_len + (size_t)content_length) {
+                body_complete = 1;
                 break;
             }
 
@@ -1309,15 +1471,39 @@ static int execute_http(const char *method,
             }
         }
 
+        /* A reused connection the server had already closed: nothing came
+         * back, so the request never reached it. Once more on a new one. */
+        if (reused && total == 0) {
+            free(buf);
+#ifndef NO_OPENSSL
+            if (ssl) SSL_free(ssl);
+#endif
+            close(sock);
+            fresh_only = 1;
+            continue;
+        }
+
+        const int keep = ka && body_complete && !server_close;
 #ifndef NO_OPENSSL
         if (ssl) {
             tls_session_keep(ssl, host, port);
-            SSL_shutdown(ssl);
-            SSL_free(ssl);
-            ssl = NULL;
+            if (!keep) {
+                SSL_shutdown(ssl);
+                SSL_free(ssl);
+                ssl = NULL;
+            }
         }
 #endif
-        close(sock);
+        if (keep) {
+#ifndef NO_OPENSSL
+            pool_put(host, port, is_https, sock, ssl);
+            ssl = NULL;
+#else
+            pool_put(host, port, is_https, sock, NULL);
+#endif
+        } else {
+            close(sock);
+        }
         sock = -1;
 
         buf[total] = '\0';
@@ -1691,6 +1877,7 @@ void evo_net_shutdown(void)
     }
     g_completed_count = 0;
 
+    pool_drain();
 #ifndef NO_OPENSSL
     pthread_mutex_lock(&s_tls_mx);
     for (int i = 0; i < EVO_NET_TLS_CACHE; i++) {
