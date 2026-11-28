@@ -1851,6 +1851,20 @@ int Application::run() {
 
             bool smoothing_active = evo_agc_motion_smoothing_is_active() && !is_paused && !is_scrubbing && !g_pp_pb.seek_discarding;
 
+            /* Steady presents: while a picture is up, present on every
+             * refresh, as a paused picture already does. Presenting only on
+             * a new frame (plus the stale-buffer redraw) gave a 24 fps file
+             * on the 120 Hz output an 8 ms / 33-50 ms flip rhythm (pace:
+             * presents 48/s, gap max 50 ms). A VRR panel follows that rhythm,
+             * and OLED/VA gamma moves with the refresh interval, so dark
+             * scenes pulsed: the "VRR flicker" seen on anime night scenes.
+             *
+             * A steady present only flips: it draws nothing. Once a frame has
+             * been drawn into both scanout buffers (new_frame, then
+             * buffer_stale), either buffer already shows it. Redrawing it
+             * would re-run the whole upscaler chain on every refresh - AI
+             * Maximum ran 120 times a second for a 24 fps file. */
+            const bool steady_present = have;
             bool should_render = (have && new_frame) || buffer_stale || overlay_active || is_paused || is_scrubbing || toast_visible || g_pp_pb.seek_discarding || (have && smoothing_active);
 
             /* #103 `upcompare`: capture what the previous iteration presented,
@@ -1972,6 +1986,16 @@ int Application::run() {
                 if (overlay_active || is_paused || is_scrubbing || toast_visible) {
                     evo_agc_runtime_note_ui_drawn();
                 }
+                swap = true;
+            }
+            /* Steady present (see above): flip the buffer that already holds
+             * this frame, nothing drawn. frame_end skips a frame with no draws
+             * (no submit, no flip, no vblank wait - the loop then spun at
+             * 25,000 presents/s), so mark it as a frame to submit. */
+            if (!swap && steady_present) {
+                /* In the player a frame is only opened by the blit. */
+                evo_agc_runtime_frame_begin();
+                evo_agc_runtime_note_draw();
                 swap = true;
             }
         } else {
